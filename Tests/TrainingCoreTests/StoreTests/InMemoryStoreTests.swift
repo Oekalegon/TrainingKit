@@ -83,6 +83,19 @@ struct InMemoryStoreTests {
         #expect(Set(stored.map(\.id)) == Set([meso.id, microA.id, microB.id]))
     }
 
+    @Test("CycleStore accepts a parent + children in one batch regardless of array order")
+    func cycleStoreAcceptsValidNestingRegardlessOfOrder() async throws {
+        let store = InMemoryStore()
+        let meso = TrainingCycle(level: .meso, phase: .build, name: "Meso 1", dateRange: day(0)...day(13))
+        let micro = TrainingCycle(level: .micro, phase: .build, name: "Week 1", dateRange: day(0)...day(6), parentID: meso.id)
+
+        // The child is listed BEFORE its parent — this must resolve identically to parent-first.
+        try await store.upsert([micro, meso])
+
+        #expect(try await store.cycle(id: meso.id) == meso)
+        #expect(try await store.cycle(id: micro.id) == micro)
+    }
+
     @Test("CycleStore rejects a child outside its parent's range")
     func cycleStoreRejectsOutOfRangeChild() async throws {
         let store = InMemoryStore()

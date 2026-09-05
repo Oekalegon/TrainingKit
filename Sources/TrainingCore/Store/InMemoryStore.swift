@@ -101,10 +101,15 @@ public actor InMemoryStore: ActivityStore, PlanStore, WorkoutLibraryStore, Cycle
     }
 
     /// See ``CycleStore/upsert(_:)``. Validates each cycle in `cycles` against a working copy
-    /// seeded from the currently-stored cycles, updated incrementally as the batch is processed —
-    /// so a parent and its children can be upserted together in one call.
+    /// seeded from the currently-stored cycles plus the entire incoming batch — so a parent and
+    /// its children can be upserted together in one call, regardless of which order they appear
+    /// in `cycles` (a child listed before its parent in the array is still resolved correctly).
     public func upsert(_ cycles: [TrainingCycle]) async throws {
         var workingSet = cyclesByID
+        for cycle in cycles {
+            workingSet[cycle.id] = cycle
+        }
+
         for cycle in cycles {
             if let parentID = cycle.parentID {
                 guard let parent = workingSet[parentID] else {
@@ -121,8 +126,6 @@ public actor InMemoryStore: ActivityStore, PlanStore, WorkoutLibraryStore, Cycle
             for sibling in siblings where sibling.dateRange.overlaps(cycle.dateRange) {
                 throw CycleStoreError.overlappingSiblings(cycle.id, sibling.id)
             }
-
-            workingSet[cycle.id] = cycle
         }
         cyclesByID = workingSet
     }

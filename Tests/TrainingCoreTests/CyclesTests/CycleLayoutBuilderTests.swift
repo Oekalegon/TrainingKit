@@ -205,6 +205,18 @@ struct CycleLayoutBuilderTests {
         #expect(builder.microcycles(from: start, to: race, macro: macro, meso: zeroLength, athlete: athlete).isEmpty)
     }
 
+    @Test("a non-positive microLengthDays in a block's own pattern override also returns no cycles")
+    func nonPositiveMicroLengthDaysInBlockOverrideReturnsEmpty() {
+        let race = race()
+        let start = calendar.date(byAdding: .day, value: -30, to: raceDate)!
+        let badOverride = MesocycleTemplate(name: "bad", microPhases: [.build], microLengthDays: 0)
+        let macroWithBadOverride = MacroTemplate(name: "Bad Override", mesoBlocks: [
+            MacroTemplate.MesoBlock(phase: .base, microCount: 4, pattern: badOverride),
+        ])
+
+        #expect(builder.layout(from: start, to: race, macro: macroWithBadOverride, meso: meso, athlete: athlete).isEmpty)
+    }
+
     @Test("two consecutive same-phase blocks produce two separate meso-level cycles, not one merged one")
     func consecutiveSamePhaseBlocksStaySeparate() {
         let race = race()
@@ -231,5 +243,29 @@ struct CycleLayoutBuilderTests {
         let micros = cycles.filter { $0.level == .micro }
         #expect(micros.filter { $0.parentID == mesos[0].id }.count == 4)
         #expect(micros.filter { $0.parentID == mesos[1].id }.count == 4)
+    }
+
+    @Test("a block's own pattern override lets one layout mix e.g. 2:1 and 3:1")
+    func mixedPatternsPerBlock() {
+        let race = race()
+        let raceDay = calendar.startOfDay(for: raceDate)
+        let mixedMacro = MacroTemplate(name: "Mixed", mesoBlocks: [
+            MacroTemplate.MesoBlock(phase: .base, microCount: 6, pattern: .twoToOne),
+            MacroTemplate.MesoBlock(phase: .build, microCount: 4), // no override -> falls back to the default `meso` parameter
+            MacroTemplate.MesoBlock(phase: .taper, microCount: 1),
+        ])
+        let totalDays = 11 * meso.microLengthDays
+        let start = calendar.date(byAdding: .day, value: -(totalDays - 1), to: raceDay)!
+
+        let cycles = builder.layout(from: start, to: race, macro: mixedMacro, meso: meso, athlete: athlete)
+
+        let micros = cycles.filter { $0.level == .micro }.sorted { $0.dateRange.lowerBound < $1.dateRange.lowerBound }
+        #expect(micros.count == 11)
+        // Base block uses its own 2:1 override, restarting at its own boundary.
+        #expect(micros[0..<6].map(\.phase) == [.build, .build, .recovery, .build, .build, .recovery])
+        // Build block has no override, so it falls back to the default 3:1 `meso` parameter.
+        #expect(micros[6..<10].map(\.phase) == [.build, .build, .build, .recovery])
+        // The taper block's one micro is always the forced race micro, regardless of pattern.
+        #expect(micros[10].phase == .race)
     }
 }

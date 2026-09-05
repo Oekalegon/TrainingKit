@@ -8,11 +8,19 @@ import Foundation
 /// zone model is heart-rate only; refining this is a natural follow-up once pace/power zone
 /// models exist.
 public struct TRIMPPlanEstimator: PlannedLoadEstimator {
+    /// The `(a, b)` weighting coefficients, selected per ``AthleteProfile/sex``.
     public var coefficients: TRIMPCoefficients
+    /// Turns each step's `StepGoal` into a duration.
     public var durationEstimator: WorkoutDurationEstimator
     /// Estimate confidence relative to a measured load, used to mark this as `.estimatedFromPlan`.
     public var confidence: Double
 
+    /// Creates a TRIMP plan estimator.
+    ///
+    /// - Parameters:
+    ///   - coefficients: The `(a, b)` weighting coefficients; defaults to Banister's originals.
+    ///   - durationEstimator: Turns each step's `StepGoal` into a duration.
+    ///   - confidence: Estimate confidence relative to a measured load; defaults to 0.7.
     public init(
         coefficients: TRIMPCoefficients = TRIMPCoefficients(),
         durationEstimator: WorkoutDurationEstimator = WorkoutDurationEstimator(),
@@ -23,6 +31,14 @@ public struct TRIMPPlanEstimator: PlannedLoadEstimator {
         self.confidence = confidence
     }
 
+    /// Walks `workout`'s steps and applies the Banister TRIMP formula using each step's target
+    /// intensity, using the athlete's current heart-rate zone settings.
+    ///
+    /// - Parameters:
+    ///   - workout: The workout to estimate.
+    ///   - athlete: Supplies zone settings, sex (for coefficients), and the pace model.
+    /// - Returns: A ``TrainingLoad`` with `method: .estimatedFromPlan`. If the athlete has no
+    ///   heart-rate zone settings on record, returns a zero-confidence zero rather than throwing.
     public func estimatedLoad(for workout: StructuredWorkout, athlete: AthleteProfile) -> TrainingLoad {
         // Planning is always about who the athlete is now, not who they were on some past date,
         // so this uses the current settings rather than an as-of-date lookup. If none have been

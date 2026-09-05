@@ -13,6 +13,11 @@ public struct PaceModel: Sendable, Codable {
     /// Per-zone pace multiplier relative to threshold pace. Missing zones fall back to 1.0.
     public var zonePaceMultipliers: [Int: Double]
 
+    /// Creates a pace model.
+    ///
+    /// - Parameters:
+    ///   - thresholdPaceSecondsPerKilometer: Threshold pace, in seconds per kilometer.
+    ///   - zonePaceMultipliers: Per-zone pace multiplier relative to threshold pace.
     public init(
         thresholdPaceSecondsPerKilometer: Double,
         zonePaceMultipliers: [Int: Double] = [1: 1.35, 2: 1.20, 3: 1.08, 4: 1.0, 5: 0.92]

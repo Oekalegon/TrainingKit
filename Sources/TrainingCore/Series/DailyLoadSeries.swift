@@ -12,8 +12,25 @@ import Foundation
 /// `today` is an injected `Date`, not `Date()`, so the series is deterministic in tests and so a
 /// caller can ask "what does the curve look like as of next Monday".
 public struct DailyLoadSeries: Sendable {
+    /// Creates a daily load series builder.
     public init() {}
 
+    /// Builds the continuous day-by-day merge described above.
+    ///
+    /// - Parameters:
+    ///   - activities: Completed activities to score with `calculators`.
+    ///   - plans: Planned activities to score with `estimator`.
+    ///   - workouts: The library workouts `plans` reference, looked up by id.
+    ///   - estimator: Estimates load for a planned activity's workout.
+    ///   - calculators: Tried in order per activity; the first to succeed wins, so an activity
+    ///     without heart-rate data can fall back to e.g. ``DurationRPECalculator``.
+    ///   - athlete: Supplies the timezone for day boundaries and is passed through to the
+    ///     calculators/estimator.
+    ///   - today: The boundary between "actual" and "estimated" days; injected rather than
+    ///     `Date()` so the series is deterministic.
+    /// - Returns: One ``DayLoad`` per calendar day, spanning from the earliest activity/plan (or
+    ///   `today`, whichever is earlier) through the latest (or `today`, whichever is later), with
+    ///   no gaps.
     public func days(
         activities: [Activity],
         plans: [PlannedActivity],

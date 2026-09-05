@@ -11,6 +11,9 @@ public struct WorkoutDurationEstimator: Sendable {
     /// Duration assumed for `.open` steps, which have no explicit time or distance.
     public var defaultOpenStepDuration: TimeInterval
 
+    /// Creates a workout duration estimator.
+    ///
+    /// - Parameter defaultOpenStepDuration: Duration assumed for `.open` steps; defaults to 600s.
     public init(defaultOpenStepDuration: TimeInterval = 600) {
         self.defaultOpenStepDuration = defaultOpenStepDuration
     }

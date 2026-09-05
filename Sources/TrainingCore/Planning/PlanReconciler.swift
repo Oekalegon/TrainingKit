@@ -12,6 +12,9 @@ public struct PlanReconciler: Sendable {
     /// the two never silently disagree about how long a given workout is assumed to take.
     public var durationEstimator: WorkoutDurationEstimator
 
+    /// Creates a plan reconciler.
+    ///
+    /// - Parameter durationEstimator: Used to tie-break candidate matches on duration.
     public init(durationEstimator: WorkoutDurationEstimator = WorkoutDurationEstimator()) {
         self.durationEstimator = durationEstimator
     }

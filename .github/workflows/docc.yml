@@ -40,7 +40,8 @@ jobs:
             TrainingToolsFoundationModels
           )
           for target in "${targets[@]}"; do
-            swift package generate-documentation \
+            swift package --allow-writing-to-directory .build/docc-archives \
+              generate-documentation \
               --target "$target" \
               --output-path ".build/docc-archives/$target.doccarchive"
           done

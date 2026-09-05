@@ -2,9 +2,11 @@ import Foundation
 
 /// A completed activity, imported or entered manually.
 ///
-/// Heart-rate samples are kept on the activity, not just the resulting ``TrainingLoad``, so a
-/// recalculation with a changed `maxHeartRateBPM` or a different ``LoadCalculator`` is possible
-/// without re-importing.
+/// Heart-rate and speed samples are kept on the activity, not just the resulting
+/// ``TrainingLoad``, so a recalculation with a changed `maxHeartRateBPM` or a different
+/// ``LoadCalculator`` is possible without re-importing. Elevation, cadence, and the geographic
+/// area covered are kept as one-time summaries rather than raw streams — see ``ElevationStats``,
+/// ``CadenceStats``, and ``GeographicBounds`` for why.
 public struct Activity: Identifiable, Sendable, Codable {
     public let id: UUID
     public var source: ActivitySource
@@ -14,6 +16,11 @@ public struct Activity: Identifiable, Sendable, Codable {
     public var distanceMeters: Double?
     /// May be empty for sports/sources without heart-rate data; see ``DurationRPECalculator``.
     public var heartRate: [HeartRateSample]
+    /// May be empty for sports/sources without speed data (e.g. indoor strength training).
+    public var speed: [SpeedSample]
+    public var elevation: ElevationStats?
+    public var cadence: CadenceStats?
+    public var geographicBounds: GeographicBounds?
     /// Borg CR10 rating of perceived exertion (1...10), used by ``DurationRPECalculator`` when
     /// no heart-rate data is available.
     public var perceivedExertion: Int?
@@ -28,6 +35,10 @@ public struct Activity: Identifiable, Sendable, Codable {
         duration: TimeInterval,
         distanceMeters: Double? = nil,
         heartRate: [HeartRateSample] = [],
+        speed: [SpeedSample] = [],
+        elevation: ElevationStats? = nil,
+        cadence: CadenceStats? = nil,
+        geographicBounds: GeographicBounds? = nil,
         perceivedExertion: Int? = nil,
         linkedPlanID: UUID? = nil
     ) {
@@ -38,6 +49,10 @@ public struct Activity: Identifiable, Sendable, Codable {
         self.duration = duration
         self.distanceMeters = distanceMeters
         self.heartRate = heartRate
+        self.speed = speed
+        self.elevation = elevation
+        self.cadence = cadence
+        self.geographicBounds = geographicBounds
         self.perceivedExertion = perceivedExertion
         self.linkedPlanID = linkedPlanID
     }

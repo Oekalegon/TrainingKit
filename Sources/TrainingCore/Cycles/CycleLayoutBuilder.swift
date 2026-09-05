@@ -33,10 +33,10 @@ public struct CycleLayoutBuilder: Sendable {
     ///   - race: The race the layout tapers into.
     ///   - macro: The ordered phase/length structure to fill backward from the race.
     ///   - meso: The repeating build/recovery pattern applied within every non-taper, non-race
-    ///     block.
+    ///     block. `meso.microLengthDays` must be positive.
     ///   - athlete: Supplies the timezone used for all day-granular boundaries.
-    /// - Returns: One ``Microcycle`` per surviving micro, oldest first. Empty if `race.date` is
-    ///   before `start`, or if `macro` has no blocks.
+    /// - Returns: One ``Microcycle`` per surviving micro, oldest first. Empty if `macro` has no
+    ///   blocks, if `meso.microLengthDays` isn't positive, or if `race.date` is before `start`.
     public func microcycles(
         from start: Date,
         to race: Race,
@@ -50,8 +50,16 @@ public struct CycleLayoutBuilder: Sendable {
         let startDay = calendar.startOfDay(for: start)
         let raceDay = calendar.startOfDay(for: race.date)
 
-        guard raceDay >= startDay, !macro.mesoBlocks.isEmpty else {
-            Logging.series.warning("CycleLayoutBuilder.microcycles(from:to:macro:meso:athlete:) called with race date before start, or an empty macro template; returning none")
+        guard !macro.mesoBlocks.isEmpty else {
+            Logging.series.warning("CycleLayoutBuilder.microcycles(from:to:macro:meso:athlete:) called with an empty macro template; returning none")
+            return []
+        }
+        guard meso.microLengthDays > 0 else {
+            Logging.series.warning("CycleLayoutBuilder.microcycles(from:to:macro:meso:athlete:) called with a non-positive microLengthDays (\(meso.microLengthDays)); returning none")
+            return []
+        }
+        guard raceDay >= startDay else {
+            Logging.series.warning("CycleLayoutBuilder.microcycles(from:to:macro:meso:athlete:) called with race date before start; returning none")
             return []
         }
 
@@ -71,8 +79,8 @@ public struct CycleLayoutBuilder: Sendable {
     ///   - athlete: Supplies the timezone used for all day-granular boundaries.
     /// - Returns: One macro-level ``TrainingCycle``, one meso-level cycle per surviving
     ///   ``MacroTemplate/MesoBlock``, and one micro-level cycle per surviving ``Microcycle`` —
-    ///   parented micro → meso → macro. Empty if `race.date` is before `start`, or if `macro` has
-    ///   no blocks.
+    ///   parented micro → meso → macro. Empty under the same conditions as
+    ///   ``microcycles(from:to:macro:meso:athlete:)``.
     public func layout(
         from start: Date,
         to race: Race,

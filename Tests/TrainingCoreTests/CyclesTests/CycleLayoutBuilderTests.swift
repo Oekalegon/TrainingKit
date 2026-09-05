@@ -69,6 +69,8 @@ struct CycleLayoutBuilderTests {
         let macroCycle = macros[0]
         #expect(macroCycle.dateRange == start...raceDay)
         #expect(macroCycle.targetRaceID == race.id)
+        // The macro's own phase tracks whichever block it actually starts in.
+        #expect(macroCycle.phase == .base)
         for meso in mesos {
             #expect(meso.parentID == macroCycle.id)
             #expect(meso.targetRaceID == race.id)
@@ -112,6 +114,9 @@ struct CycleLayoutBuilderTests {
         #expect(micros.first?.dateRange == start...raceDay)
         #expect(mesos.count == 1)
         #expect(mesos.first?.phase == .taper)
+        // The macro cycle's own phase must track the surviving start (.taper), not the original
+        // template's first block (.base), which was dropped entirely.
+        #expect(cycles.first { $0.level == .macro }?.phase == .taper)
         for cycle in cycles {
             #expect(cycle.dateRange.lowerBound <= cycle.dateRange.upperBound)
         }
@@ -186,5 +191,45 @@ struct CycleLayoutBuilderTests {
         let micros = builder.microcycles(from: start, to: race, macro: macro, meso: meso, athlete: athlete)
 
         #expect(micros.isEmpty)
+    }
+
+    @Test("a non-positive microLengthDays returns no cycles rather than crashing")
+    func nonPositiveMicroLengthDaysReturnsEmpty() {
+        let race = race()
+        let start = calendar.date(byAdding: .day, value: -30, to: raceDate)!
+        let zeroLength = MesocycleTemplate(name: "zero", microPhases: [.build], microLengthDays: 0)
+        let negativeLength = MesocycleTemplate(name: "negative", microPhases: [.build], microLengthDays: -7)
+
+        #expect(builder.layout(from: start, to: race, macro: macro, meso: zeroLength, athlete: athlete).isEmpty)
+        #expect(builder.layout(from: start, to: race, macro: macro, meso: negativeLength, athlete: athlete).isEmpty)
+        #expect(builder.microcycles(from: start, to: race, macro: macro, meso: zeroLength, athlete: athlete).isEmpty)
+    }
+
+    @Test("two consecutive same-phase blocks produce two separate meso-level cycles, not one merged one")
+    func consecutiveSamePhaseBlocksStaySeparate() {
+        let race = race()
+        let raceDay = calendar.startOfDay(for: raceDate)
+        let twoBaseBlocks = MacroTemplate(name: "Two Base Blocks", mesoBlocks: [
+            MacroTemplate.MesoBlock(phase: .base, microCount: 4),
+            MacroTemplate.MesoBlock(phase: .base, microCount: 4),
+            MacroTemplate.MesoBlock(phase: .taper, microCount: 2),
+        ])
+        let totalDays = 10 * meso.microLengthDays
+        let start = calendar.date(byAdding: .day, value: -(totalDays - 1), to: raceDay)!
+
+        let cycles = builder.layout(from: start, to: race, macro: twoBaseBlocks, meso: meso, athlete: athlete)
+
+        let mesos = cycles.filter { $0.level == .meso }.sorted { $0.dateRange.lowerBound < $1.dateRange.lowerBound }
+        #expect(mesos.count == 3)
+        #expect(mesos.map(\.phase) == [.base, .base, .taper])
+        // Distinct cycles, each with its own id and its own contiguous, non-overlapping range.
+        #expect(Set(mesos.map(\.id)).count == 3)
+        #expect(mesos[0].dateRange.upperBound < mesos[1].dateRange.lowerBound)
+        let expectedSecondStart = calendar.date(byAdding: .day, value: 1, to: mesos[0].dateRange.upperBound)!
+        #expect(mesos[1].dateRange.lowerBound == expectedSecondStart)
+
+        let micros = cycles.filter { $0.level == .micro }
+        #expect(micros.filter { $0.parentID == mesos[0].id }.count == 4)
+        #expect(micros.filter { $0.parentID == mesos[1].id }.count == 4)
     }
 }

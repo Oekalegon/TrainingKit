@@ -100,4 +100,47 @@ struct TrainingModelTests {
         #expect(firstRun.map(\.load) == secondRun.map(\.load))
         #expect(firstRun.map(\.ctl) == secondRun.map(\.ctl))
     }
+
+    @Test("add(_ plan:) reflects the addition even if load(in:) was never called")
+    func addPlanWithoutPriorLoad() async throws {
+        let (store, stores) = makeStores()
+        let athlete = AthleteProfile.fixture()
+        let workout = steadyWorkout()
+        try await store.upsert([workout])
+
+        let model = TrainingModel(stores: stores, athlete: athlete)
+        let plan = PlannedActivity(workoutID: workout.id, date: day(0))
+        try await model.add(plan, asOf: day(0))
+
+        #expect(model.plans.map(\.id) == [plan.id])
+        #expect(try await store.plan(id: plan.id) == plan)
+        #expect(model.metrics.contains { $0.load > 0 })
+    }
+
+    @Test("a failed load(in:) leaves the model unchanged rather than partially updated")
+    func failedLoadLeavesModelUnchanged() async throws {
+        let (store, stores) = makeStores()
+        let athlete = AthleteProfile.fixture()
+        let activity = Activity(source: .manual, sport: .running, start: day(0), duration: 1800)
+        try await store.upsert([activity])
+
+        var throwingStores = stores
+        throwingStores.planStore = ThrowingPlanStore()
+        let model = TrainingModel(stores: throwingStores, athlete: athlete)
+
+        await #expect(throws: (any Error).self) {
+            try await model.load(in: day(0)...day(1), asOf: day(0))
+        }
+
+        #expect(model.activities.isEmpty)
+        #expect(model.metrics.isEmpty)
+    }
+}
+
+private struct ThrowingPlanStore: PlanStore {
+    struct Boom: Error {}
+    func plans(in range: ClosedRange<Date>) async throws -> [PlannedActivity] { throw Boom() }
+    func upsert(_ plans: [PlannedActivity]) async throws {}
+    func plan(id: UUID) async throws -> PlannedActivity? { nil }
+    func deletePlan(id: UUID) async throws {}
 }

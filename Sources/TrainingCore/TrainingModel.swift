@@ -51,30 +51,52 @@ public final class TrainingModel {
 
     /// Fetches activities/plans/cycles in `range` and the full workout library from the stores,
     /// then recomputes. Call once at startup, and again if the visible range changes.
+    ///
+    /// Fetches into locals first and only assigns once all four succeed, so a failure partway
+    /// through (e.g. the plan fetch throwing after the activity fetch already succeeded) leaves
+    /// this model exactly as it was before the call, rather than a mix of the old and new range.
     public func load(in range: ClosedRange<Date>, asOf today: Date = .now) async throws {
+        let newActivities = try await stores.activityStore.activities(in: range)
+        let newPlans = try await stores.planStore.plans(in: range)
+        let newWorkouts = try await stores.workoutStore.workouts()
+        let newCycles = try await stores.cycleStore.cycles(in: range)
+
+        activities = newActivities
+        plans = newPlans
+        workouts = newWorkouts
+        cycles = newCycles
         loadedRange = range
-        activities = try await stores.activityStore.activities(in: range)
-        plans = try await stores.planStore.plans(in: range)
-        workouts = try await stores.workoutStore.workouts()
-        cycles = try await stores.cycleStore.cycles(in: range)
         await recompute(asOf: today)
     }
 
-    /// Upserts `plan` into ``PlanStore``, reloads plans from the store, and recomputes.
+    /// Upserts `plan` into ``PlanStore``, reloads plans and the workout library from the store,
+    /// and recomputes.
+    ///
+    /// If ``load(in:asOf:)`` hasn't been called yet, this falls back to a range covering just
+    /// `plan.date` (and adopts it as the loaded range) rather than silently skipping the reload —
+    /// without this, the plan would persist to the store but `plans`/`metrics` would never reflect
+    /// it, with no error to signal anything was skipped.
     public func add(_ plan: PlannedActivity, asOf today: Date = .now) async throws {
         try await stores.planStore.upsert([plan])
-        if let loadedRange {
-            plans = try await stores.planStore.plans(in: loadedRange)
-        }
+        let range = loadedRange ?? (plan.date...plan.date)
+        plans = try await stores.planStore.plans(in: range)
+        // Always refreshed (not just when never loaded): recompute needs `workouts` to resolve
+        // `plan.workoutID`, and the workout `plan` references might not be in the cached array yet.
+        workouts = try await stores.workoutStore.workouts()
+        loadedRange = range
         await recompute(asOf: today)
     }
 
     /// Upserts `newCycles` into ``CycleStore``, reloads cycles from the store, and recomputes.
+    ///
+    /// If `load(in:asOf:)` hasn't been called yet, this falls back to a range covering the union
+    /// of `newCycles`' date ranges (and adopts it as the loaded range), for the same reason as the
+    /// `PlannedActivity` overload of `add` above.
     public func add(_ newCycles: [TrainingCycle], asOf today: Date = .now) async throws {
         try await stores.cycleStore.upsert(newCycles)
-        if let loadedRange {
-            cycles = try await stores.cycleStore.cycles(in: loadedRange)
-        }
+        let range = loadedRange ?? Self.union(of: newCycles.map(\.dateRange), fallback: today)
+        cycles = try await stores.cycleStore.cycles(in: range)
+        loadedRange = range
         await recompute(asOf: today)
     }
 
@@ -93,6 +115,15 @@ public final class TrainingModel {
             parameters: parameters,
             today: today
         )
+    }
+
+    /// The smallest range covering every range in `ranges`, or `fallback...fallback` if `ranges`
+    /// is empty.
+    private static func union(of ranges: [ClosedRange<Date>], fallback: Date) -> ClosedRange<Date> {
+        guard let first = ranges.first else { return fallback...fallback }
+        return ranges.dropFirst().reduce(first) { partial, range in
+            min(partial.lowerBound, range.lowerBound)...max(partial.upperBound, range.upperBound)
+        }
     }
 
     /// Pure computation extracted so it runs off the main actor: calling a `nonisolated async`

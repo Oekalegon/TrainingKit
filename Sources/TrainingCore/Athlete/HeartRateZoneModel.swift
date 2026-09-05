@@ -14,11 +14,22 @@ import Foundation
 /// ``HeartRateZoneMethod`` is in effect — that's the ratio the formula is defined in terms of.
 /// The zone method only changes which heart rates count as which zone.
 public struct HeartRateZoneModel: Sendable {
+    /// Resting heart rate, in beats per minute.
     public let restingHeartRateBPM: Double
+    /// Maximum heart rate, in beats per minute.
     public let maxHeartRateBPM: Double
+    /// Lactate threshold heart rate, in beats per minute, used when `method` is `.lactateThreshold`.
     public let lactateThresholdHeartRateBPM: Double?
+    /// How zone boundaries are determined; see ``HeartRateZoneMethod``.
     public let method: HeartRateZoneMethod
 
+    /// Creates a heart-rate zone model directly from raw values.
+    ///
+    /// - Parameters:
+    ///   - restingHeartRateBPM: Resting heart rate, in beats per minute.
+    ///   - maxHeartRateBPM: Maximum heart rate, in beats per minute.
+    ///   - lactateThresholdHeartRateBPM: Lactate threshold heart rate, if known.
+    ///   - method: How zone boundaries are determined; defaults to `.karvonen`.
     public init(
         restingHeartRateBPM: Double,
         maxHeartRateBPM: Double,
@@ -31,6 +42,7 @@ public struct HeartRateZoneModel: Sendable {
         self.method = method
     }
 
+    /// Creates a heart-rate zone model from a dated ``HeartRateZoneSettings`` snapshot.
     public init(settings: HeartRateZoneSettings) {
         self.init(
             restingHeartRateBPM: settings.restingHeartRateBPM,

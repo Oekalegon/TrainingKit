@@ -3,7 +3,9 @@ import Foundation
 /// The athlete's physiological and calendar defaults, used throughout `TrainingCore` to turn raw
 /// heart-rate data and workout plans into training load.
 public struct AthleteProfile: Sendable, Codable {
+    /// Used to select ``TRIMPCoefficients``.
     public var sex: BiologicalSex
+    /// Turns a distance into a duration at a given heart-rate zone, for plan estimation.
     public var paceModel: PaceModel
     /// Boundary for daily bucketing in the fitness series (``DailyLoadSeries``).
     public var timeZone: TimeZone
@@ -16,6 +18,14 @@ public struct AthleteProfile: Sendable, Codable {
     /// history of past training load.
     public var heartRateZoneHistory: [HeartRateZoneSettings]
 
+    /// Creates an athlete profile.
+    ///
+    /// - Parameters:
+    ///   - sex: Used to select ``TRIMPCoefficients``.
+    ///   - paceModel: Turns a distance into a duration at a given heart-rate zone.
+    ///   - timeZone: Boundary for daily bucketing in the fitness series.
+    ///   - weekStartsOn: Boundary for weekly statistics; defaults to Monday.
+    ///   - heartRateZoneHistory: Every ``HeartRateZoneSettings`` this athlete has recorded.
     public init(
         sex: BiologicalSex,
         paceModel: PaceModel,

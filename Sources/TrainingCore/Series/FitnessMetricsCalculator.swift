@@ -6,8 +6,11 @@ import Foundation
 /// so no vectorised math is needed here; only the rolling monotony window is worth batching, and
 /// even that is a few thousand elements at most for a season of data.
 public struct FitnessMetricsCalculator: Sendable {
+    /// Creates a fitness metrics calculator.
     public init() {}
 
+    /// Computes the day-by-day fitness metrics for a series.
+    ///
     /// - Parameters:
     ///   - series: A continuous, gap-free day sequence, e.g. from ``DailyLoadSeries``.
     ///   - parameters: EWMA time constants and the monotony window length.

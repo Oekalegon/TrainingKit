@@ -142,4 +142,21 @@ struct InMemoryStoreTests {
 
         #expect(try await store.cycle(id: cycle.id) == nil)
     }
+
+    @Test("CycleStore rejects deleting a cycle that still has children")
+    func cycleStoreRejectsDeletingCycleWithChildren() async throws {
+        let store = InMemoryStore()
+        let meso = TrainingCycle(level: .meso, phase: .build, name: "Meso 1", dateRange: day(0)...day(13))
+        let micro = TrainingCycle(level: .micro, phase: .build, name: "Week 1", dateRange: day(0)...day(6), parentID: meso.id)
+        try await store.upsert([meso, micro])
+
+        await #expect(throws: CycleStoreError.hasChildren(meso.id)) {
+            try await store.deleteCycle(id: meso.id)
+        }
+
+        // Deleting the child first, then the parent, succeeds.
+        try await store.deleteCycle(id: micro.id)
+        try await store.deleteCycle(id: meso.id)
+        #expect(try await store.cycle(id: meso.id) == nil)
+    }
 }

@@ -17,5 +17,9 @@ public protocol CycleStore: Sendable {
     func upsert(_ cycles: [TrainingCycle]) async throws
 
     /// Removes the cycle with this id, if any.
+    ///
+    /// - Throws: ``CycleStoreError/hasChildren(_:)`` if another cycle's `parentID` still
+    ///   references this one — delete children before their parent, so no cycle is ever left
+    ///   pointing at one that no longer exists.
     func deleteCycle(id: UUID) async throws
 }

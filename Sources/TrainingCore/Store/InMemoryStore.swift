@@ -132,6 +132,9 @@ public actor InMemoryStore: ActivityStore, PlanStore, WorkoutLibraryStore, Cycle
 
     /// See ``CycleStore/deleteCycle(id:)``.
     public func deleteCycle(id: UUID) async throws {
+        guard !cyclesByID.values.contains(where: { $0.parentID == id }) else {
+            throw CycleStoreError.hasChildren(id)
+        }
         cyclesByID.removeValue(forKey: id)
     }
 

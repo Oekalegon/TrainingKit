@@ -19,8 +19,8 @@ public struct TrainingCycle: Identifiable, Sendable, Codable, Hashable {
     public var dateRange: ClosedRange<Date>
     /// The parent cycle this one nests inside (micro → meso → macro), if any.
     public var parentID: UUID?
-    /// The race this cycle's macro/meso targets, if any. An opaque id for now — the `Race` model
-    /// itself doesn't exist until MVP 2.
+    /// The ``Race`` this cycle's macro/meso targets, if any. Only macro- and meso-level cycles set
+    /// this; a micro doesn't carry its own copy since it can always be read from its meso parent.
     public var targetRaceID: UUID?
 
     /// Creates a training cycle.

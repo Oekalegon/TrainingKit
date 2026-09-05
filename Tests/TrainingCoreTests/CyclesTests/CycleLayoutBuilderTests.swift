@@ -160,4 +160,31 @@ struct CycleLayoutBuilderTests {
         let store = InMemoryStore()
         try await store.upsert(cycles)
     }
+
+    @Test("microcycles(from:to:macro:meso:athlete:) previews the same weeks layout(...) commits")
+    func microcyclesMatchesLayout() {
+        let race = race()
+        let raceDay = calendar.startOfDay(for: raceDate)
+        let start = exactStart(raceDay: raceDay)
+
+        let micros = builder.microcycles(from: start, to: race, macro: macro, meso: meso, athlete: athlete)
+        let cycles = builder.layout(from: start, to: race, macro: macro, meso: meso, athlete: athlete)
+        let microCycles = cycles.filter { $0.level == .micro }.sorted { $0.dateRange.lowerBound < $1.dateRange.lowerBound }
+
+        #expect(micros.count == 10)
+        #expect(micros.map(\.dateRange) == microCycles.map(\.dateRange))
+        #expect(micros.map(\.phase) == microCycles.map(\.phase))
+        #expect(micros.last?.phase == .race)
+        #expect(micros.map(\.id) == micros.map(\.dateRange.lowerBound))
+    }
+
+    @Test("microcycles(from:to:macro:meso:athlete:) is empty when race is before start")
+    func microcyclesEmptyWhenRaceBeforeStart() {
+        let race = race()
+        let start = calendar.date(byAdding: .day, value: 1, to: raceDate)!
+
+        let micros = builder.microcycles(from: start, to: race, macro: macro, meso: meso, athlete: athlete)
+
+        #expect(micros.isEmpty)
+    }
 }

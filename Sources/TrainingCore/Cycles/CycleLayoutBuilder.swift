@@ -21,30 +21,29 @@ public struct CycleLayoutBuilder: Sendable {
     /// Creates a cycle layout builder.
     public init() {}
 
-    /// Lays out one macrocycle, its mesocycles, and their micro-cycles from `start` through
-    /// `race.date`.
+    /// Computes the week-by-week phase progression from `start` through `race.date`, without
+    /// minting any `TrainingCycle`/`UUID` values — useful for previewing or letting the user tweak
+    /// a layout before committing it via ``layout(from:to:macro:meso:athlete:)``.
     ///
     /// - Parameters:
     ///   - start: The earliest day the layout may begin, in the athlete's timezone. The actual
     ///     layout may begin later than this if `macro`'s total length is shorter than the span to
     ///     `race.date`, and a block may be trimmed or dropped if it's longer (see the type's
     ///     documentation).
-    ///   - race: The race the layout tapers into; every generated cycle's `targetRaceID` is set to
-    ///     `race.id` (macro and meso levels only, per ``TrainingCycle/targetRaceID``).
+    ///   - race: The race the layout tapers into.
     ///   - macro: The ordered phase/length structure to fill backward from the race.
     ///   - meso: The repeating build/recovery pattern applied within every non-taper, non-race
     ///     block.
     ///   - athlete: Supplies the timezone used for all day-granular boundaries.
-    /// - Returns: One macro-level ``TrainingCycle``, one meso-level cycle per surviving
-    ///   ``MacroTemplate/MesoBlock``, and one micro-level cycle per surviving micro — parented
-    ///   micro → meso → macro. Empty if `race.date` is before `start`, or if `macro` has no blocks.
-    public func layout(
+    /// - Returns: One ``Microcycle`` per surviving micro, oldest first. Empty if `race.date` is
+    ///   before `start`, or if `macro` has no blocks.
+    public func microcycles(
         from start: Date,
         to race: Race,
         macro: MacroTemplate,
         meso: MesocycleTemplate,
         athlete: AthleteProfile
-    ) -> [TrainingCycle] {
+    ) -> [Microcycle] {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = athlete.timeZone
 
@@ -52,27 +51,45 @@ public struct CycleLayoutBuilder: Sendable {
         let raceDay = calendar.startOfDay(for: race.date)
 
         guard raceDay >= startDay, !macro.mesoBlocks.isEmpty else {
-            Logging.series.warning("CycleLayoutBuilder.layout(from:to:macro:meso:athlete:) called with race date before start, or an empty macro template; returning no cycles")
+            Logging.series.warning("CycleLayoutBuilder.microcycles(from:to:macro:meso:athlete:) called with race date before start, or an empty macro template; returning none")
             return []
         }
 
-        let micros = trimmed(micros: microSlots(macro: macro, meso: meso, raceDay: raceDay, calendar: calendar), toStartOn: startDay)
+        return trimmed(micros: microSlots(macro: macro, meso: meso, raceDay: raceDay, calendar: calendar), toStartOn: startDay)
+    }
+
+    /// Lays out one macrocycle, its mesocycles, and their micro-cycles from `start` through
+    /// `race.date`.
+    ///
+    /// - Parameters:
+    ///   - start: The earliest day the layout may begin; see ``microcycles(from:to:macro:meso:athlete:)``.
+    ///   - race: The race the layout tapers into; every generated cycle's `targetRaceID` is set to
+    ///     `race.id` (macro and meso levels only, per ``TrainingCycle/targetRaceID``).
+    ///   - macro: The ordered phase/length structure to fill backward from the race.
+    ///   - meso: The repeating build/recovery pattern applied within every non-taper, non-race
+    ///     block.
+    ///   - athlete: Supplies the timezone used for all day-granular boundaries.
+    /// - Returns: One macro-level ``TrainingCycle``, one meso-level cycle per surviving
+    ///   ``MacroTemplate/MesoBlock``, and one micro-level cycle per surviving ``Microcycle`` —
+    ///   parented micro → meso → macro. Empty if `race.date` is before `start`, or if `macro` has
+    ///   no blocks.
+    public func layout(
+        from start: Date,
+        to race: Race,
+        macro: MacroTemplate,
+        meso: MesocycleTemplate,
+        athlete: AthleteProfile
+    ) -> [TrainingCycle] {
+        let micros = microcycles(from: start, to: race, macro: macro, meso: meso, athlete: athlete)
         guard !micros.isEmpty else { return [] }
 
         return cycles(from: micros, macro: macro, race: race)
     }
 
-    /// One micro-cycle's phase, parent block, and date range before trimming.
-    private struct MicroSlot {
-        let blockIndex: Int
-        let phase: CyclePhase
-        let dateRange: ClosedRange<Date>
-    }
-
     /// Generates every micro implied by `macro`, working backward from `raceDay`, then returns
     /// them in chronological order.
-    private func microSlots(macro: MacroTemplate, meso: MesocycleTemplate, raceDay: Date, calendar: Calendar) -> [MicroSlot] {
-        var slots: [MicroSlot] = []
+    private func microSlots(macro: MacroTemplate, meso: MesocycleTemplate, raceDay: Date, calendar: Calendar) -> [Microcycle] {
+        var slots: [Microcycle] = []
         var cursorEnd = raceDay
 
         for blockIndex in macro.mesoBlocks.indices.reversed() {
@@ -83,7 +100,7 @@ public struct CycleLayoutBuilder: Sendable {
                 let positionInBlock = block.microCount - 1 - positionFromBlockEnd
                 let lowerBound = calendar.date(byAdding: .day, value: -(meso.microLengthDays - 1), to: cursorEnd)!
                 let phase = phase(forPositionInBlock: positionInBlock, block: block, meso: meso, isRaceMicro: slots.isEmpty)
-                slots.append(MicroSlot(blockIndex: blockIndex, phase: phase, dateRange: lowerBound...cursorEnd))
+                slots.append(Microcycle(dateRange: lowerBound...cursorEnd, phase: phase, mesoBlockIndex: blockIndex))
                 cursorEnd = calendar.date(byAdding: .day, value: -meso.microLengthDays, to: cursorEnd)!
             }
         }
@@ -100,17 +117,17 @@ public struct CycleLayoutBuilder: Sendable {
 
     /// Drops any micro entirely before `startDay`, and clamps the one micro that straddles it —
     /// the "trim the oldest block" behavior described in the type's documentation.
-    private func trimmed(micros: [MicroSlot], toStartOn startDay: Date) -> [MicroSlot] {
+    private func trimmed(micros: [Microcycle], toStartOn startDay: Date) -> [Microcycle] {
         micros.compactMap { slot in
             guard slot.dateRange.upperBound >= startDay else { return nil }
             guard slot.dateRange.lowerBound < startDay else { return slot }
-            return MicroSlot(blockIndex: slot.blockIndex, phase: slot.phase, dateRange: startDay...slot.dateRange.upperBound)
+            return Microcycle(dateRange: startDay...slot.dateRange.upperBound, phase: slot.phase, mesoBlockIndex: slot.mesoBlockIndex)
         }
     }
 
     /// Builds the macro/meso/micro `TrainingCycle` hierarchy from the surviving, chronologically
-    /// ordered micro slots.
-    private func cycles(from micros: [MicroSlot], macro: MacroTemplate, race: Race) -> [TrainingCycle] {
+    /// ordered micro-cycles.
+    private func cycles(from micros: [Microcycle], macro: MacroTemplate, race: Race) -> [TrainingCycle] {
         let macroID = UUID()
         var result: [TrainingCycle] = []
         var weekNumber = 0
@@ -118,9 +135,9 @@ public struct CycleLayoutBuilder: Sendable {
         var groupStart = 0
         var groupIndex = 0
         while groupStart < micros.count {
-            let blockIndex = micros[groupStart].blockIndex
+            let blockIndex = micros[groupStart].mesoBlockIndex
             var groupEnd = groupStart
-            while groupEnd + 1 < micros.count, micros[groupEnd + 1].blockIndex == blockIndex {
+            while groupEnd + 1 < micros.count, micros[groupEnd + 1].mesoBlockIndex == blockIndex {
                 groupEnd += 1
             }
             let group = micros[groupStart...groupEnd]
@@ -140,14 +157,14 @@ public struct CycleLayoutBuilder: Sendable {
                 )
             )
 
-            for slot in group {
+            for micro in group {
                 weekNumber += 1
                 result.append(
                     TrainingCycle(
                         level: .micro,
-                        phase: slot.phase,
+                        phase: micro.phase,
                         name: "\(macro.name) Week \(weekNumber)",
-                        dateRange: slot.dateRange,
+                        dateRange: micro.dateRange,
                         parentID: mesoID
                     )
                 )
@@ -159,7 +176,7 @@ public struct CycleLayoutBuilder: Sendable {
         let macroCycle = TrainingCycle(
             id: macroID,
             level: .macro,
-            phase: macro.mesoBlocks[micros.first!.blockIndex].phase,
+            phase: macro.mesoBlocks[micros.first!.mesoBlockIndex].phase,
             name: macro.name,
             dateRange: micros.first!.dateRange.lowerBound...micros.last!.dateRange.upperBound,
             targetRaceID: race.id

@@ -14,8 +14,14 @@ extension Activity {
     /// - Parameters:
     ///   - workout: The HealthKit workout to import.
     ///   - heartRate: This workout's heart-rate samples, already scoped to its time range.
-    public init(healthKitWorkout workout: HKWorkout, heartRate: [HeartRateSample]) {
+    ///   - existingID: The `id` of the `Activity` already stored for this workout's source, if
+    ///     this is a re-import rather than the first import of it. `Activity.source` is the stable
+    ///     dedupe key across re-imports, but `ActivityStore.upsert(_:)` matches by `id` — omitting
+    ///     this (or passing `nil` when an existing activity's id could have been looked up) means a
+    ///     re-import produces a *second* row for the same workout instead of updating the first.
+    public init(healthKitWorkout workout: HKWorkout, heartRate: [HeartRateSample], existingID: UUID? = nil) {
         self.init(
+            id: existingID ?? UUID(),
             source: .healthKit(workout.uuid),
             sport: Sport(healthKitActivityType: workout.workoutActivityType),
             start: workout.startDate,

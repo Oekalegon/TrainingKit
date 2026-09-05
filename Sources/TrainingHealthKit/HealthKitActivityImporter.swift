@@ -11,17 +11,27 @@ import HealthKit
 ///   back unchanged for `TrainingCore` to persist via `AthleteStore`.
 /// - For each added/updated workout, a separate `HKSampleQueryDescriptor` on `heartRate` scoped to
 ///   the workout's `startDate...endDate` supplies its `[HeartRateSample]`.
-/// - `Activity.source = .healthKit(workout.uuid)` — that UUID is the dedupe key, matching
-///   `ActivityStore.activity(source:)`.
+/// - `Activity.source = .healthKit(workout.uuid)` is the stable dedupe key across re-imports, but
+///   `ActivityStore.upsert(_:)` matches by `id`, not `source` — so when `activityStore` is supplied,
+///   a workout already on record has its existing `id` looked up and reused, rather than every
+///   reported workout (added *or* updated — HealthKit reports a modified workout back through the
+///   same "added" channel) turning into a second row for the same source.
 public struct HealthKitActivityImporter: ActivityImporting {
     private let healthStore: HKHealthStore
+    private let activityStore: (any ActivityStore)?
 
     /// Creates a HealthKit activity importer.
     ///
-    /// - Parameter healthStore: The health store to import from; the caller is responsible for
-    ///   requesting authorization first (see ``HealthKitAuthorization``).
-    public init(healthStore: HKHealthStore) {
+    /// - Parameters:
+    ///   - healthStore: The health store to import from; the caller is responsible for requesting
+    ///     authorization first (see ``HealthKitAuthorization``).
+    ///   - activityStore: Used to look up an existing activity's `id` by source before
+    ///     constructing a re-imported workout's `Activity`, so `ActivityStore.upsert(_:)` replaces
+    ///     it rather than adding a duplicate. Pass `nil` only if the caller reconciles ids itself
+    ///     before upserting `ImportResult.upserted`.
+    public init(healthStore: HKHealthStore, activityStore: (any ActivityStore)? = nil) {
         self.healthStore = healthStore
+        self.activityStore = activityStore
     }
 
     /// See `ActivityImporting.importActivities(since:)`.
@@ -41,7 +51,8 @@ public struct HealthKitActivityImporter: ActivityImporting {
         activities.reserveCapacity(result.addedSamples.count)
         for workout in result.addedSamples {
             let heartRate = try await heartRateSamples(for: workout)
-            activities.append(Activity(healthKitWorkout: workout, heartRate: heartRate))
+            let existingID = try await activityStore?.activity(source: .healthKit(workout.uuid))?.id
+            activities.append(Activity(healthKitWorkout: workout, heartRate: heartRate, existingID: existingID))
         }
 
         let deletedSources = result.deletedObjects.map { ActivitySource.healthKit($0.uuid) }

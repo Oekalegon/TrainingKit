@@ -1,12 +1,15 @@
-/// Storage contract for the athlete's profile.
-///
-/// Kept minimal for now — the design doc also anticipates HealthKit import anchors being
-/// persisted here (§5.1), but that shape depends on `TrainingHealthKit`'s not-yet-built
-/// `ImportAnchor` type; adding a generic blob-storage API ahead of that risks guessing wrong.
+/// Storage contract for the athlete's profile and the incremental-import cursor.
 public protocol AthleteStore: Sendable {
     /// The stored athlete profile, if one has been created yet.
     func athleteProfile() async throws -> AthleteProfile?
 
     /// Replaces the stored athlete profile.
     func save(_ profile: AthleteProfile) async throws
+
+    /// The persisted ``ImportAnchor`` from the last successful ``ActivityImporting`` run, if any.
+    func importAnchor() async throws -> ImportAnchor?
+
+    /// Replaces the persisted import anchor; `nil` clears it, forcing the next import to be a full
+    /// one.
+    func saveImportAnchor(_ anchor: ImportAnchor?) async throws
 }

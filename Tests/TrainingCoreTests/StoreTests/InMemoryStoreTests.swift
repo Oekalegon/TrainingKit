@@ -33,6 +33,34 @@ struct InMemoryStoreTests {
         #expect(try await store.activity(source: .manual) == nil)
     }
 
+    @Test("ActivityStore deleteActivity removes by source, no-ops if not found")
+    func activityStoreDeleteActivity() async throws {
+        let store = InMemoryStore()
+        let source = ActivitySource.healthKit(UUID())
+        let activity = Activity(source: source, sport: .cycling, start: day(0), duration: 3600)
+        try await store.upsert([activity])
+
+        try await store.deleteActivity(source: .healthKit(UUID())) // unrelated source: no-op
+        #expect(try await store.activity(source: source) == activity)
+
+        try await store.deleteActivity(source: source)
+        #expect(try await store.activity(source: source) == nil)
+        #expect(try await store.activity(id: activity.id) == nil)
+    }
+
+    @Test("AthleteStore import anchor round-trips and clears to nil")
+    func athleteStoreImportAnchor() async throws {
+        let store = InMemoryStore()
+        #expect(try await store.importAnchor() == nil)
+
+        let anchor = ImportAnchor(data: Data([1, 2, 3]))
+        try await store.saveImportAnchor(anchor)
+        #expect(try await store.importAnchor() == anchor)
+
+        try await store.saveImportAnchor(nil)
+        #expect(try await store.importAnchor() == nil)
+    }
+
     @Test("PlanStore upsert/fetch/delete")
     func planStoreCRUD() async throws {
         let store = InMemoryStore()

@@ -14,4 +14,8 @@ public protocol ActivityStore: Sendable {
 
     /// The activity with this id, if any.
     func activity(id: UUID) async throws -> Activity?
+
+    /// Removes the activity from this source, if any — the delete half of an ``ActivityImporting``
+    /// run that reports a source as removed at the origin.
+    func deleteActivity(source: ActivitySource) async throws
 }

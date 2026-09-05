@@ -2,7 +2,7 @@ import Foundation
 
 /// The athlete's physiological and calendar defaults, used throughout `TrainingCore` to turn raw
 /// heart-rate data and workout plans into training load.
-public struct AthleteProfile: Sendable, Codable {
+public struct AthleteProfile: Sendable, Codable, Equatable {
     /// Used to select ``TRIMPCoefficients``.
     public var sex: BiologicalSex
     /// Turns a distance into a duration at a given heart-rate zone, for plan estimation.

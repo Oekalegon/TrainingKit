@@ -69,3 +69,19 @@ See `docs/design/trainingKit-design.md` in the package repository for the full m
 - ``LoadModelParameters``
 - ``FitnessMetrics``
 - ``FitnessMetricsCalculator``
+
+### Periodisation
+
+- ``TrainingCycle``
+- ``CycleLevel``
+- ``CyclePhase``
+
+### Stores
+
+- ``ActivityStore``
+- ``PlanStore``
+- ``WorkoutLibraryStore``
+- ``CycleStore``
+- ``CycleStoreError``
+- ``AthleteStore``
+- ``InMemoryStore``

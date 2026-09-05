@@ -6,7 +6,7 @@ import Foundation
 /// computed alongside `.time` steps. Pace is expressed relative to a threshold pace (roughly
 /// zone 4) using a per-zone multiplier table; multipliers greater than 1 are slower than
 /// threshold, less than 1 are faster.
-public struct PaceModel: Sendable, Codable {
+public struct PaceModel: Sendable, Codable, Equatable {
     /// Threshold pace, in seconds per kilometer.
     public var thresholdPaceSecondsPerKilometer: Double
 

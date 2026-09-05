@@ -7,7 +7,7 @@ import Foundation
 /// ``LoadCalculator`` is possible without re-importing. Elevation, cadence, and the geographic
 /// area covered are kept as one-time summaries rather than raw streams — see ``ElevationStats``,
 /// ``CadenceStats``, and ``GeographicBounds`` for why.
-public struct Activity: Identifiable, Sendable, Codable {
+public struct Activity: Identifiable, Sendable, Codable, Hashable {
     /// A stable identifier for this activity, independent of ``source``.
     public let id: UUID
     /// Where this activity came from, and the key used to dedupe re-imports.

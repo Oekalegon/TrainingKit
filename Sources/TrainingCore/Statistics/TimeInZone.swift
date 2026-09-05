@@ -10,6 +10,9 @@ public struct TimeInZone: Sendable, Codable, Hashable {
     public let seconds: [Int: TimeInterval]
 
     /// Creates a time-in-zone breakdown.
+    ///
+    /// - Parameter seconds: Seconds spent in each zone, keyed by zone number (0...5); defaults to
+    ///   empty.
     public init(seconds: [Int: TimeInterval] = [:]) {
         self.seconds = seconds
     }

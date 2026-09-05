@@ -16,6 +16,15 @@ public struct SportPeriodStats: Sendable, Hashable {
     public let activityCount: Int
 
     /// Creates a per-sport period statistic.
+    ///
+    /// - Parameters:
+    ///   - sport: The sport these totals cover.
+    ///   - distanceMeters: Total distance covered in this sport during the period.
+    ///   - time: Total time spent in this sport during the period.
+    ///   - load: Total training load from this sport during the period.
+    ///   - timeInZone: Seconds spent in each heart-rate zone across this sport's activities.
+    ///   - activityCount: How many activities (actual or, for a projected period, planned)
+    ///     contributed.
     public init(
         sport: Sport,
         distanceMeters: Double,

@@ -81,6 +81,16 @@ public struct StatisticsCalculator: Sendable {
     /// whichever is earlier) through `today` (or the latest activity/plan, whichever is later).
     ///
     /// Week boundaries follow ``AthleteProfile/weekStartsOn`` in ``AthleteProfile/timeZone``.
+    ///
+    /// - Parameters:
+    ///   - activities: Completed activities to summarize with `calculators`.
+    ///   - plans: Planned activities to project with `estimator`/`durationEstimator` for weeks that
+    ///     aren't fully in the past.
+    ///   - workouts: The library workouts `plans` reference, looked up by id.
+    ///   - athlete: Supplies the timezone, week-start day, and zone settings used throughout.
+    ///   - today: The boundary between "actual" and "estimated" days; injected rather than
+    ///     `Date()` so the result is deterministic.
+    /// - Returns: One ``WeeklyStats`` per calendar week, oldest first, with no gaps.
     public func weeklyStats(
         activities: [Activity],
         plans: [PlannedActivity],
@@ -124,6 +134,11 @@ public struct StatisticsCalculator: Sendable {
     /// Computes descriptive totals over an arbitrary calendar-day `range`.
     ///
     /// - Parameters:
+    ///   - activities: Completed activities to summarize with `calculators`.
+    ///   - plans: Planned activities to project with `estimator`/`durationEstimator` for days in
+    ///     `range` that aren't in the past.
+    ///   - workouts: The library workouts `plans` reference, looked up by id.
+    ///   - athlete: Supplies the timezone and zone settings used throughout.
     ///   - range: The calendar-day range to summarize, in the athlete's timezone. Both bounds are
     ///     inclusive whole days.
     ///   - today: The boundary between "actual" and "estimated" days, matching ``DailyLoadSeries``.

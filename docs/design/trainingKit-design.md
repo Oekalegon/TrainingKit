@@ -442,6 +442,8 @@ struct TimeInZone: Sendable {
 
 Time in zone is integrated from `Activity.heartRate` using the same trapezoid segments and gap rule as the TRIMP calculator (one `HeartRateSegmentIterator` shared by both, so zone seconds and TRIMP always agree on what counts as "in the activity"). A sample straddling a zone boundary is split proportionally, not assigned whole.
 
+> **Note (pending, not yet built):** `ActivitySummary`/`TimeInZone` should gain a pace/speed equivalent alongside the HR one — `Activity.speed` (added when the model gained device-recorded streams; see §2.2) is the raw stream to integrate the same way, once a pace/speed zone model exists to bucket it against. On the "computed on demand, cache is a later optimisation" line above: recomputing time-in-zone for e.g. 30 activities in a calendar view is not expected to be a real cost (trapezoidal integration over a few hundred–low-thousand samples per activity is sub-millisecond total), so if caching is ever needed it belongs at the app/view-model layer (keyed on activity ID, invalidated on data change), not inside `StatisticsCalculator` itself.
+
 ### 9.2 Per-week
 
 ```swift

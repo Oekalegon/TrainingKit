@@ -11,3 +11,12 @@ Bridges TrainingKit's structured workout model to Apple WorkoutKit and syncs sch
 ### Overview
 
 - ``TrainingWorkoutKit``
+
+### Bridge
+
+- ``WorkoutKitBridge``
+- ``WorkoutKitMappingError``
+
+### Authorization
+
+- ``WorkoutKitAuthorization``

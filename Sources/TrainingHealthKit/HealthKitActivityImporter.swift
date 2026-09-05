@@ -47,12 +47,26 @@ public struct HealthKitActivityImporter: ActivityImporting {
         )
         let result = try await descriptor.result(for: healthStore)
 
-        var activities: [Activity] = []
-        activities.reserveCapacity(result.addedSamples.count)
-        for workout in result.addedSamples {
-            let heartRate = try await heartRateSamples(for: workout)
-            let existingID = try await activityStore?.activity(source: .healthKit(workout.uuid))?.id
-            activities.append(Activity(healthKitWorkout: workout, heartRate: heartRate, existingID: existingID))
+        // Concurrent per workout: a full first import can be hundreds of sessions, each needing
+        // its own round-trip heart-rate query (and, if activityStore is set, an existing-id
+        // lookup) — doing those one at a time would serialize the whole import behind however
+        // many workouts there are.
+        let activities = try await withThrowingTaskGroup(of: Activity.self) { group in
+            for workout in result.addedSamples {
+                group.addTask {
+                    async let heartRateTask = heartRateSamples(for: workout)
+                    async let existingIDTask = activityStore?.activity(source: .healthKit(workout.uuid))?.id
+                    let heartRate = try await heartRateTask
+                    let existingID = try await existingIDTask
+                    return Activity(healthKitWorkout: workout, heartRate: heartRate, existingID: existingID)
+                }
+            }
+            var activities: [Activity] = []
+            activities.reserveCapacity(result.addedSamples.count)
+            for try await activity in group {
+                activities.append(activity)
+            }
+            return activities
         }
 
         let deletedSources = result.deletedObjects.map { ActivitySource.healthKit($0.uuid) }

@@ -1,13 +1,18 @@
 import Foundation
 
-/// Derives heart-rate zone boundaries and Karvonen heart-rate-reserve ratios from an
-/// ``AthleteProfile``.
+/// Derives heart-rate zone boundaries and Karvonen heart-rate-reserve ratios from a
+/// ``HeartRateZoneSettings`` snapshot.
+///
+/// A snapshot, not an ``AthleteProfile`` directly, because these values change over the years —
+/// callers pick the settings effective on the relevant date (``AthleteProfile/heartRateZoneSettings(asOf:)``
+/// for a past activity, ``AthleteProfile/currentHeartRateZoneSettings`` for planning) before
+/// building a model from them.
 ///
 /// The "ratio" used throughout `TrainingCore` for the Banister TRIMP formula (in
 /// ``ExponentialTRIMPCalculator`` and ``TRIMPPlanEstimator``) is always the Karvonen
 /// heart-rate-reserve fraction, `(bpm - resting) / (max - resting)`, regardless of which
-/// ``HeartRateZoneMethod`` the athlete uses — that's the ratio the formula is defined in terms
-/// of. `heartRateZoneMethod` only changes which heart rates count as which zone.
+/// ``HeartRateZoneMethod`` is in effect — that's the ratio the formula is defined in terms of.
+/// The zone method only changes which heart rates count as which zone.
 public struct HeartRateZoneModel: Sendable {
     public let restingHeartRateBPM: Double
     public let maxHeartRateBPM: Double
@@ -26,12 +31,12 @@ public struct HeartRateZoneModel: Sendable {
         self.method = method
     }
 
-    public init(athlete: AthleteProfile) {
+    public init(settings: HeartRateZoneSettings) {
         self.init(
-            restingHeartRateBPM: athlete.restingHeartRateBPM,
-            maxHeartRateBPM: athlete.maxHeartRateBPM,
-            lactateThresholdHeartRateBPM: athlete.lactateThresholdHeartRateBPM,
-            method: athlete.heartRateZoneMethod
+            restingHeartRateBPM: settings.restingHeartRateBPM,
+            maxHeartRateBPM: settings.maxHeartRateBPM,
+            lactateThresholdHeartRateBPM: settings.lactateThresholdHeartRateBPM,
+            method: settings.zoneMethod
         )
     }
 

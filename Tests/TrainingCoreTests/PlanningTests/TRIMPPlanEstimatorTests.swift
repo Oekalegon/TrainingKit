@@ -4,13 +4,7 @@ import Testing
 
 @Suite("TRIMPPlanEstimator")
 struct TRIMPPlanEstimatorTests {
-    let athlete = AthleteProfile(
-        restingHeartRateBPM: 50,
-        maxHeartRateBPM: 190,
-        sex: .male,
-        paceModel: PaceModel(thresholdPaceSecondsPerKilometer: 240),
-        timeZone: TimeZone(identifier: "UTC")!
-    )
+    let athlete = AthleteProfile.fixture()
     let estimator = TRIMPPlanEstimator()
 
     @Test("a workout with only .time steps at fixed zones is deterministic")
@@ -49,8 +43,9 @@ struct TRIMPPlanEstimatorTests {
 
     @Test("estimated load for a steady Z2 run is within a sane band of the equivalent measured TRIMP")
     func estimateApproximatesMeasuredLoad() throws {
-        let zone2Midpoint = HeartRateZoneModel(athlete: athlete).zoneMidpointRatio(2)!
-        let bpm = athlete.restingHeartRateBPM + zone2Midpoint * (athlete.maxHeartRateBPM - athlete.restingHeartRateBPM)
+        let settings = athlete.currentHeartRateZoneSettings!
+        let zone2Midpoint = HeartRateZoneModel(settings: settings).zoneMidpointRatio(2)!
+        let bpm = settings.restingHeartRateBPM + zone2Midpoint * (settings.maxHeartRateBPM - settings.restingHeartRateBPM)
 
         let workout = StructuredWorkout(
             name: "60 min Z2",

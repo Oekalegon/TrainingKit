@@ -4,13 +4,7 @@ import Testing
 
 @Suite("DailyLoadSeries")
 struct DailyLoadSeriesTests {
-    let athlete = AthleteProfile(
-        restingHeartRateBPM: 50,
-        maxHeartRateBPM: 190,
-        sex: .male,
-        paceModel: PaceModel(thresholdPaceSecondsPerKilometer: 240),
-        timeZone: TimeZone(identifier: "UTC")!
-    )
+    let athlete = AthleteProfile.fixture()
     let series = DailyLoadSeries()
     let estimator = TRIMPPlanEstimator()
     let calculators: [any LoadCalculator] = [ExponentialTRIMPCalculator(), DurationRPECalculator()]

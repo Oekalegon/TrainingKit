@@ -25,7 +25,14 @@ public struct TRIMPPlanEstimator: PlannedLoadEstimator {
     }
 
     public func estimatedLoad(for workout: StructuredWorkout, athlete: AthleteProfile) -> TrainingLoad {
-        let zoneModel = HeartRateZoneModel(athlete: athlete)
+        // Planning is always about who the athlete is now, not who they were on some past date,
+        // so this uses the current settings rather than an as-of-date lookup. If none have been
+        // recorded yet, there's no ratio to compute against; return a zero-confidence zero rather
+        // than making the protocol throwing for what should be a transient onboarding state.
+        guard let settings = athlete.currentHeartRateZoneSettings else {
+            return TrainingLoad(value: 0, method: .estimatedFromPlan, confidence: 0)
+        }
+        let zoneModel = HeartRateZoneModel(settings: settings)
         let (a, b) = coefficients.coefficients(for: athlete.sex)
 
         var total = 0.0

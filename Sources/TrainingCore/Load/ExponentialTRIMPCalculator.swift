@@ -27,8 +27,12 @@ public struct ExponentialTRIMPCalculator: LoadCalculator {
             }
         }
 
+        guard let settings = athlete.heartRateZoneSettings(asOf: activity.start) else {
+            throw LoadError.missingHeartRateZoneSettings
+        }
+
         let samples = activity.heartRate.sorted { $0.time < $1.time }
-        let zoneModel = HeartRateZoneModel(athlete: athlete)
+        let zoneModel = HeartRateZoneModel(settings: settings)
         let (a, b) = coefficients.coefficients(for: athlete.sex)
 
         var totalTRIMP = 0.0

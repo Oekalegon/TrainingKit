@@ -7,4 +7,7 @@ public enum LoadError: Error, Sendable, Equatable {
     case invalidHeartRateData(reason: String)
     /// The activity has no `perceivedExertion`, so ``DurationRPECalculator`` cannot score it.
     case missingPerceivedExertion
+    /// The athlete has no ``HeartRateZoneSettings`` on record at all, so no heart-rate-reserve
+    /// ratio can be computed for the activity's date.
+    case missingHeartRateZoneSettings
 }

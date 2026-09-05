@@ -1,6 +1,6 @@
 # trainingKit — Package Design (MVP 1)
 
-Swift package for iOS 17+, watchOS 10+, macOS 14+. Library only, no UI.
+Swift package for iOS 26+, watchOS 26+, macOS 26+. Library only, no UI.
 
 Scope of MVP 1:
 - Import completed activities (HealthKit first, file import later) and compute a training load (HR-TRIMP) per activity.
@@ -21,12 +21,12 @@ Split so the pure model never imports an Apple platform framework. That keeps th
 | Target | Depends on | Platforms | Purpose |
 |---|---|---|---|
 | `TrainingCore` | Foundation only | all | Models, load calculators, series engine, estimators, store protocols |
-| `TrainingHealthKit` | Core, HealthKit | iOS, watchOS, macOS 14+ | Activity + HR sample import, resting HR, biological sex |
+| `TrainingHealthKit` | Core, HealthKit | iOS, watchOS, macOS | Activity + HR sample import, resting HR, biological sex |
 | `TrainingWorkoutKit` | Core, WorkoutKit | iOS, watchOS | Structured workout ↔ `CustomWorkout`, schedule sync |
 | `TrainingPersistence` | Core, SwiftData | all | SwiftData models + CloudKit sync, conforms to Core store protocols |
 | `TrainingTools` | Core | all | Provider-neutral tool registry, JSON schemas, `PlanSandbox` |
 | `TrainingToolsAnthropic` | Tools | all | Messages API tool-use loop |
-| `TrainingToolsFoundationModels` | Tools, FoundationModels | iOS/macOS 26+ | On-device model adapter |
+| `TrainingToolsFoundationModels` | Tools, FoundationModels | iOS, macOS | On-device model adapter |
 | `TrainingFIT` (later) | Core | all | FIT/TCX import and FIT workout export for Garmin/COROS |
 
 Test targets: `TrainingCoreTests` (bulk of the coverage), one small test target per adapter.
@@ -35,7 +35,7 @@ Test targets: `TrainingCoreTests` (bulk of the coverage), one small test target 
 // Package.swift (sketch)
 let package = Package(
     name: "trainingKit",
-    platforms: [.iOS(.v17), .watchOS(.v10), .macOS(.v14)],
+    platforms: [.iOS(.v26), .watchOS(.v26), .macOS(.v26)],
     products: [
         .library(name: "TrainingCore", targets: ["TrainingCore"]),
         .library(name: "TrainingHealthKit", targets: ["TrainingHealthKit"]),
@@ -57,7 +57,7 @@ let package = Package(
 )
 ```
 
-Platform note: HealthKit is nominally available on macOS 14+, but health data only appears there if the user has iCloud Health sync enabled, and WorkoutKit does not exist on macOS at all. Treat the Mac as a *viewer/planner* that receives data through `TrainingPersistence` + CloudKit rather than importing directly. Adapters are wrapped in `#if canImport(...)` and the Core store protocols are what the app talks to.
+Platform note: HealthKit is nominally available on macOS, but health data only appears there if the user has iCloud Health sync enabled, and WorkoutKit does not exist on macOS at all. Treat the Mac as a *viewer/planner* that receives data through `TrainingPersistence` + CloudKit rather than importing directly. Adapters are wrapped in `#if canImport(...)` and the Core store protocols are what the app talks to.
 
 ---
 

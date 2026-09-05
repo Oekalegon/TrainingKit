@@ -56,7 +56,7 @@ public struct TRIMPPlanEstimator: PlannedLoadEstimator {
             var blockTotal = 0.0
             for step in block.steps {
                 let duration = durationEstimator.duration(for: step, athlete: athlete)
-                let ratio = ratio(for: step.target, zoneModel: zoneModel)
+                let ratio = zoneModel.intensityRatio(for: step.target)
                 let weight = a * exp(b * ratio)
                 blockTotal += (duration / 60) * ratio * weight
             }
@@ -64,22 +64,5 @@ public struct TRIMPPlanEstimator: PlannedLoadEstimator {
         }
 
         return TrainingLoad(value: total, method: .estimatedFromPlan, confidence: confidence)
-    }
-
-    private func ratio(for target: IntensityTarget?, zoneModel: HeartRateZoneModel) -> Double {
-        guard let target else {
-            return zoneModel.zoneMidpointRatio(3) ?? 0.75
-        }
-        switch target {
-        case .heartRateZone(let zone):
-            return zoneModel.zoneMidpointRatio(zone) ?? zoneModel.zoneMidpointRatio(3) ?? 0.75
-        case .heartRateRange(let low, let high):
-            return (zoneModel.deltaHRRatio(for: low) + zoneModel.deltaHRRatio(for: high)) / 2
-        case .pace, .power:
-            // Approximation: MVP 1 has no pace/power zone model, so assume a threshold-adjacent effort.
-            return zoneModel.zoneMidpointRatio(4) ?? 0.85
-        case .rpe(let rpe):
-            return Double(rpe) / 10
-        }
     }
 }

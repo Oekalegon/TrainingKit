@@ -217,6 +217,24 @@ struct CycleLayoutBuilderTests {
         #expect(builder.layout(from: start, to: race, macro: macroWithBadOverride, meso: meso, athlete: athlete).isEmpty)
     }
 
+    @Test("a bad pattern on a disabled (microCount <= 0) block doesn't invalidate an otherwise-valid layout")
+    func disabledBlockWithBadPatternIsIgnored() {
+        let race = race()
+        let raceDay = calendar.startOfDay(for: raceDate)
+        let badPattern = MesocycleTemplate(name: "bad", microPhases: [.build], microLengthDays: 0)
+        let macroWithDisabledBlock = MacroTemplate(name: "Test", mesoBlocks: [
+            MacroTemplate.MesoBlock(phase: .peak, microCount: 0, pattern: badPattern), // disabled, shouldn't matter
+            MacroTemplate.MesoBlock(phase: .build, microCount: 4),
+        ])
+        let start = calendar.date(byAdding: .day, value: -27, to: raceDay)!
+
+        let cycles = builder.layout(from: start, to: race, macro: macroWithDisabledBlock, meso: meso, athlete: athlete)
+
+        let micros = cycles.filter { $0.level == .micro }
+        #expect(micros.count == 4)
+        #expect(!cycles.contains { $0.phase == .peak })
+    }
+
     @Test("two consecutive same-phase blocks produce two separate meso-level cycles, not one merged one")
     func consecutiveSamePhaseBlocksStaySeparate() {
         let race = race()

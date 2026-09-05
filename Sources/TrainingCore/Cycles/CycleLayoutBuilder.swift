@@ -58,7 +58,10 @@ public struct CycleLayoutBuilder: Sendable {
             Logging.series.warning("CycleLayoutBuilder.microcycles(from:to:macro:meso:athlete:) called with an empty macro template; returning none")
             return []
         }
-        guard macro.mesoBlocks.allSatisfy({ ($0.pattern ?? meso).microLengthDays > 0 }) else {
+        // Only blocks that will actually produce micros need a valid pattern — a microCount <= 0
+        // block is effectively disabled, so a stray bad pattern left on it shouldn't invalidate an
+        // otherwise-valid layout.
+        guard macro.mesoBlocks.allSatisfy({ $0.microCount <= 0 || ($0.pattern ?? meso).microLengthDays > 0 }) else {
             Logging.series.warning("CycleLayoutBuilder.microcycles(from:to:macro:meso:athlete:) called with a non-positive microLengthDays in some block's pattern; returning none")
             return []
         }

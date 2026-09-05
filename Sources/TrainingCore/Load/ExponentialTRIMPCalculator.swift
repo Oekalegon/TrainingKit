@@ -48,21 +48,15 @@ public struct ExponentialTRIMPCalculator: LoadCalculator {
             throw LoadError.missingHeartRateZoneSettings
         }
 
-        let samples = activity.heartRate.sorted { $0.time < $1.time }
         let zoneModel = HeartRateZoneModel(settings: settings)
         let (a, b) = coefficients.coefficients(for: athlete.sex)
+        let iterator = HeartRateSegmentIterator(gapThresholdSeconds: gapThresholdSeconds, zoneModel: zoneModel)
 
         var totalTRIMP = 0.0
-        for (previous, current) in zip(samples, samples.dropFirst()) {
-            let dtSeconds = current.time.timeIntervalSince(previous.time)
-            guard dtSeconds > 0, dtSeconds <= gapThresholdSeconds else { continue }
-
-            let previousRatio = zoneModel.deltaHRRatio(for: previous.bpm)
-            let currentRatio = zoneModel.deltaHRRatio(for: current.bpm)
-            let averageRatio = (previousRatio + currentRatio) / 2
-            let weight = a * exp(b * averageRatio)
-            let dtMinutes = dtSeconds / 60
-            totalTRIMP += dtMinutes * averageRatio * weight
+        for segment in iterator.segments(samples: activity.heartRate) {
+            let weight = a * exp(b * segment.averageRatio)
+            let dtMinutes = segment.duration / 60
+            totalTRIMP += dtMinutes * segment.averageRatio * weight
         }
 
         return TrainingLoad(value: totalTRIMP, method: .exponentialTRIMP, confidence: 1.0)

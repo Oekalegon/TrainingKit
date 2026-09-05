@@ -119,4 +119,30 @@ public struct HeartRateZoneModel: Sendable {
         4: 0.94...0.99,
         5: 0.99...1.20,
     ]
+
+    /// The heart-rate-reserve ratio a workout step's target intensity implies.
+    ///
+    /// Shared by ``TRIMPPlanEstimator`` (to weight planned TRIMP) and `StatisticsCalculator` (to
+    /// bucket a planned step into a zone for time-in-zone/distance projection) so the two can't
+    /// silently drift apart on what a `.pace`/`.power`/`.rpe` target is assumed to mean.
+    ///
+    /// `.pace`/`.power` approximate a threshold-adjacent effort (roughly zone 4) since MVP 1 has no
+    /// pace/power zone model; `.rpe(let rpe)` treats the Borg CR10 rating as a fraction of
+    /// heart-rate reserve directly (`rpe / 10`). A `nil` target, or an out-of-range `.heartRateZone`,
+    /// falls back to zone 3's midpoint.
+    public func intensityRatio(for target: IntensityTarget?) -> Double {
+        guard let target else {
+            return zoneMidpointRatio(3) ?? 0.75
+        }
+        switch target {
+        case .heartRateZone(let zone):
+            return zoneMidpointRatio(zone) ?? zoneMidpointRatio(3) ?? 0.75
+        case .heartRateRange(let low, let high):
+            return (deltaHRRatio(for: low) + deltaHRRatio(for: high)) / 2
+        case .pace, .power:
+            return zoneMidpointRatio(4) ?? 0.85
+        case .rpe(let rpe):
+            return Double(rpe) / 10
+        }
+    }
 }

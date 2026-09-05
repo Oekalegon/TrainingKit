@@ -86,6 +86,11 @@ public struct HeartRateZoneModel: Sendable {
     ]
 
     /// Zones 1 through 5 as a fraction of maximum heart rate.
+    ///
+    /// These percentages are intentionally identical to ``karvonenZoneRatioRanges`` — that's not
+    /// a copy-paste artifact. Both tables use the same commonly-quoted boundary percentages,
+    /// applied to a different reference heart rate (max vs. heart-rate reserve); if the two are
+    /// ever tuned independently based on updated sports-science guidance, update this comment.
     private static let maxHeartRateZonePercentRanges: [Int: ClosedRange<Double>] = [
         1: 0.50...0.60,
         2: 0.60...0.70,

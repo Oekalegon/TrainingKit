@@ -46,7 +46,11 @@ public struct DailyLoadSeries: Sendable {
             estimatedLoadByDay[day, default: 0] += load
         }
 
-        let allDays = Set(actualLoadByDay.keys).union(estimatedLoadByDay.keys)
+        // The range always includes `today`, even if the last actual/planned data is days away
+        // from it — otherwise a caller who stopped logging activities a while ago would get a
+        // series (and downstream CTL/ATL/TSB) that silently stops at the last data point instead
+        // of reflecting the detraining between that day and today.
+        let allDays = Set(actualLoadByDay.keys).union(estimatedLoadByDay.keys).union([todayStart])
         guard let firstDay = allDays.min(), let lastDay = allDays.max() else { return [] }
 
         var result: [DayLoad] = []

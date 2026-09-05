@@ -7,7 +7,14 @@ import Foundation
 /// In MVP 1 this only affects that merge rule; in MVP 3 the `(expected, actual)` pairs it
 /// produces become the training data for calibration.
 public struct PlanReconciler: Sendable {
-    public init() {}
+    /// Used only to tie-break candidate matches on duration; unlike ``TRIMPPlanEstimator`` this
+    /// doesn't need to compute intensity, only elapsed time. Shared with `TRIMPPlanEstimator` so
+    /// the two never silently disagree about how long a given workout is assumed to take.
+    public var durationEstimator: WorkoutDurationEstimator
+
+    public init(durationEstimator: WorkoutDurationEstimator = WorkoutDurationEstimator()) {
+        self.durationEstimator = durationEstimator
+    }
 
     /// Matches unlinked activities to unmatched plans on the same day and sport, tie-breaking on
     /// whichever candidate's planned duration is closest to the activity's actual duration.
@@ -25,7 +32,7 @@ public struct PlanReconciler: Sendable {
         let sportByWorkoutID = Dictionary(uniqueKeysWithValues: workouts.map { ($0.id, $0.sport) })
         var durationByWorkoutID: [UUID: TimeInterval] = [:]
         for workout in workouts {
-            durationByWorkoutID[workout.id] = plannedDuration(for: workout, athlete: athlete)
+            durationByWorkoutID[workout.id] = durationEstimator.duration(for: workout, athlete: athlete)
         }
 
         var activities = activities
@@ -62,32 +69,5 @@ public struct PlanReconciler: Sendable {
         }
 
         return (activities, plans)
-    }
-
-    /// A minimal duration estimate used only for tie-breaking candidate matches; unlike
-    /// ``TRIMPPlanEstimator`` this doesn't need to compute intensity, only elapsed time.
-    private func plannedDuration(for workout: StructuredWorkout, athlete: AthleteProfile) -> TimeInterval {
-        var total: TimeInterval = 0
-        for block in workout.blocks {
-            var blockTotal: TimeInterval = 0
-            for step in block.steps {
-                switch step.goal {
-                case .time(let interval):
-                    blockTotal += interval
-                case .distance(let meters):
-                    let zone: Int
-                    if case .heartRateZone(let value) = step.target {
-                        zone = value
-                    } else {
-                        zone = 3
-                    }
-                    blockTotal += athlete.paceModel.duration(forMeters: meters, atZone: zone)
-                case .open:
-                    blockTotal += 600
-                }
-            }
-            total += blockTotal * Double(block.repetitions)
-        }
-        return total
     }
 }

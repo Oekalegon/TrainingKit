@@ -75,6 +75,25 @@ struct DailyLoadSeriesTests {
         #expect(futureLoad!.load > 0)
     }
 
+    @Test("the series always extends through today, even when the last data is days away")
+    func seriesAlwaysReachesToday() {
+        let today = startOfDay(0, from: Date())
+        let workout = steadyWorkout()
+        let staleDay = startOfDay(-14, from: today)
+        let hr = (0...30).map { HeartRateSample(time: staleDay.addingTimeInterval(Double($0) * 60), bpm: 140) }
+        let activity = Activity(source: .manual, sport: .running, start: staleDay, duration: 1800, heartRate: hr)
+
+        let days = series.days(
+            activities: [activity], plans: [], workouts: [workout],
+            estimator: estimator, calculators: calculators, athlete: athlete, today: today
+        )
+
+        #expect(days.contains { $0.day == today })
+        #expect(days.last?.day == today)
+        // The gap days between the stale activity and today are backfilled with 0, not skipped.
+        #expect(days.count == 15)
+    }
+
     @Test("an activity just before local midnight doesn't leak into the next day")
     func timezoneBoundaryDoesNotLeak() {
         var nonUTCAthlete = athlete
@@ -95,7 +114,11 @@ struct DailyLoadSeriesTests {
             estimator: estimator, calculators: calculators, athlete: nonUTCAthlete, today: today
         )
 
-        #expect(days.count == 1)
+        // The series now always extends through `today` (10 days later), so this checks the
+        // activity landed on `localDayStart` specifically — not that the series stops there.
+        #expect(days.count == 11)
         #expect(days.first?.day == localDayStart)
+        let leakedDay = localDayStart.addingTimeInterval(86400)
+        #expect(!days.contains { $0.day == leakedDay && $0.load > 0 })
     }
 }

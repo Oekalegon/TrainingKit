@@ -9,18 +9,17 @@ import Foundation
 /// models exist.
 public struct TRIMPPlanEstimator: PlannedLoadEstimator {
     public var coefficients: TRIMPCoefficients
-    /// Duration assumed for `.open` steps, which have no explicit time or distance.
-    public var defaultOpenStepDuration: TimeInterval
+    public var durationEstimator: WorkoutDurationEstimator
     /// Estimate confidence relative to a measured load, used to mark this as `.estimatedFromPlan`.
     public var confidence: Double
 
     public init(
         coefficients: TRIMPCoefficients = TRIMPCoefficients(),
-        defaultOpenStepDuration: TimeInterval = 600,
+        durationEstimator: WorkoutDurationEstimator = WorkoutDurationEstimator(),
         confidence: Double = 0.7
     ) {
         self.coefficients = coefficients
-        self.defaultOpenStepDuration = defaultOpenStepDuration
+        self.durationEstimator = durationEstimator
         self.confidence = confidence
     }
 
@@ -30,6 +29,7 @@ public struct TRIMPPlanEstimator: PlannedLoadEstimator {
         // recorded yet, there's no ratio to compute against; return a zero-confidence zero rather
         // than making the protocol throwing for what should be a transient onboarding state.
         guard let settings = athlete.currentHeartRateZoneSettings else {
+            Logging.load.warning("estimatedLoad(for:athlete:) called with no heartRateZoneHistory recorded; returning a zero-confidence 0 rather than a real estimate for workout \(workout.id, privacy: .public)")
             return TrainingLoad(value: 0, method: .estimatedFromPlan, confidence: 0)
         }
         let zoneModel = HeartRateZoneModel(settings: settings)
@@ -39,7 +39,7 @@ public struct TRIMPPlanEstimator: PlannedLoadEstimator {
         for block in workout.blocks {
             var blockTotal = 0.0
             for step in block.steps {
-                let duration = duration(for: step, athlete: athlete)
+                let duration = durationEstimator.duration(for: step, athlete: athlete)
                 let ratio = ratio(for: step.target, zoneModel: zoneModel)
                 let weight = a * exp(b * ratio)
                 blockTotal += (duration / 60) * ratio * weight
@@ -48,23 +48,6 @@ public struct TRIMPPlanEstimator: PlannedLoadEstimator {
         }
 
         return TrainingLoad(value: total, method: .estimatedFromPlan, confidence: confidence)
-    }
-
-    private func duration(for step: WorkoutStep, athlete: AthleteProfile) -> TimeInterval {
-        switch step.goal {
-        case .time(let interval):
-            return interval
-        case .distance(let meters):
-            let zone = zoneNumber(for: step.target) ?? 3
-            return athlete.paceModel.duration(forMeters: meters, atZone: zone)
-        case .open:
-            return defaultOpenStepDuration
-        }
-    }
-
-    private func zoneNumber(for target: IntensityTarget?) -> Int? {
-        guard case .heartRateZone(let zone) = target else { return nil }
-        return zone
     }
 
     private func ratio(for target: IntensityTarget?, zoneModel: HeartRateZoneModel) -> Double {

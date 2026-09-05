@@ -36,7 +36,10 @@ public struct PlanEvaluator: Sendable {
         cycles: [TrainingCycle] = [],
         guardrails: PlanGuardrails = PlanGuardrails()
     ) -> PlanEvaluation {
-        let metricsByDay = Dictionary(uniqueKeysWithValues: metrics.map { ($0.day, $0) })
+        // `uniquingKeysWith` rather than `uniqueKeysWithValues:` — the latter traps if `metrics`
+        // ever contains two entries for the same day, which nothing here enforces against caller
+        // input; keeping the later entry mirrors "last write wins" for any accidental duplicate.
+        let metricsByDay = Dictionary(metrics.map { ($0.day, $0) }, uniquingKeysWith: { _, latest in latest })
 
         var findings: [PlanFinding] = []
         findings += ctlRampFindings(metrics: metrics, guardrails: guardrails)
@@ -56,11 +59,13 @@ public struct PlanEvaluator: Sendable {
         return PlanEvaluation(findings: findings.sorted { $0.day < $1.day })
     }
 
-    /// CTL[d] − CTL[d−7] per day, flagged when it exceeds `maxCTLRampPerWeek`.
+    /// CTL[d] − CTL[d−7] per day, flagged when it exceeds `maxCTLRampPerWeek`. Warming-up days are
+    /// skipped — CTL mechanically ramps up from zero during warmup regardless of whether training
+    /// load is actually excessive, so this would otherwise false-positive on every fresh series.
     private func ctlRampFindings(metrics: [FitnessMetrics], guardrails: PlanGuardrails) -> [PlanFinding] {
         guard metrics.count > 7 else { return [] }
         var findings: [PlanFinding] = []
-        for index in 7..<metrics.count {
+        for index in 7..<metrics.count where !metrics[index].isWarmingUp {
             let ramp = metrics[index].ctl - metrics[index - 7].ctl
             if ramp > guardrails.maxCTLRampPerWeek {
                 findings.append(PlanFinding(day: metrics[index].day, rule: .ctlRamp, severity: .risk, value: ramp, threshold: guardrails.maxCTLRampPerWeek))
@@ -70,10 +75,12 @@ public struct PlanEvaluator: Sendable {
     }
 
     /// ATL[d] / CTL[d] per day; exceeding the max is `.risk`, undershooting the min is `.warning`
-    /// ("below this = detraining, not risk" per the guardrail's own documentation).
+    /// ("below this = detraining, not risk" per the guardrail's own documentation). Warming-up days
+    /// are skipped — ATL (τ=7) ramps faster than CTL (τ=42) from a cold start, inflating the ratio
+    /// independent of the actual training load.
     private func atlToCTLRatioFindings(metrics: [FitnessMetrics], guardrails: PlanGuardrails) -> [PlanFinding] {
         var findings: [PlanFinding] = []
-        for entry in metrics where entry.ctl > 0 {
+        for entry in metrics where entry.ctl > 0 && !entry.isWarmingUp {
             let ratio = entry.atl / entry.ctl
             if ratio > guardrails.maxATLtoCTLRatio {
                 findings.append(PlanFinding(day: entry.day, rule: .atlToCTLRatio, severity: .risk, value: ratio, threshold: guardrails.maxATLtoCTLRatio))

@@ -17,9 +17,10 @@ struct PlanEvaluatorCycleFreeRulesTests {
         tsb: Double = 0,
         monotony: Double = 1.0,
         strain: Double = 100,
-        load: Double = 50
+        load: Double = 50,
+        isWarmingUp: Bool = false
     ) -> FitnessMetrics {
-        FitnessMetrics(day: day(offset), load: load, ctl: ctl, atl: atl, tsb: tsb, monotony: monotony, strain: strain, isProjected: false, isWarmingUp: false)
+        FitnessMetrics(day: day(offset), load: load, ctl: ctl, atl: atl, tsb: tsb, monotony: monotony, strain: strain, isProjected: false, isWarmingUp: isWarmingUp)
     }
 
     // MARK: - CTL ramp
@@ -43,6 +44,16 @@ struct PlanEvaluatorCycleFreeRulesTests {
     func ctlRampWithinThreshold() {
         // Only day 7 has a day-7 predecessor to compare against; its ramp is 3.5, under the 6 threshold.
         let metrics = (0..<8).map { metric($0, ctl: 50 + Double($0) * 0.5) }
+
+        let evaluation = evaluator.evaluate(metrics, races: [])
+
+        #expect(!evaluation.findings.contains { $0.rule == .ctlRamp })
+    }
+
+    @Test("a CTL ramp during warmup doesn't fire, even though the raw ramp exceeds the threshold")
+    func ctlRampSkipsWarmingUpDays() {
+        var metrics = (0..<8).map { metric($0, ctl: 50, isWarmingUp: true) }
+        metrics[7] = metric(7, ctl: 57, isWarmingUp: true) // would be a risk finding if not warming up
 
         let evaluation = evaluator.evaluate(metrics, races: [])
 
@@ -75,6 +86,29 @@ struct PlanEvaluatorCycleFreeRulesTests {
         let evaluation = evaluator.evaluate(metrics, races: [])
 
         #expect(!evaluation.findings.contains { $0.rule == .atlToCTLRatio })
+    }
+
+    @Test("an ATL/CTL ratio during warmup doesn't fire, even though the raw ratio exceeds the max")
+    func atlToCTLRatioSkipsWarmingUpDays() {
+        let metrics = [metric(0, ctl: 50, atl: 80, isWarmingUp: true)] // would be risk if not warming up
+
+        let evaluation = evaluator.evaluate(metrics, races: [])
+
+        #expect(!evaluation.findings.contains { $0.rule == .atlToCTLRatio })
+    }
+
+    // MARK: - Duplicate days
+
+    @Test("two metrics entries sharing a day don't crash evaluate")
+    func duplicateDayDoesNotCrash() {
+        let metrics = [
+            metric(0, ctl: 40),
+            FitnessMetrics(day: day(0), load: 60, ctl: 41, atl: 42, tsb: 0, monotony: 1, strain: 50, isProjected: false, isWarmingUp: false),
+        ]
+
+        let evaluation = evaluator.evaluate(metrics, races: [])
+
+        #expect(evaluation.findings.isEmpty)
     }
 
     // MARK: - Monotony

@@ -21,8 +21,9 @@ extension PlanEvaluator {
     }
 
     /// A build-phase micro's total load relative to the previous build-phase micro (skipping over
-    /// any recovery micros in between). Below 0% is ``Severity/warning`` (the plan isn't building);
-    /// above `maxBuildProgressionFraction` is ``Severity/risk`` (too aggressive a jump).
+    /// any recovery micros in between). Below 0% is ``Severity/info`` (the plan isn't building, but
+    /// that alone isn't a trend worth a second look); above `maxBuildProgressionFraction` is
+    /// ``Severity/risk`` (too aggressive a jump).
     func buildProgressionFindings(cycles: [TrainingCycle], metrics: [FitnessMetrics], guardrails: PlanGuardrails) -> [PlanFinding] {
         var findings: [PlanFinding] = []
         var previousBuildLoad: Double?
@@ -33,7 +34,7 @@ extension PlanEvaluator {
             guard let previousLoad = previousBuildLoad, previousLoad > 0 else { continue }
             let fraction = (load - previousLoad) / previousLoad
             if fraction < 0 {
-                findings.append(PlanFinding(day: micro.dateRange.lowerBound, rule: .buildProgression, severity: .warning, value: fraction, threshold: 0))
+                findings.append(PlanFinding(day: micro.dateRange.lowerBound, rule: .buildProgression, severity: .info, value: fraction, threshold: 0))
             } else if fraction > guardrails.maxBuildProgressionFraction {
                 findings.append(PlanFinding(day: micro.dateRange.lowerBound, rule: .buildProgression, severity: .risk, value: fraction, threshold: guardrails.maxBuildProgressionFraction))
             }
@@ -42,13 +43,15 @@ extension PlanEvaluator {
     }
 
     /// CTL gain across a base/build meso, flagged when it falls short of `minCTLGainPerMeso` — a
-    /// "safe" plan that's actually flat.
+    /// "safe" plan that's actually flat. Skipped if either boundary day is still warming up, since
+    /// CTL there hasn't settled enough to make "gain" meaningful.
     func mesoProgressFindings(cycles: [TrainingCycle], metricsByDay: [Date: FitnessMetrics], guardrails: PlanGuardrails) -> [PlanFinding] {
         cycles.filter { $0.level == .meso && ($0.phase == .base || $0.phase == .build) }.compactMap { meso in
-            guard let ctlStart = metricsByDay[meso.dateRange.lowerBound]?.ctl,
-                  let ctlEnd = metricsByDay[meso.dateRange.upperBound]?.ctl
+            guard let start = metricsByDay[meso.dateRange.lowerBound],
+                  let end = metricsByDay[meso.dateRange.upperBound],
+                  !start.isWarmingUp, !end.isWarmingUp
             else { return nil }
-            let gain = ctlEnd - ctlStart
+            let gain = end.ctl - start.ctl
             guard gain < guardrails.minCTLGainPerMeso else { return nil }
             return PlanFinding(day: meso.dateRange.lowerBound, rule: .mesoProgress, severity: .risk, value: gain, threshold: guardrails.minCTLGainPerMeso)
         }
@@ -56,18 +59,22 @@ extension PlanEvaluator {
 
     /// CTL drop across a taper meso (flagged past `maxTaperCTLDropFraction`) and whether TSB
     /// actually rose across it (flagged if it didn't) — "taper landed: positive but not so high
-    /// that fitness was lost."
+    /// that fitness was lost." The two checks are independent: a missing/zero CTL precondition for
+    /// the drop check doesn't suppress the TSB check, which doesn't depend on CTL at all. Skipped
+    /// if either boundary day is still warming up.
     func taperShapeFindings(cycles: [TrainingCycle], metricsByDay: [Date: FitnessMetrics], guardrails: PlanGuardrails) -> [PlanFinding] {
         var findings: [PlanFinding] = []
         for meso in cycles where meso.level == .meso && meso.phase == .taper {
             guard let start = metricsByDay[meso.dateRange.lowerBound],
                   let end = metricsByDay[meso.dateRange.upperBound],
-                  start.ctl > 0
+                  !start.isWarmingUp, !end.isWarmingUp
             else { continue }
 
-            let dropFraction = (start.ctl - end.ctl) / start.ctl
-            if dropFraction > guardrails.maxTaperCTLDropFraction {
-                findings.append(PlanFinding(day: meso.dateRange.lowerBound, rule: .taperShape, severity: .risk, value: dropFraction, threshold: guardrails.maxTaperCTLDropFraction))
+            if start.ctl > 0 {
+                let dropFraction = (start.ctl - end.ctl) / start.ctl
+                if dropFraction > guardrails.maxTaperCTLDropFraction {
+                    findings.append(PlanFinding(day: meso.dateRange.lowerBound, rule: .taperShape, severity: .risk, value: dropFraction, threshold: guardrails.maxTaperCTLDropFraction))
+                }
             }
 
             let tsbRise = end.tsb - start.tsb

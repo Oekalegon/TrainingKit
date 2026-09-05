@@ -16,9 +16,9 @@ struct PlanEvaluatorCycleAwareRulesTests {
 
     /// One `FitnessMetrics` entry per day of `week`, each contributing `dailyLoad` (so the week's
     /// total load is `dailyLoad * 7`), with `ctl`/`tsb` only meaningful on the week's boundary days.
-    private func metricsForWeek(_ weekIndex: Int, dailyLoad: Double, ctl: Double = 50, tsb: Double = 0) -> [FitnessMetrics] {
+    private func metricsForWeek(_ weekIndex: Int, dailyLoad: Double, ctl: Double = 50, tsb: Double = 0, isWarmingUp: Bool = false) -> [FitnessMetrics] {
         (0..<7).map {
-            FitnessMetrics(day: day(weekIndex * 7 + $0), load: dailyLoad, ctl: ctl, atl: ctl, tsb: tsb, monotony: 1, strain: dailyLoad, isProjected: false, isWarmingUp: false)
+            FitnessMetrics(day: day(weekIndex * 7 + $0), load: dailyLoad, ctl: ctl, atl: ctl, tsb: tsb, monotony: 1, strain: dailyLoad, isProjected: false, isWarmingUp: isWarmingUp)
         }
     }
 
@@ -66,14 +66,14 @@ struct PlanEvaluatorCycleAwareRulesTests {
 
     // MARK: - Build progression
 
-    @Test("build progression too aggressive fires risk; negative progression fires warning; skips recovery micros in between")
+    @Test("build progression too aggressive fires risk; negative progression fires info; skips recovery micros in between")
     func buildProgressionBounds() {
         let mesoID = UUID()
         let cycles = [
             micro(week: 0, phase: .build, parentID: mesoID), // baseline: 100
             micro(week: 1, phase: .recovery, parentID: mesoID), // skipped when comparing builds
             micro(week: 2, phase: .build, parentID: mesoID), // +50% vs week 0 -> risk
-            micro(week: 3, phase: .build, parentID: mesoID), // -20% vs week 2 -> warning
+            micro(week: 3, phase: .build, parentID: mesoID), // -20% vs week 2 -> info
         ]
         let metrics = metricsForWeek(0, dailyLoad: 100)
             + metricsForWeek(1, dailyLoad: 20)
@@ -85,7 +85,7 @@ struct PlanEvaluatorCycleAwareRulesTests {
         let findings = evaluation.findings.filter { $0.rule == .buildProgression }
         #expect(findings.count == 2)
         #expect(findings.first { $0.day == week(2).lowerBound }?.severity == .risk)
-        #expect(findings.first { $0.day == week(3).lowerBound }?.severity == .warning)
+        #expect(findings.first { $0.day == week(3).lowerBound }?.severity == .info)
     }
 
     // MARK: - Meso progress
@@ -120,6 +120,20 @@ struct PlanEvaluatorCycleAwareRulesTests {
         #expect(!evaluation.findings.contains { $0.rule == .mesoProgress })
     }
 
+    @Test("meso progress is skipped when either boundary day is still warming up")
+    func mesoProgressSkipsWarmingUpBoundary() {
+        let macroID = UUID()
+        let meso = TrainingCycle(level: .meso, phase: .build, name: "Meso 1", dateRange: week(0), parentID: macroID)
+        // Same insufficient-gain shape as mesoProgressInsufficientGain, but the end boundary is
+        // still warming up — should not fire even though the raw gain is below the minimum.
+        var metrics = metricsForWeek(0, dailyLoad: 50, ctl: 50, isWarmingUp: true)
+        metrics[metrics.count - 1] = FitnessMetrics(day: metrics.last!.day, load: 50, ctl: 51, atl: 50, tsb: 0, monotony: 1, strain: 50, isProjected: false, isWarmingUp: true)
+
+        let evaluation = evaluator.evaluate(metrics, races: [], cycles: [meso])
+
+        #expect(!evaluation.findings.contains { $0.rule == .mesoProgress })
+    }
+
     // MARK: - Taper shape
 
     @Test("too much CTL dropped across a taper meso fires risk, and TSB not rising fires warning")
@@ -144,6 +158,33 @@ struct PlanEvaluatorCycleAwareRulesTests {
         var metrics = metricsForWeek(0, dailyLoad: 20, ctl: 50, tsb: 0)
         // CTL drops only 4% and TSB rises.
         metrics[6] = FitnessMetrics(day: day(6), load: 20, ctl: 48, atl: 30, tsb: 18, monotony: 1, strain: 20, isProjected: false, isWarmingUp: false)
+
+        let evaluation = evaluator.evaluate(metrics, races: [], cycles: [taper])
+
+        #expect(!evaluation.findings.contains { $0.rule == .taperShape })
+    }
+
+    @Test("TSB-not-rising still fires even when the CTL-drop check can't run (start CTL is zero)")
+    func taperShapeTSBCheckIsIndependentOfCTLCheck() {
+        let macroID = UUID()
+        let taper = TrainingCycle(level: .meso, phase: .taper, name: "Taper", dateRange: week(0), parentID: macroID)
+        var metrics = metricsForWeek(0, dailyLoad: 20, ctl: 0, tsb: 0)
+        // Start CTL is 0 (the drop-fraction check can't divide by it), but TSB still doesn't rise.
+        metrics[6] = FitnessMetrics(day: day(6), load: 20, ctl: 0, atl: 0, tsb: -2, monotony: 1, strain: 20, isProjected: false, isWarmingUp: false)
+
+        let evaluation = evaluator.evaluate(metrics, races: [], cycles: [taper])
+
+        let findings = evaluation.findings.filter { $0.rule == .taperShape }
+        #expect(findings.count == 1)
+        #expect(findings.first?.severity == .warning)
+    }
+
+    @Test("taper shape is skipped when either boundary day is still warming up")
+    func taperShapeSkipsWarmingUpBoundary() {
+        let macroID = UUID()
+        let taper = TrainingCycle(level: .meso, phase: .taper, name: "Taper", dateRange: week(0), parentID: macroID)
+        var metrics = metricsForWeek(0, dailyLoad: 20, ctl: 50, tsb: 0, isWarmingUp: true)
+        metrics[6] = FitnessMetrics(day: day(6), load: 20, ctl: 40, atl: 30, tsb: -2, monotony: 1, strain: 20, isProjected: false, isWarmingUp: true)
 
         let evaluation = evaluator.evaluate(metrics, races: [], cycles: [taper])
 

@@ -24,6 +24,15 @@ public struct ActivitySummary: Identifiable, Sendable, Hashable {
     public let load: TrainingLoad
 
     /// Creates an activity summary.
+    ///
+    /// - Parameters:
+    ///   - activityID: The summarized activity's id.
+    ///   - sport: The summarized activity's sport.
+    ///   - distanceMeters: Total distance covered, if the activity reports one.
+    ///   - movingTime: How long the activity lasted.
+    ///   - averageHeartRateBPM: Mean heart rate across the activity's samples, or `nil` if empty.
+    ///   - timeInZone: Seconds spent in each heart-rate zone.
+    ///   - load: The activity's training load, from the first calculator that succeeds for it.
     public init(
         activityID: UUID,
         sport: Sport,

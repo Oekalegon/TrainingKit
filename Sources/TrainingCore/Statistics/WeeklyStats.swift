@@ -34,6 +34,23 @@ public struct WeeklyStats: Identifiable, Sendable, Hashable {
     public let delta: WeeklyDelta?
 
     /// Creates a weekly statistic.
+    ///
+    /// - Parameters:
+    ///   - weekStart: Start of the week, in the athlete's timezone.
+    ///   - isProjected: `true` if any part of this week's totals came from planned activities
+    ///     rather than completed ones.
+    ///   - bySport: Totals broken down by sport.
+    ///   - totalDistanceMeters: Total distance covered across every sport.
+    ///   - totalTime: Total time across every sport.
+    ///   - totalLoad: Total training load across every sport.
+    ///   - timeInZone: Seconds spent in each heart-rate zone across every activity in the week.
+    ///   - activityCount: How many activities (actual or, for a projected week, planned)
+    ///     contributed.
+    ///   - longestActivityTime: The longest single activity's duration in the week, or 0 if there
+    ///     were none.
+    ///   - longestActivityDistanceMeters: The longest single activity's distance in the week, or
+    ///     `nil` if none reported one.
+    ///   - delta: The change versus the previous week, or `nil` for the first week in the series.
     public init(
         weekStart: Date,
         isProjected: Bool,

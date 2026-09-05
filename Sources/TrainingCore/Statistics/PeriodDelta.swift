@@ -19,6 +19,14 @@ public struct PeriodDelta: Sendable, Hashable {
     public let loadFraction: Double
 
     /// Creates a period delta.
+    ///
+    /// - Parameters:
+    ///   - distanceMeters: Absolute change in total distance, in meters.
+    ///   - distanceFraction: Relative change in total distance, e.g. `0.12` for +12%.
+    ///   - time: Absolute change in total time.
+    ///   - timeFraction: Relative change in total time.
+    ///   - load: Absolute change in total load.
+    ///   - loadFraction: Relative change in total load.
     public init(
         distanceMeters: Double,
         distanceFraction: Double,

@@ -23,6 +23,7 @@ See `docs/design/trainingKit-design.md` in the package repository for the full m
 - ``HeartRateZoneModel``
 - ``HeartRateZoneMethod``
 - ``HeartRateZoneSettings``
+- ``TanakaHRMaxEstimator``
 
 ### Activity
 
@@ -70,11 +71,38 @@ See `docs/design/trainingKit-design.md` in the package repository for the full m
 - ``FitnessMetrics``
 - ``FitnessMetricsCalculator``
 
+### Statistics
+
+- ``ActivitySummary``
+- ``TimeInZone``
+- ``WeeklyStats``
+- ``WeeklyDelta``
+- ``SportWeekStats``
+- ``PeriodStats``
+- ``PeriodDelta``
+- ``SportPeriodStats``
+- ``StatisticsCalculator``
+
 ### Periodisation
 
 - ``TrainingCycle``
 - ``CycleLevel``
 - ``CyclePhase``
+- ``Microcycle``
+- ``MesocycleTemplate``
+- ``MacroTemplate``
+- ``CycleLayoutBuilder``
+- ``Race``
+- ``RacePriority``
+
+### Plan Evaluation
+
+- ``PlanEvaluator``
+- ``PlanEvaluation``
+- ``PlanFinding``
+- ``PlanRule``
+- ``PlanGuardrails``
+- ``Severity``
 
 ### Stores
 
@@ -86,6 +114,9 @@ See `docs/design/trainingKit-design.md` in the package repository for the full m
 - ``AthleteStore``
 - ``InMemoryStore``
 - ``StoreSet``
+- ``ImportAnchor``
+- ``ImportResult``
+- ``ActivityImporting``
 
 ### Facade
 

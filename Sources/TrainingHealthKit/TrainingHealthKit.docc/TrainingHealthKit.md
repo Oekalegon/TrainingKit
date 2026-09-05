@@ -11,3 +11,17 @@ Imports completed activities and heart-rate samples from HealthKit, plus resting
 ### Overview
 
 - ``TrainingHealthKit``
+
+### Import
+
+- ``HealthKitActivityImporter``
+- ``HealthKitImportError``
+
+### Athlete
+
+- ``HealthKitAthleteReader``
+- ``HealthKitAthleteSnapshot``
+
+### Authorization
+
+- ``HealthKitAuthorization``

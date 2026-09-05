@@ -12,6 +12,7 @@ public actor InMemoryStore: ActivityStore, PlanStore, WorkoutLibraryStore, Cycle
     private var workoutsByID: [UUID: StructuredWorkout] = [:]
     private var cyclesByID: [UUID: TrainingCycle] = [:]
     private var profile: AthleteProfile?
+    private var anchor: ImportAnchor?
 
     /// Creates an empty in-memory store.
     public init() {}
@@ -38,6 +39,12 @@ public actor InMemoryStore: ActivityStore, PlanStore, WorkoutLibraryStore, Cycle
     /// See ``ActivityStore/activity(id:)``.
     public func activity(id: UUID) async throws -> Activity? {
         activitiesByID[id]
+    }
+
+    /// See ``ActivityStore/deleteActivity(source:)``.
+    public func deleteActivity(source: ActivitySource) async throws {
+        guard let id = activitiesByID.values.first(where: { $0.source == source })?.id else { return }
+        activitiesByID.removeValue(forKey: id)
     }
 
     // MARK: PlanStore
@@ -148,5 +155,15 @@ public actor InMemoryStore: ActivityStore, PlanStore, WorkoutLibraryStore, Cycle
     /// See ``AthleteStore/save(_:)``.
     public func save(_ profile: AthleteProfile) async throws {
         self.profile = profile
+    }
+
+    /// See ``AthleteStore/importAnchor()``.
+    public func importAnchor() async throws -> ImportAnchor? {
+        anchor
+    }
+
+    /// See ``AthleteStore/saveImportAnchor(_:)``.
+    public func saveImportAnchor(_ anchor: ImportAnchor?) async throws {
+        self.anchor = anchor
     }
 }

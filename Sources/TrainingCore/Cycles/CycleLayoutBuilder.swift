@@ -6,8 +6,10 @@ import Foundation
 /// The algorithm works backwards from `race.date`:
 /// 1. The very last micro (the one covering race day itself) is always phase `.race`.
 /// 2. Every other micro in a `.taper`-phase ``MacroTemplate/MesoBlock`` is phase `.taper`.
-/// 3. Every micro in any other block cycles through `meso.microPhases` (e.g. "3:1"'s
-///    `build, build, build, recovery`), restarting the pattern at each block's boundary.
+/// 3. Every micro in any other block cycles through its pattern's `microPhases` (e.g. "3:1"'s
+///    `build, build, build, recovery`), restarting the pattern at each block's boundary. The
+///    pattern is `meso`, unless the block sets its own ``MacroTemplate/MesoBlock/pattern``, so a
+///    single layout can mix e.g. a "2:1" base phase with a "3:1" build phase.
 /// 4. Filling continues backward through every block in `macro.mesoBlocks` until reaching `from`.
 ///    If `from` falls in the middle of the oldest surviving block, that block (and only that one)
 ///    is trimmed short rather than starting before `from`; if `from` falls so close to the race
@@ -32,11 +34,13 @@ public struct CycleLayoutBuilder: Sendable {
     ///     documentation).
     ///   - race: The race the layout tapers into.
     ///   - macro: The ordered phase/length structure to fill backward from the race.
-    ///   - meso: The repeating build/recovery pattern applied within every non-taper, non-race
-    ///     block. `meso.microLengthDays` must be positive.
+    ///   - meso: The default build/recovery pattern applied within every non-taper, non-race block
+    ///     that doesn't set its own ``MacroTemplate/MesoBlock/pattern``. Every pattern actually
+    ///     used (this one, and any per-block overrides) must have a positive `microLengthDays`.
     ///   - athlete: Supplies the timezone used for all day-granular boundaries.
     /// - Returns: One ``Microcycle`` per surviving micro, oldest first. Empty if `macro` has no
-    ///   blocks, if `meso.microLengthDays` isn't positive, or if `race.date` is before `start`.
+    ///   blocks, if any pattern in use has a non-positive `microLengthDays`, or if `race.date` is
+    ///   before `start`.
     public func microcycles(
         from start: Date,
         to race: Race,
@@ -54,8 +58,11 @@ public struct CycleLayoutBuilder: Sendable {
             Logging.series.warning("CycleLayoutBuilder.microcycles(from:to:macro:meso:athlete:) called with an empty macro template; returning none")
             return []
         }
-        guard meso.microLengthDays > 0 else {
-            Logging.series.warning("CycleLayoutBuilder.microcycles(from:to:macro:meso:athlete:) called with a non-positive microLengthDays (\(meso.microLengthDays)); returning none")
+        // Only blocks that will actually produce micros need a valid pattern — a microCount <= 0
+        // block is effectively disabled, so a stray bad pattern left on it shouldn't invalidate an
+        // otherwise-valid layout.
+        guard macro.mesoBlocks.allSatisfy({ $0.microCount <= 0 || ($0.pattern ?? meso).microLengthDays > 0 }) else {
+            Logging.series.warning("CycleLayoutBuilder.microcycles(from:to:macro:meso:athlete:) called with a non-positive microLengthDays in some block's pattern; returning none")
             return []
         }
         guard raceDay >= startDay else {
@@ -74,8 +81,8 @@ public struct CycleLayoutBuilder: Sendable {
     ///   - race: The race the layout tapers into; every generated cycle's `targetRaceID` is set to
     ///     `race.id` (macro and meso levels only, per ``TrainingCycle/targetRaceID``).
     ///   - macro: The ordered phase/length structure to fill backward from the race.
-    ///   - meso: The repeating build/recovery pattern applied within every non-taper, non-race
-    ///     block.
+    ///   - meso: The default build/recovery pattern; see
+    ///     ``microcycles(from:to:macro:meso:athlete:)``.
     ///   - athlete: Supplies the timezone used for all day-granular boundaries.
     /// - Returns: One macro-level ``TrainingCycle``, one meso-level cycle per surviving
     ///   ``MacroTemplate/MesoBlock``, and one micro-level cycle per surviving ``Microcycle`` —
@@ -95,7 +102,8 @@ public struct CycleLayoutBuilder: Sendable {
     }
 
     /// Generates every micro implied by `macro`, working backward from `raceDay`, then returns
-    /// them in chronological order.
+    /// them in chronological order. Each block uses its own ``MacroTemplate/MesoBlock/pattern``
+    /// when set, falling back to `meso` otherwise — so a single layout can mix patterns.
     private func microSlots(macro: MacroTemplate, meso: MesocycleTemplate, raceDay: Date, calendar: Calendar) -> [Microcycle] {
         var slots: [Microcycle] = []
         var cursorEnd = raceDay
@@ -103,13 +111,14 @@ public struct CycleLayoutBuilder: Sendable {
         for blockIndex in macro.mesoBlocks.indices.reversed() {
             let block = macro.mesoBlocks[blockIndex]
             guard block.microCount > 0 else { continue }
+            let pattern = block.pattern ?? meso
 
             for positionFromBlockEnd in 0..<block.microCount {
                 let positionInBlock = block.microCount - 1 - positionFromBlockEnd
-                let lowerBound = calendar.date(byAdding: .day, value: -(meso.microLengthDays - 1), to: cursorEnd)!
-                let phase = phase(forPositionInBlock: positionInBlock, block: block, meso: meso, isRaceMicro: slots.isEmpty)
+                let lowerBound = calendar.date(byAdding: .day, value: -(pattern.microLengthDays - 1), to: cursorEnd)!
+                let phase = phase(forPositionInBlock: positionInBlock, block: block, meso: pattern, isRaceMicro: slots.isEmpty)
                 slots.append(Microcycle(dateRange: lowerBound...cursorEnd, phase: phase, mesoBlockIndex: blockIndex))
-                cursorEnd = calendar.date(byAdding: .day, value: -meso.microLengthDays, to: cursorEnd)!
+                cursorEnd = calendar.date(byAdding: .day, value: -pattern.microLengthDays, to: cursorEnd)!
             }
         }
 

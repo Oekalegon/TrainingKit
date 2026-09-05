@@ -1,0 +1,89 @@
+name: Deploy DocC to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build documentation
+    runs-on: macos-26
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Resolve dependencies
+        run: swift package resolve
+
+      - name: Generate documentation archives
+        run: |
+          set -euo pipefail
+          mkdir -p .build/docc-archives
+          targets=(
+            TrainingCore
+            TrainingHealthKit
+            TrainingWorkoutKit
+            TrainingPersistence
+            TrainingTools
+            TrainingToolsAnthropic
+            TrainingToolsFoundationModels
+          )
+          for target in "${targets[@]}"; do
+            swift package generate-documentation \
+              --target "$target" \
+              --output-path ".build/docc-archives/$target.doccarchive"
+          done
+
+      - name: Merge archives
+        run: |
+          xcrun docc merge .build/docc-archives/*.doccarchive \
+            --output-path .build/merged.doccarchive
+
+      - name: Transform for static hosting
+        run: |
+          xcrun docc process-archive transform-for-static-hosting \
+            .build/merged.doccarchive \
+            --output-path .build/docs-site \
+            --hosting-base-path TrainingKit
+
+      - name: Add landing page redirect
+        run: |
+          cat <<'HTML' > .build/docs-site/index.html
+          <!DOCTYPE html>
+          <html>
+            <head>
+              <meta http-equiv="refresh" content="0; url=./documentation/">
+            </head>
+            <body>
+              <p><a href="./documentation/">Redirecting to documentation…</a></p>
+            </body>
+          </html>
+          HTML
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: .build/docs-site
+
+  deploy:
+    name: Deploy to GitHub Pages
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

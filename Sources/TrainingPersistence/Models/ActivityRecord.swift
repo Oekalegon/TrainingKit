@@ -15,9 +15,13 @@ import SwiftData
 /// is instead enforced by ``SwiftDataStore``, which always looks a record up by `id` before
 /// deciding whether to update it or insert a new one.
 ///
-/// Public so a host app can include it in a `Schema`/`ModelContainer` of its own composition
-/// (alongside its own models, or with a different `ModelConfiguration`) rather than being
-/// restricted to ``TrainingPersistenceContainer``'s.
+/// The class is public — and `id` with it — so a host app can include it in a `Schema`/
+/// `ModelContainer` of its own composition (alongside its own models, or with a different
+/// `ModelConfiguration`) rather than being restricted to ``TrainingPersistenceContainer``'s, and
+/// run its own lightweight id-based queries against it. `sourceKey` and `payload` stay internal:
+/// they're a storage detail of the JSON-blob encoding this file's doc explains above, not a shape
+/// external code should read or write directly — ``init(activity:)``/``toActivity()``/
+/// ``update(from:)`` are the sanctioned way in and out.
 @Model
 public final class ActivityRecord {
     /// Mirrors `Activity.id`.
@@ -25,17 +29,11 @@ public final class ActivityRecord {
     /// A stable string key derived from `Activity.source`, so
     /// `ActivityStore.activity(source:)`/`deleteActivity(source:)` can look a record up without
     /// decoding `payload`.
-    public var sourceKey: String = ""
+    var sourceKey: String = ""
     /// The JSON-encoded `Activity`.
-    public var payload: Data = Data()
+    var payload: Data = Data()
 
-    /// Creates an activity record directly from its stored fields.
-    ///
-    /// - Parameters:
-    ///   - id: Mirrors `Activity.id`.
-    ///   - sourceKey: A stable string key derived from `Activity.source`.
-    ///   - payload: The JSON-encoded `Activity`.
-    public init(id: UUID, sourceKey: String, payload: Data) {
+    init(id: UUID, sourceKey: String, payload: Data) {
         self.id = id
         self.sourceKey = sourceKey
         self.payload = payload

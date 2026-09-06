@@ -3,21 +3,16 @@ import Foundation
 import SwiftData
 
 /// The persisted row for a `PlannedActivity`. See ``ActivityRecord`` for why this is a JSON
-/// payload plus one indexed lookup field rather than one attribute per model field, and why it's
-/// public.
+/// payload plus one indexed lookup field rather than one attribute per model field, why the class
+/// and `id` are public, and why `payload` isn't.
 @Model
 public final class PlannedActivityRecord {
     /// Mirrors `PlannedActivity.id`.
     public var id: UUID = UUID()
     /// The JSON-encoded `PlannedActivity`.
-    public var payload: Data = Data()
+    var payload: Data = Data()
 
-    /// Creates a planned-activity record directly from its stored fields.
-    ///
-    /// - Parameters:
-    ///   - id: Mirrors `PlannedActivity.id`.
-    ///   - payload: The JSON-encoded `PlannedActivity`.
-    public init(id: UUID, payload: Data) {
+    init(id: UUID, payload: Data) {
         self.id = id
         self.payload = payload
     }

@@ -20,12 +20,16 @@ public enum TrainingPersistenceContainer {
     /// - Parameters:
     ///   - cloudKitDatabase: Defaults to `.automatic`, syncing via the app's default CloudKit
     ///     container (set up via the app target's own iCloud entitlement — this package has no
-    ///     opinion on which container). Pass `.none` for a local-only store.
+    ///     opinion on which container). Pass `.none` for a local-only store — required for tests
+    ///     and previews, and for any target that hasn't added the iCloud/CloudKit capability yet:
+    ///     `.automatic` without that entitlement throws here rather than silently falling back to
+    ///     local storage.
     ///   - isStoredInMemoryOnly: `true` for a throwaway container (tests, previews) that never
     ///     touches disk; defaults to `false`.
     /// - Returns: A `ModelContainer` ready to build a ``SwiftDataStore`` from.
     /// - Throws: Whatever `ModelContainer.init(for:configurations:)` throws — most commonly a
-    ///   schema/CloudKit configuration mismatch.
+    ///   missing iCloud/CloudKit entitlement (see `cloudKitDatabase` above) or a schema mismatch
+    ///   against an existing on-disk store.
     public static func make(
         cloudKitDatabase: ModelConfiguration.CloudKitDatabase = .automatic,
         isStoredInMemoryOnly: Bool = false

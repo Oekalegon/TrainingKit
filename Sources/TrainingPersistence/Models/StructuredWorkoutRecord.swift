@@ -3,21 +3,16 @@ import Foundation
 import SwiftData
 
 /// The persisted row for a library `StructuredWorkout`. See ``ActivityRecord`` for why this is a
-/// JSON payload plus one indexed lookup field rather than one attribute per model field, and why
-/// it's public.
+/// JSON payload plus one indexed lookup field rather than one attribute per model field, why the
+/// class and `id` are public, and why `payload` isn't.
 @Model
 public final class StructuredWorkoutRecord {
     /// Mirrors `StructuredWorkout.id`.
     public var id: UUID = UUID()
     /// The JSON-encoded `StructuredWorkout`.
-    public var payload: Data = Data()
+    var payload: Data = Data()
 
-    /// Creates a structured-workout record directly from its stored fields.
-    ///
-    /// - Parameters:
-    ///   - id: Mirrors `StructuredWorkout.id`.
-    ///   - payload: The JSON-encoded `StructuredWorkout`.
-    public init(id: UUID, payload: Data) {
+    init(id: UUID, payload: Data) {
         self.id = id
         self.payload = payload
     }

@@ -111,6 +111,7 @@ See `docs/design/trainingKit-design.md` in the package repository for the full m
 - ``WorkoutLibraryStore``
 - ``CycleStore``
 - ``CycleStoreError``
+- ``CycleNestingValidator``
 - ``AthleteStore``
 - ``InMemoryStore``
 - ``StoreSet``

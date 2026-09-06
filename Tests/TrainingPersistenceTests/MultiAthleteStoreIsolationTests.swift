@@ -34,4 +34,23 @@ struct MultiAthleteStoreIsolationTests {
         #expect(fetchedB?.id == athleteB.id)
         #expect(fetchedB?.name == "Athlete B")
     }
+
+    @Test("id survives a load, mutate, save round trip on the same store")
+    func idSurvivesUpdateInPlace() async throws {
+        // The realistic "athlete updates a setting" flow: load the current profile, mutate a
+        // copy, save it back. `AthleteStore.save(_:)` never generates or rewrites `id` itself, so
+        // this only stays stable if the caller preserves it — which mutating a loaded copy does
+        // automatically, since `id` is a stored `let`.
+        let store = try makeStore()
+        let original = AthleteProfile.fixture(name: "Athlete A")
+        try await store.save(original)
+
+        var updated = try #require(await store.athleteProfile())
+        updated.name = "Athlete A (renamed)"
+        try await store.save(updated)
+
+        let final = try await store.athleteProfile()
+        #expect(final?.id == original.id)
+        #expect(final?.name == "Athlete A (renamed)")
+    }
 }

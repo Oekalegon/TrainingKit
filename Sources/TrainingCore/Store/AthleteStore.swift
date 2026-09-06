@@ -4,6 +4,13 @@ public protocol AthleteStore: Sendable {
     func athleteProfile() async throws -> AthleteProfile?
 
     /// Replaces the stored athlete profile.
+    ///
+    /// Preserves `profile.id` exactly as given — the store never generates or rewrites it. A
+    /// caller updating an existing profile should mutate a copy of the value previously returned
+    /// by ``athleteProfile()`` rather than constructing a fresh ``AthleteProfile``, or the
+    /// athlete's identity will silently change (``AthleteProfile/id`` defaults to a new random
+    /// `UUID` when omitted), breaking any external mapping — e.g. a multi-athlete roster — keyed
+    /// on it.
     func save(_ profile: AthleteProfile) async throws
 
     /// The persisted ``ImportAnchor`` from the last successful ``ActivityImporting`` run, if any.

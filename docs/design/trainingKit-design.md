@@ -69,14 +69,15 @@ All model types are `Sendable` value types with stable `UUID` identifiers. `Doub
 
 ```swift
 struct AthleteProfile: Sendable, Codable {
-    let id: UUID                      // stable identity; see "Multiple athletes" below
-    var name: String                  // human-readable label, e.g. for a roster picker
-    var restingHeartRateBPM: Double
-    var maxHeartRateBPM: Double
-    var sex: BiologicalSex            // .male, .female, .unspecified (uses male coefficients)
-    var paceModel: PaceModel          // used to turn distance steps into time
-    var timeZone: TimeZone            // daily bucketing boundary
-    var weekStartsOn: Weekday         // weekly stats boundary, default .monday
+    let id: UUID                                    // stable identity; see "Multiple athletes" below
+    var name: String                                // human-readable label, e.g. for a roster picker
+    var sex: BiologicalSex                          // .male, .female, .unspecified (uses male coefficients)
+    var paceModel: PaceModel                        // used to turn distance steps into time
+    var timeZone: TimeZone                          // daily bucketing boundary
+    var weekStartsOn: Weekday                       // weekly stats boundary, default .monday
+    var heartRateZoneHistory: [HeartRateZoneSettings] // resting/max HR + zone method, dated so
+                                                       // recomputing an old activity's load uses the
+                                                       // settings effective on its date, not today's
 }
 ```
 

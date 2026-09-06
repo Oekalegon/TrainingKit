@@ -107,34 +107,13 @@ public actor InMemoryStore: ActivityStore, PlanStore, WorkoutLibraryStore, Cycle
         cyclesByID[id]
     }
 
-    /// See ``CycleStore/upsert(_:)``. Validates each cycle in `cycles` against a working copy
-    /// seeded from the currently-stored cycles plus the entire incoming batch — so a parent and
-    /// its children can be upserted together in one call, regardless of which order they appear
-    /// in `cycles` (a child listed before its parent in the array is still resolved correctly).
+    /// See ``CycleStore/upsert(_:)``. Nesting/overlap validation is shared with every other
+    /// `CycleStore` conformer via ``CycleNestingValidator``.
     public func upsert(_ cycles: [TrainingCycle]) async throws {
-        var workingSet = cyclesByID
+        try CycleNestingValidator.validate(cycles, existing: cyclesByID)
         for cycle in cycles {
-            workingSet[cycle.id] = cycle
+            cyclesByID[cycle.id] = cycle
         }
-
-        for cycle in cycles {
-            if let parentID = cycle.parentID {
-                guard let parent = workingSet[parentID] else {
-                    throw CycleStoreError.parentNotFound(parentID)
-                }
-                guard parent.dateRange.lowerBound <= cycle.dateRange.lowerBound,
-                      cycle.dateRange.upperBound <= parent.dateRange.upperBound
-                else {
-                    throw CycleStoreError.childOutsideParentRange(child: cycle.id, parent: parentID)
-                }
-            }
-
-            let siblings = workingSet.values.filter { $0.parentID == cycle.parentID && $0.id != cycle.id }
-            for sibling in siblings where sibling.dateRange.overlaps(cycle.dateRange) {
-                throw CycleStoreError.overlappingSiblings(cycle.id, sibling.id)
-            }
-        }
-        cyclesByID = workingSet
     }
 
     /// See ``CycleStore/deleteCycle(id:)``.

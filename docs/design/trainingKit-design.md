@@ -69,16 +69,33 @@ All model types are `Sendable` value types with stable `UUID` identifiers. `Doub
 
 ```swift
 struct AthleteProfile: Sendable, Codable {
-    var restingHeartRateBPM: Double
-    var maxHeartRateBPM: Double
-    var sex: BiologicalSex            // .male, .female, .unspecified (uses male coefficients)
-    var paceModel: PaceModel          // used to turn distance steps into time
-    var timeZone: TimeZone            // daily bucketing boundary
-    var weekStartsOn: Weekday         // weekly stats boundary, default .monday
+    let id: UUID                                    // stable identity; see "Multiple athletes" below
+    var name: String                                // human-readable label, e.g. for a roster picker
+    var sex: BiologicalSex                          // .male, .female, .unspecified (uses male coefficients)
+    var paceModel: PaceModel                        // used to turn distance steps into time
+    var timeZone: TimeZone                          // daily bucketing boundary
+    var weekStartsOn: Weekday                       // weekly stats boundary, default .monday
+    var heartRateZoneHistory: [HeartRateZoneSettings] // resting/max HR + zone method, dated so
+                                                       // recomputing an old activity's load uses the
+                                                       // settings effective on its date, not today's
 }
 ```
 
 `HeartRateZoneModel` derives `deltaHRRatio(for bpm:)` from the profile and maps HR zones ↔ ratios so a workout step targeting "Zone 3" can be turned into a TRIMP intensity.
+
+#### Multiple athletes
+
+Every store protocol, `TrainingModel`, `PlanSandbox`, and tool context already assume "one instance
+= one athlete" — that's already sufficient for a coach-style host app to support a roster: construct
+one `StoreSet` (backed by its own `ModelContainer`/CloudKit database — exactly the one container a
+single-athlete app already uses, just one per athlete instead of one total) and one `TrainingModel`
+per athlete, keyed by `AthleteProfile.id`. No store-protocol method gains an athlete parameter and no
+persisted record gains an `athleteID` column — isolation comes from using separate store instances,
+not from filtering shared rows within one. `TrainingHealthKit`/`TrainingWorkoutKit` stay single-
+device/single-athlete regardless (Apple's own APIs have no notion of a second athlete's data on the
+same device); a true "coach sees a remote athlete's live data" flow — most plausibly via CloudKit
+sharing, granting the coach's iCloud account read/plan-write access to an athlete's private
+database — is unscoped future work with no design here yet.
 
 ### 2.2 Completed activities
 

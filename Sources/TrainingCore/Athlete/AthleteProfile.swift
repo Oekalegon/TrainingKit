@@ -3,6 +3,19 @@ import Foundation
 /// The athlete's physiological and calendar defaults, used throughout `TrainingCore` to turn raw
 /// heart-rate data and workout plans into training load.
 public struct AthleteProfile: Sendable, Codable, Equatable {
+    /// A stable identity for this athlete.
+    ///
+    /// Nothing in `TrainingCore` reads this itself — every store protocol, `TrainingModel`, and
+    /// tool context already assumes "one instance = one athlete," and isolation between athletes
+    /// comes from using separate store instances (e.g. separate `ModelContainer`s), not from
+    /// filtering shared rows by this id. It exists for a host app to key a multi-athlete roster
+    /// on — e.g. mapping `AthleteProfile.id` to which `TrainingModel`/container belongs to which
+    /// athlete — without which there'd be nothing to distinguish one athlete's profile from
+    /// another's once decoded.
+    public let id: UUID
+    /// A human-readable label, e.g. for a roster picker. Empty (not optional) when unset, so
+    /// callers that don't need it never have to unwrap it.
+    public var name: String
     /// Used to select ``TRIMPCoefficients``.
     public var sex: BiologicalSex
     /// Turns a distance into a duration at a given heart-rate zone, for plan estimation.
@@ -21,18 +34,24 @@ public struct AthleteProfile: Sendable, Codable, Equatable {
     /// Creates an athlete profile.
     ///
     /// - Parameters:
+    ///   - id: A stable identity for this athlete; defaults to a new random `UUID`.
+    ///   - name: A human-readable label, e.g. for a roster picker; defaults to empty.
     ///   - sex: Used to select ``TRIMPCoefficients``.
     ///   - paceModel: Turns a distance into a duration at a given heart-rate zone.
     ///   - timeZone: Boundary for daily bucketing in the fitness series.
     ///   - weekStartsOn: Boundary for weekly statistics; defaults to Monday.
     ///   - heartRateZoneHistory: Every ``HeartRateZoneSettings`` this athlete has recorded.
     public init(
+        id: UUID = UUID(),
+        name: String = "",
         sex: BiologicalSex,
         paceModel: PaceModel,
         timeZone: TimeZone,
         weekStartsOn: Weekday = .monday,
         heartRateZoneHistory: [HeartRateZoneSettings]
     ) {
+        self.id = id
+        self.name = name
         self.sex = sex
         self.paceModel = paceModel
         self.timeZone = timeZone

@@ -1,0 +1,49 @@
+name: HealthKitHarness
+options:
+  bundleIdPrefix: org.oekalegon.trainingkit
+  deploymentTarget:
+    iOS: "26.0"
+packages:
+  TrainingKit:
+    path: ../../
+targets:
+  HealthKitHarness:
+    type: application
+    platform: iOS
+    sources:
+      - Sources
+    info:
+      path: Generated/Info.plist
+      properties:
+        UILaunchScreen: {}
+        NSHealthShareUsageDescription: "HealthKitHarness reads workouts and heart-rate data to test TrainingHealthKit's importer and athlete reader."
+        NSHealthUpdateUsageDescription: "HealthKitHarness does not write any data; this key is unused but some HealthKit APIs require it to be present."
+        UIBackgroundModes:
+          - remote-notification
+    entitlements:
+      path: Generated/HealthKitHarness.entitlements
+      properties:
+        com.apple.developer.healthkit: true
+        com.apple.developer.icloud-container-identifiers:
+          - iCloud.org.oekalegon.trainingkit.shared
+        com.apple.developer.icloud-services:
+          - CloudKit
+        com.apple.developer.aps-environment: development
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: org.oekalegon.trainingkit.HealthKitHarness
+        CODE_SIGN_STYLE: Automatic
+        CODE_SIGN_IDENTITY: "Apple Development"
+        DEVELOPMENT_TEAM: WTT2LZ6DDG
+        SWIFT_VERSION: "6.0"
+    dependencies:
+      - package: TrainingKit
+        product: TrainingHealthKit
+      - package: TrainingKit
+        product: TrainingCore
+      - package: TrainingKit
+        product: TrainingPersistence
+    scheme:
+      # See the matching comment in PersistenceHarness/project.yml.
+      commandLineArguments:
+        "-com.apple.CoreData.CloudKitDebug 3": false

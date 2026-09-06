@@ -31,9 +31,19 @@ public actor SwiftDataStore: ActivityStore, PlanStore, WorkoutLibraryStore, Cycl
     }
 
     /// See `ActivityStore/upsert(_:)`.
+    ///
+    /// Looks up every existing record with one fetch of the whole table, rather than one fetch
+    /// per incoming activity — for an import of hundreds or thousands of activities (a full
+    /// HealthKit history import, say), N individual fetches each pay their own query overhead,
+    /// while one fetch plus an in-memory dictionary lookup does not.
     public func upsert(_ activities: [Activity]) async throws {
+        var recordsByID: [UUID: ActivityRecord] = [:]
+        for record in try modelContext.fetch(FetchDescriptor<ActivityRecord>()) {
+            recordsByID[record.id] = record
+        }
+
         for activity in activities {
-            if let existing = try fetchActivityRecord(id: activity.id) {
+            if let existing = recordsByID[activity.id] {
                 try existing.update(from: activity)
             } else {
                 modelContext.insert(try ActivityRecord(activity: activity))
@@ -79,10 +89,16 @@ public actor SwiftDataStore: ActivityStore, PlanStore, WorkoutLibraryStore, Cycl
             .filter { range.contains($0.date) }
     }
 
-    /// See `PlanStore/upsert(_:)`.
+    /// See `PlanStore/upsert(_:)`. See ``upsert(_:)`` (`ActivityStore`'s) for why this looks up
+    /// every existing record with one fetch rather than one fetch per incoming plan.
     public func upsert(_ plans: [PlannedActivity]) async throws {
+        var recordsByID: [UUID: PlannedActivityRecord] = [:]
+        for record in try modelContext.fetch(FetchDescriptor<PlannedActivityRecord>()) {
+            recordsByID[record.id] = record
+        }
+
         for plan in plans {
-            if let existing = try fetchPlanRecord(id: plan.id) {
+            if let existing = recordsByID[plan.id] {
                 try existing.update(from: plan)
             } else {
                 modelContext.insert(try PlannedActivityRecord(plan: plan))
@@ -120,10 +136,16 @@ public actor SwiftDataStore: ActivityStore, PlanStore, WorkoutLibraryStore, Cycl
         try fetchWorkoutRecord(id: id)?.toWorkout()
     }
 
-    /// See `WorkoutLibraryStore/upsert(_:)`.
+    /// See `WorkoutLibraryStore/upsert(_:)`. See ``upsert(_:)`` (`ActivityStore`'s) for why this
+    /// looks up every existing record with one fetch rather than one fetch per incoming workout.
     public func upsert(_ workouts: [StructuredWorkout]) async throws {
+        var recordsByID: [UUID: StructuredWorkoutRecord] = [:]
+        for record in try modelContext.fetch(FetchDescriptor<StructuredWorkoutRecord>()) {
+            recordsByID[record.id] = record
+        }
+
         for workout in workouts {
-            if let existing = try fetchWorkoutRecord(id: workout.id) {
+            if let existing = recordsByID[workout.id] {
                 try existing.update(from: workout)
             } else {
                 modelContext.insert(try StructuredWorkoutRecord(workout: workout))
@@ -159,16 +181,20 @@ public actor SwiftDataStore: ActivityStore, PlanStore, WorkoutLibraryStore, Cycl
     }
 
     /// See `CycleStore/upsert(_:)`. Nesting/overlap validation is shared with every other
-    /// `CycleStore` conformer via `CycleNestingValidator`.
+    /// `CycleStore` conformer via `CycleNestingValidator`. Reuses the one fetch this needs anyway
+    /// (to decode every existing cycle for validation) as the update lookup too, rather than
+    /// fetching again per cycle — see ``upsert(_:)`` (`ActivityStore`'s) for why that matters.
     public func upsert(_ cycles: [TrainingCycle]) async throws {
+        var existingRecordsByID: [UUID: TrainingCycleRecord] = [:]
         var existingByID: [UUID: TrainingCycle] = [:]
         for record in try modelContext.fetch(FetchDescriptor<TrainingCycleRecord>()) {
+            existingRecordsByID[record.id] = record
             existingByID[record.id] = try record.toCycle()
         }
         try CycleNestingValidator.validate(cycles, existing: existingByID)
 
         for cycle in cycles {
-            if let existing = try fetchCycleRecord(id: cycle.id) {
+            if let existing = existingRecordsByID[cycle.id] {
                 try existing.update(from: cycle)
             } else {
                 modelContext.insert(try TrainingCycleRecord(cycle: cycle))

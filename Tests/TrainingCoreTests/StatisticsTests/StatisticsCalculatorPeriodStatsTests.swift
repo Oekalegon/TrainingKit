@@ -89,6 +89,35 @@ struct StatisticsCalculatorPeriodStatsTests {
         #expect(lenient.timeInZone.total == 90)
     }
 
+    @Test("an actual activity on today wins over a plan on the same day, rather than summing both")
+    func actualWinsOverPlanOnSameDay() {
+        let day = Date(timeIntervalSince1970: 0)
+        let realActivity = activity(sport: .running, start: day, distanceMeters: 5000, duration: 1800)
+        let workout = StructuredWorkout(
+            name: "Easy run",
+            sport: .running,
+            blocks: [WorkoutBlock(steps: [WorkoutStep(kind: .work, goal: .time(1800), target: .heartRateZone(2))])]
+        )
+        let planSameDay = PlannedActivity(workoutID: workout.id, date: day)
+
+        let stats = calculator.periodStats(
+            activities: [realActivity],
+            plans: [planSameDay],
+            workouts: [workout],
+            athlete: athlete,
+            range: day...day,
+            asOf: day,
+            previous: nil
+        )
+
+        // Mirrors DailyLoadSeries's merge rule: only the actual activity should count on `today`
+        // when one exists, not both — a double-count here would silently disagree with the
+        // fitness series about the same day's totals.
+        #expect(stats.activityCount == 1)
+        #expect(stats.totalDistanceMeters == 5000)
+        #expect(stats.totalTime == 1800)
+    }
+
     @Test("delta is nil for the first call with no previous period")
     func deltaNilWithNoPrevious() {
         let day = Date(timeIntervalSince1970: 0)

@@ -8,8 +8,9 @@ extension Sport {
     ///
     /// Only the types `TrainingCore` has a direct case for are mapped explicitly; every other
     /// HealthKit activity type (there are dozens) falls back to `.other`, labeled with the type's
-    /// raw value so the original HealthKit type isn't lost even though `Sport` can't represent it
-    /// precisely.
+    /// raw value via ``Sport/otherLabel(rawValue:)`` so the original HealthKit type isn't lost even
+    /// though `Sport` can't represent it precisely — and so a `Sport.other` built here round-trips
+    /// through `TrainingWorkoutKit`'s reverse mapping, which shares the same label format.
     public init(healthKitActivityType type: HKWorkoutActivityType) {
         switch type {
         case .running:
@@ -25,7 +26,7 @@ extension Sport {
         case .rowing:
             self = .rowing
         default:
-            self = .other("HKWorkoutActivityType(rawValue: \(type.rawValue))")
+            self = .other(Sport.otherLabel(rawValue: type.rawValue))
         }
     }
 }

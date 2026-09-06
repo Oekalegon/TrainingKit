@@ -30,5 +30,6 @@ let package = Package(
         .target(name: "TrainingToolsFoundationModels", dependencies: ["TrainingTools"]),
         .testTarget(name: "TrainingCoreTests", dependencies: ["TrainingCore"]),
         .testTarget(name: "TrainingHealthKitTests", dependencies: ["TrainingHealthKit"]),
+        .testTarget(name: "TrainingWorkoutKitTests", dependencies: ["TrainingWorkoutKit"]),
     ]
 )

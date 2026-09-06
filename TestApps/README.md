@@ -61,6 +61,20 @@ The generated `.xcodeproj`s and `Generated/` plists are committed for convenienc
 workspace opens and runs without requiring XcodeGen to be installed first) — regenerate and commit
 the diff after any `project.yml` change.
 
+## Re-importing without duplicating
+
+`HealthKitHarness`'s importer is created with `activityStore: store`, so a re-import looks up each
+workout's existing `Activity.id` by its HealthKit source before minting a new one — without that,
+`HealthKitActivityImporter` has no way to know a workout was already imported, so every repeated
+Import+Save produces a *second* record for the same workout (`SwiftDataStore.upsert(_:)` matches by
+`id`, and a fresh id never matches anything already stored). If you ever see the Mac's activity
+count balloon far past what's actually in Health, this is almost certainly why — check
+`importActivities()` still passes `activityStore:` before looking anywhere else.
+
+If duplicates have already piled up (from before this was wired up, or from any other cause), both
+apps have a **"Delete ALL Activities"** button that clears the store and lets the CloudKit deletes
+propagate to every other synced device — use it to reset to zero, then re-import cleanly.
+
 ## Debugging CloudKit sync
 
 If sync stalls or fails, the in-app "CloudKit Sync Events" section (both apps) surfaces

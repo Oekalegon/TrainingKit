@@ -14,7 +14,7 @@ struct ContentView: View {
     @State private var status = "Opening store…"
     @State private var isBusy = false
     @State private var autoRefresh = false
-    @State private var cloudKitEvents: [String] = []
+    @State private var cloudKitEvents: [CloudKitEventLine] = []
 
     private let autoRefreshTimer = Timer.publish(every: 5, on: .main, in: .common).autoconnect()
 
@@ -30,6 +30,10 @@ struct ContentView: View {
                         Task { await refresh() }
                     }
                     Toggle("Auto-refresh every 5s", isOn: $autoRefresh)
+                    Spacer()
+                    Button("Delete ALL Activities", role: .destructive) {
+                        Task { await deleteAllActivities() }
+                    }
                 }
 
                 List(activities.sorted { $0.start > $1.start }) { activity in
@@ -50,8 +54,8 @@ struct ContentView: View {
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 } else {
-                    List(cloudKitEvents, id: \.self) { event in
-                        Text(event)
+                    List(cloudKitEvents) { event in
+                        Text(event.text)
                             .font(.system(.footnote, design: .monospaced))
                     }
                     .frame(minHeight: 150)
@@ -102,6 +106,20 @@ struct ContentView: View {
         }
     }
 
+    private func deleteAllActivities() async {
+        guard let store else { return }
+        isBusy = true
+        defer { isBusy = false }
+
+        do {
+            let count = try await store.deleteAllActivities()
+            status = "Deleted \(count) activities. CloudKit will propagate the deletions to other devices in the background."
+            activities = []
+        } catch {
+            status = "Delete failed: \(error.localizedDescription)"
+        }
+    }
+
     private func recordCloudKitEvent(from note: Notification) {
         guard let event = note.userInfo?[NSPersistentCloudKitContainer.eventNotificationUserInfoKey] as? NSPersistentCloudKitContainer.Event else {
             return
@@ -122,7 +140,7 @@ struct ContentView: View {
         } else {
             line = "[\(time)] \(type) FAILED: \(describeFully(event.error))"
         }
-        cloudKitEvents.insert(line, at: 0)
+        cloudKitEvents.insert(CloudKitEventLine(text: line), at: 0)
         if cloudKitEvents.count > 25 {
             cloudKitEvents.removeLast()
         }
@@ -145,6 +163,15 @@ struct ContentView: View {
         let nsError = error as NSError
         return "\(nsError.domain)#\(nsError.code) \(nsError.localizedDescription) userInfo=\(nsError.userInfo)"
     }
+}
+
+/// A single "CloudKit Sync Events" line, identified independently of its display text -- two
+/// events can render to the identical string within the same clock second, and `List`/`ForEach`
+/// need a stable per-row identity distinct from that text to avoid "ID occurs multiple times"
+/// warnings.
+private struct CloudKitEventLine: Identifiable {
+    let id = UUID()
+    let text: String
 }
 
 #Preview {

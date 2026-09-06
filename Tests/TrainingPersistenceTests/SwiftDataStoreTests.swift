@@ -86,6 +86,18 @@ struct SwiftDataStoreTests {
         #expect(try await store.activity(id: activity.id) == nil)
     }
 
+    @Test("ActivityStore deleteAllActivities removes every activity and reports how many")
+    func activityStoreDeleteAllActivities() async throws {
+        let store = try makeStore()
+        let activities = (0..<5).map { Activity(source: .healthKit(UUID()), sport: .running, start: day($0), duration: 1800) }
+        try await store.upsert(activities)
+
+        let deletedCount = try await store.deleteAllActivities()
+
+        #expect(deletedCount == 5)
+        #expect(try await store.activities(in: day(0)...day(4)).isEmpty)
+    }
+
     @Test("AthleteStore import anchor round-trips and clears to nil")
     func athleteStoreImportAnchor() async throws {
         let store = try makeStore()

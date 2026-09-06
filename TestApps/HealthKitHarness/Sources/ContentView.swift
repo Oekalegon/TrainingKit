@@ -24,7 +24,7 @@ struct ContentView: View {
     @State private var persistenceStatus = ""
     @State private var store: SwiftDataStore?
     @State private var isBusy = false
-    @State private var cloudKitEvents: [String] = []
+    @State private var cloudKitEvents: [CloudKitEventLine] = []
 
     var body: some View {
         NavigationStack {
@@ -69,6 +69,9 @@ struct ContentView: View {
                     Button("List What's Currently in the Store") {
                         Task { await listStoredActivities() }
                     }
+                    Button("Delete ALL Activities From This Store", role: .destructive) {
+                        Task { await deleteAllActivities() }
+                    }
                 }
 
                 Section("5. CloudKit Sync Events") {
@@ -77,8 +80,8 @@ struct ContentView: View {
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     } else {
-                        ForEach(cloudKitEvents, id: \.self) { event in
-                            Text(event)
+                        ForEach(cloudKitEvents) { event in
+                            Text(event.text)
                                 .font(.system(.footnote, design: .monospaced))
                         }
                     }
@@ -124,7 +127,7 @@ struct ContentView: View {
         } else {
             line = "[\(time)] \(type) FAILED: \(describeFully(event.error))"
         }
-        cloudKitEvents.insert(line, at: 0)
+        cloudKitEvents.insert(CloudKitEventLine(text: line), at: 0)
         if cloudKitEvents.count > 25 {
             cloudKitEvents.removeLast()
         }
@@ -185,7 +188,13 @@ struct ContentView: View {
         isBusy = true
         defer { isBusy = false }
 
-        let importer = HealthKitActivityImporter(healthStore: healthStore)
+        // Without passing `store` here, every re-import mints a fresh UUID for the same HealthKit
+        // workout (Activity.id defaults to a new UUID when there's no existingID to reuse), so
+        // upsert(_:) -- which matches by id -- can never recognize it as the same activity it
+        // already has. Repeated Import+Save taps then silently pile up duplicate records instead
+        // of updating the one that's already there. Passing `store` lets the importer look up the
+        // existing id by source first.
+        let importer = HealthKitActivityImporter(healthStore: healthStore, activityStore: store)
         do {
             let result = try await importer.importActivities(since: nil)
             importedActivities = result.upserted
@@ -233,6 +242,30 @@ struct ContentView: View {
             persistenceStatus = "List failed: \(error.localizedDescription)"
         }
     }
+
+    private func deleteAllActivities() async {
+        isBusy = true
+        defer { isBusy = false }
+
+        guard let store else {
+            persistenceStatus = "Store isn't open yet."
+            return
+        }
+        do {
+            let count = try await store.deleteAllActivities()
+            persistenceStatus = "Deleted \(count) activities. CloudKit will propagate the deletions to other devices in the background."
+        } catch {
+            persistenceStatus = "Delete failed: \(error.localizedDescription)"
+        }
+    }
+}
+
+/// A single "CloudKit Sync Events" line, identified independently of its display text -- two
+/// events can render to the identical string within the same clock second, and `ForEach` needs a
+/// stable per-row identity distinct from that text to avoid "ID occurs multiple times" warnings.
+private struct CloudKitEventLine: Identifiable {
+    let id = UUID()
+    let text: String
 }
 
 #Preview {

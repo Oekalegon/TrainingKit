@@ -69,6 +69,23 @@ public actor SwiftDataStore: ActivityStore, PlanStore, WorkoutLibraryStore, Cycl
         try modelContext.save()
     }
 
+    /// Deletes every activity in this store, returning how many were removed.
+    ///
+    /// Not part of `ActivityStore` — no Core protocol needs a bulk-clear operation — but useful
+    /// for cleaning up after a since-fixed import bug duplicated records, or for a test harness
+    /// that wants to reset between runs. Deletes are tracked individually by SwiftData's CloudKit
+    /// mirroring exactly like `deleteActivity(source:)`, so they propagate to every other device
+    /// syncing this store.
+    @discardableResult
+    public func deleteAllActivities() async throws -> Int {
+        let records = try modelContext.fetch(FetchDescriptor<ActivityRecord>())
+        for record in records {
+            modelContext.delete(record)
+        }
+        try modelContext.save()
+        return records.count
+    }
+
     private func fetchActivityRecord(id: UUID) throws -> ActivityRecord? {
         let descriptor = FetchDescriptor<ActivityRecord>(predicate: #Predicate { $0.id == id })
         return try modelContext.fetch(descriptor).first

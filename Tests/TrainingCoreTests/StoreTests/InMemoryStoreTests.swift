@@ -182,6 +182,23 @@ struct InMemoryStoreTests {
         }
     }
 
+    @Test("CycleStore rejects a self-update that would grow a child outside its own parent's range")
+    func cycleStoreRejectsSelfUpdateThatGrowsOutsideParentRange() async throws {
+        let store = InMemoryStore()
+        let meso = TrainingCycle(level: .meso, phase: .build, name: "Meso 1", dateRange: day(0)...day(13))
+        var micro = TrainingCycle(level: .micro, phase: .build, name: "Week 1", dateRange: day(0)...day(6), parentID: meso.id)
+        try await store.upsert([meso, micro])
+
+        // Widening the child past its (unchanged) parent's upper bound must still be rejected on a
+        // self-update, exactly as it would be for a brand-new out-of-range child — the parent-range
+        // check isn't only exercised on insert.
+        micro.dateRange = day(0)...day(20)
+
+        await #expect(throws: CycleStoreError.childOutsideParentRange(child: micro.id, parent: meso.id)) {
+            try await store.upsert([micro])
+        }
+    }
+
     @Test("CycleStore rejects a parentID that doesn't resolve")
     func cycleStoreRejectsMissingParent() async throws {
         let store = InMemoryStore()

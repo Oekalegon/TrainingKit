@@ -65,9 +65,9 @@ struct PlannedWorkoutProjectorTests {
                 )
             ]
         )
-        let openWorkout = workout([WorkoutBlock(steps: [WorkoutStep(kind: .work, goal: .time(600), target: .heartRateZone(2))])])
+        let unresolvableZoneWorkout = workout([WorkoutBlock(steps: [WorkoutStep(kind: .work, goal: .time(600), target: .heartRateZone(2))])])
 
-        let projection = projector.project(workout: openWorkout, athlete: athlete)
+        let projection = projector.project(workout: unresolvableZoneWorkout, athlete: athlete)
 
         #expect(projection.timeInZone.seconds[3] == 600)
         #expect(projection.timeInZone.seconds[2] == nil)

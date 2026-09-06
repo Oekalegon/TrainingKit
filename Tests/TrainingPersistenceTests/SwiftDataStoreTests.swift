@@ -58,6 +58,19 @@ struct SwiftDataStoreTests {
         #expect(try await store.activity(source: .manual) == nil)
     }
 
+    @Test("ActivityStore dedupes .fitFile sources that differ only in URL representation")
+    func activityStoreDedupeOnFitFileURLNormalization() async throws {
+        let store = try makeStore()
+        let canonical = URL(fileURLWithPath: "/tmp/imports/ride.fit")
+        let equivalent = URL(fileURLWithPath: "/tmp/imports/../imports/ride.fit")
+        let activity = Activity(source: .fitFile(canonical), sport: .cycling, start: day(0), duration: 3600)
+
+        try await store.upsert([activity])
+
+        // Same file, spelled differently -- must resolve to the same stored record.
+        #expect(try await store.activity(source: .fitFile(equivalent)) == activity)
+    }
+
     @Test("ActivityStore deleteActivity removes by source, no-ops if not found")
     func activityStoreDeleteActivity() async throws {
         let store = try makeStore()

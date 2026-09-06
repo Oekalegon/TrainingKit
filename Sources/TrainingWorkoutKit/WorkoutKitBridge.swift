@@ -25,10 +25,21 @@ import WorkoutKit
 /// records the link (reused across ``sync(_:)``/``schedule(_:workout:calendar:)`` calls) so re-syncing
 /// updates the same `WorkoutPlan` rather than creating a new one.
 public struct WorkoutKitBridge: Sendable {
-    /// Creates a WorkoutKit bridge. Stateless — `WorkoutScheduler` has no public initializer, so
-    /// scheduling always goes through `.shared`, WorkoutKit's only instance, rather than a stored
-    /// dependency this type could inject a fake for in tests.
-    public init() {}
+    private let support: WorkoutKitSupportChecking
+
+    /// Creates a WorkoutKit bridge. `WorkoutScheduler` has no public initializer, so scheduling
+    /// always goes through `.shared`, WorkoutKit's only instance, rather than a stored dependency
+    /// this type could inject a fake for in tests.
+    public init() {
+        self.support = .live
+    }
+
+    /// Internal seam for tests: substitutes a fake ``WorkoutKitSupportChecking`` so
+    /// `unsupportedActivity`/`unsupportedGoalForActivity`/`unsupportedAlertForActivity` can be
+    /// exercised deterministically, without depending on WorkoutKit's undocumented support tables.
+    init(support: WorkoutKitSupportChecking) {
+        self.support = support
+    }
 
     /// Maps a library workout onto a `CustomWorkout`, validating every step's goal and alert
     /// against `workout.sport` along the way.
@@ -41,7 +52,7 @@ public struct WorkoutKitBridge: Sendable {
     ///   strip alerts from.
     public func customWorkout(from workout: StructuredWorkout) throws(WorkoutKitMappingError) -> CustomWorkout {
         let activity = workout.sport.workoutKitActivityType
-        guard CustomWorkout.supportsActivity(activity) else {
+        guard support.supportsActivity(activity) else {
             throw .unsupportedActivity(activity)
         }
 
@@ -155,11 +166,11 @@ public struct WorkoutKitBridge: Sendable {
     /// `activity` before handing back a step WorkoutKit is guaranteed to accept.
     private func workoutKitStep(for step: WorkoutStep, activity: HKWorkoutActivityType) throws(WorkoutKitMappingError) -> WorkoutKit.WorkoutStep {
         let goal = WorkoutGoal(stepGoal: step.goal)
-        guard CustomWorkout.supportsGoal(goal, activity: activity) else {
+        guard support.supportsGoal(goal, activity) else {
             throw .unsupportedGoalForActivity(goal, activity)
         }
         let alert = step.target?.workoutAlert
-        if let alert, !CustomWorkout.supportsAlert(alert, activity: activity) {
+        if let alert, !support.supportsAlert(alert, activity) {
             throw .unsupportedAlertForActivity(activity)
         }
         return WorkoutKit.WorkoutStep(goal: goal, alert: alert)

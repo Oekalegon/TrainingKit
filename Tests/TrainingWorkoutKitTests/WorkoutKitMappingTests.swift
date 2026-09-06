@@ -149,6 +149,80 @@ struct WorkoutKitMappingTests {
 
     private let bridge = WorkoutKitBridge()
 
+    // MARK: - Support validation
+
+    @Test("customWorkout(from:) throws unsupportedActivity when the sport's activity type isn't supported at all")
+    func customWorkoutThrowsForUnsupportedActivity() {
+        let bridge = WorkoutKitBridge(support: WorkoutKitSupportChecking(
+            supportsActivity: { _ in false },
+            supportsGoal: { _, _ in true },
+            supportsAlert: { _, _ in true }
+        ))
+        let workout = StructuredWorkout(
+            name: "Easy run",
+            sport: .running,
+            blocks: [WorkoutBlock(steps: [WorkoutStep(kind: .work, goal: .time(1800))])]
+        )
+
+        #expect(throws: WorkoutKitMappingError.unsupportedActivity(.running)) {
+            try bridge.customWorkout(from: workout)
+        }
+    }
+
+    @Test("customWorkout(from:) throws unsupportedGoalForActivity when a step's goal isn't supported for the sport")
+    func customWorkoutThrowsForUnsupportedGoal() {
+        let bridge = WorkoutKitBridge(support: WorkoutKitSupportChecking(
+            supportsActivity: { _ in true },
+            supportsGoal: { _, _ in false },
+            supportsAlert: { _, _ in true }
+        ))
+        let workout = StructuredWorkout(
+            name: "Easy run",
+            sport: .running,
+            blocks: [WorkoutBlock(steps: [WorkoutStep(kind: .work, goal: .time(1800))])]
+        )
+
+        #expect(throws: WorkoutKitMappingError.unsupportedGoalForActivity(.time(1800, .seconds), .running)) {
+            try bridge.customWorkout(from: workout)
+        }
+    }
+
+    @Test("customWorkout(from:) throws unsupportedAlertForActivity when a step's alert isn't supported for the sport")
+    func customWorkoutThrowsForUnsupportedAlert() {
+        let bridge = WorkoutKitBridge(support: WorkoutKitSupportChecking(
+            supportsActivity: { _ in true },
+            supportsGoal: { _, _ in true },
+            supportsAlert: { _, _ in false }
+        ))
+        let workout = StructuredWorkout(
+            name: "Easy run",
+            sport: .running,
+            blocks: [WorkoutBlock(steps: [WorkoutStep(kind: .work, goal: .time(1800), target: .heartRateZone(2))])]
+        )
+
+        #expect(throws: WorkoutKitMappingError.unsupportedAlertForActivity(.running)) {
+            try bridge.customWorkout(from: workout)
+        }
+    }
+
+    @Test("customWorkout(from:) doesn't consult supportsAlert for a step with no target")
+    func customWorkoutSkipsAlertCheckWhenNoTarget() throws {
+        let bridge = WorkoutKitBridge(support: WorkoutKitSupportChecking(
+            supportsActivity: { _ in true },
+            supportsGoal: { _, _ in true },
+            supportsAlert: { _, _ in false } // would fail every step if consulted
+        ))
+        let workout = StructuredWorkout(
+            name: "Easy run",
+            sport: .running,
+            blocks: [WorkoutBlock(steps: [WorkoutStep(kind: .work, goal: .time(1800))])] // no target
+        )
+
+        let customWorkout = try bridge.customWorkout(from: workout)
+
+        #expect(customWorkout.blocks[0].steps[0].step.alert == nil)
+    }
+
     @Test("a workout with warmup, work, and cooldown blocks maps to a CustomWorkout with the warmup/cooldown slots split out")
     func customWorkoutSplitsWarmupAndCooldown() throws {
         let workout = StructuredWorkout(

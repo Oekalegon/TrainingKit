@@ -150,6 +150,38 @@ struct InMemoryStoreTests {
         }
     }
 
+    @Test("CycleStore lets a cycle update its own dateRange in place without colliding with its own prior version")
+    func cycleStoreAllowsSelfUpdateOfDateRange() async throws {
+        let store = InMemoryStore()
+        var week1 = TrainingCycle(level: .micro, phase: .build, name: "Week 1", dateRange: day(0)...day(6))
+        let week2 = TrainingCycle(level: .micro, phase: .build, name: "Week 2", dateRange: day(7)...day(13))
+        try await store.upsert([week1, week2])
+
+        // Shrinking week1 to end a day earlier must not be rejected as "overlapping" against the
+        // stored version of itself — `CycleNestingValidator` overlays the incoming batch onto
+        // `existing` before checking siblings specifically so a cycle never collides with its own
+        // prior state.
+        week1.dateRange = day(0)...day(5)
+        try await store.upsert([week1])
+
+        let updated = try await store.cycle(id: week1.id)
+        #expect(updated?.dateRange == day(0)...day(5))
+    }
+
+    @Test("CycleStore still rejects a self-update that would newly overlap a sibling")
+    func cycleStoreRejectsSelfUpdateThatNewlyOverlaps() async throws {
+        let store = InMemoryStore()
+        var week1 = TrainingCycle(level: .micro, phase: .build, name: "Week 1", dateRange: day(0)...day(6))
+        let week2 = TrainingCycle(level: .micro, phase: .build, name: "Week 2", dateRange: day(7)...day(13))
+        try await store.upsert([week1, week2])
+
+        week1.dateRange = day(0)...day(8) // now overlaps week2's day(7)...day(13)
+
+        await #expect(throws: CycleStoreError.overlappingSiblings(week1.id, week2.id)) {
+            try await store.upsert([week1])
+        }
+    }
+
     @Test("CycleStore rejects a parentID that doesn't resolve")
     func cycleStoreRejectsMissingParent() async throws {
         let store = InMemoryStore()

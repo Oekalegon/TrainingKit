@@ -44,6 +44,8 @@ public struct WorkoutKitBridge: Sendable {
     /// Maps a library workout onto a `CustomWorkout`, validating every step's goal and alert
     /// against `workout.sport` along the way.
     ///
+    /// - Parameter workout: The library workout to map.
+    /// - Returns: A `CustomWorkout` WorkoutKit is guaranteed to accept for `workout.sport`.
     /// - Throws: ``WorkoutKitMappingError/unsupportedActivity(_:)`` if WorkoutKit doesn't support
     ///   `workout.sport` at all; ``WorkoutKitMappingError/unsupportedGoalForActivity(_:_:)`` or
     ///   ``WorkoutKitMappingError/unsupportedAlertForActivity(_:)`` if a specific step's goal or
@@ -93,6 +95,8 @@ public struct WorkoutKitBridge: Sendable {
     /// Maps a `WorkoutPlan` back onto a `StructuredWorkout`, tagged with the plan's id as
     /// `workoutKitID`.
     ///
+    /// - Parameter plan: The plan to recover a `StructuredWorkout` from.
+    /// - Returns: The recovered `StructuredWorkout`, with `workoutKitID` set to `plan.id`.
     /// - Throws: ``WorkoutKitMappingError/unsupportedWorkoutKind(_:)`` if `plan.workout` isn't
     ///   `.custom` — a `.goal`/`.pacer`/`.swimBikeRun` plan wasn't built by this bridge and has no
     ///   `StructuredWorkout` shape to recover. Also throws if any step's goal has no `StepGoal`
@@ -136,6 +140,10 @@ public struct WorkoutKitBridge: Sendable {
     /// scheduled. `async` for symmetry with ``schedule(_:workout:calendar:)`` and to leave room for a real
     /// library-sync API if WorkoutKit ever grows one — WorkoutKit today has no concept of a
     /// workout library separate from scheduled plans.
+    ///
+    /// - Parameter workout: The workout to validate and mint/reuse a WorkoutKit plan id for.
+    /// - Returns: `workout.workoutKitID` if already set, otherwise a freshly minted `UUID`.
+    /// - Throws: Whatever ``customWorkout(from:)`` throws for `workout`.
     public func sync(_ workout: StructuredWorkout) async throws(WorkoutKitMappingError) -> UUID {
         _ = try customWorkout(from: workout)
         return workout.workoutKitID ?? UUID()

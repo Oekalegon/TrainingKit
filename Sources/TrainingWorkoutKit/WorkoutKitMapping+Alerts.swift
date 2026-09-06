@@ -27,6 +27,14 @@ extension IntensityTarget {
             let highM = Measurement(value: max(low, high), unit: unit)
             return HeartRateRangeAlert(target: lowM...highM)
         case .pace(let range):
+            // A non-positive pace (0 or negative seconds/km) has no corresponding speed —
+            // 1000/range.lowerBound would silently produce .infinity/a negative value rather than
+            // a crash, which is harmless today only because HeartRateZoneModel.intensityRatio(for:)
+            // ignores the actual .pace/.power bounds and returns a fixed zone-4 approximation. Once
+            // a real pace/power zone model reads these values, a silently infinite bound would
+            // become a genuine correctness bug instead of a no-op, so this returns nil now rather
+            // than waiting for that to surface as one.
+            guard range.lowerBound > 0 else { return nil }
             let fastSpeed = 1000 / range.lowerBound
             let slowSpeed = 1000 / range.upperBound
             let low = min(fastSpeed, slowSpeed)
@@ -49,6 +57,8 @@ extension IntensityTarget {
     /// `SpeedThresholdAlert`, `CadenceThresholdAlert`, `CadenceRangeAlert`) fall through to `nil`
     /// — `IntensityTarget` has no power-zone or cadence case, and no single-value-threshold shape
     /// for any metric, only ranges and heart-rate zones.
+    ///
+    /// - Parameter alert: The WorkoutKit alert to map.
     public init?(workoutAlert alert: any WorkoutAlert) {
         switch alert {
         case let zoneAlert as HeartRateZoneAlert:
@@ -61,6 +71,9 @@ extension IntensityTarget {
         case let speedAlert as SpeedRangeAlert:
             let lowSpeed = speedAlert.target.lowerBound.converted(to: .metersPerSecond).value
             let highSpeed = speedAlert.target.upperBound.converted(to: .metersPerSecond).value
+            // A non-positive speed has no corresponding pace; see the matching guard in
+            // workoutAlert above for why this returns nil rather than an infinite pace value.
+            guard lowSpeed > 0 else { return nil }
             let slowPace = 1000 / lowSpeed
             let fastPace = 1000 / highSpeed
             self = .pace(min(fastPace, slowPace)...max(fastPace, slowPace))

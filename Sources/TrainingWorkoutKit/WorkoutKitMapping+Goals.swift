@@ -6,6 +6,8 @@ import WorkoutKit
 
 extension WorkoutGoal {
     /// Maps a `StepGoal` onto its WorkoutKit equivalent. Total — every `StepGoal` case has one.
+    ///
+    /// - Parameter stepGoal: The `StepGoal` to map.
     public init(stepGoal: StepGoal) {
         switch stepGoal {
         case .time(let seconds):
@@ -21,6 +23,7 @@ extension WorkoutGoal {
 extension StepGoal {
     /// Maps a WorkoutKit `WorkoutGoal` onto its `StepGoal` equivalent.
     ///
+    /// - Parameter workoutGoal: The `WorkoutGoal` to map.
     /// - Throws: ``WorkoutKitMappingError/unsupportedGoal(_:)`` for `.energy` and
     ///   `.poolSwimDistanceWithTime` — `StepGoal` only models time, distance, and open-ended
     ///   steps, so an energy- or pool-length-based goal has nowhere to go.

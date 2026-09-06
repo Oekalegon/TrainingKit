@@ -79,6 +79,21 @@ struct PlanEvaluatorCycleFreeRulesTests {
         #expect(!findings.contains { $0.day == day(2) })
     }
 
+    @Test("ATL/CTL exactly at the max or min threshold doesn't fire — comparisons are strict")
+    func atlToCTLRatioExactlyAtThresholdDoesNotFire() {
+        // Guards against an accidental `>=`/`<=` flip: the guardrail's own defaults (1.4 max,
+        // 0.7 min) describe a band, and a ratio sitting exactly on its edge is documented as
+        // still within it, not already over.
+        let metrics = [
+            metric(0, ctl: 50, atl: 70), // ratio exactly 1.4 (the default max)
+            metric(1, ctl: 50, atl: 35), // ratio exactly 0.7 (the default min)
+        ]
+
+        let evaluation = evaluator.evaluate(metrics, races: [])
+
+        #expect(!evaluation.findings.contains { $0.rule == .atlToCTLRatio })
+    }
+
     @Test("a zero CTL day is skipped rather than dividing by zero")
     func atlToCTLRatioSkipsZeroCTL() {
         let metrics = [metric(0, ctl: 0, atl: 10)]
@@ -129,6 +144,15 @@ struct PlanEvaluatorCycleFreeRulesTests {
         #expect(findings.first?.severity == .risk)
     }
 
+    @Test("monotony exactly at the max doesn't fire — the comparison is strict")
+    func monotonyExactlyAtThresholdDoesNotFire() {
+        let metrics = [metric(0, monotony: 2.0)] // exactly the default max
+
+        let evaluation = evaluator.evaluate(metrics, races: [])
+
+        #expect(!evaluation.findings.contains { $0.rule == .monotony })
+    }
+
     // MARK: - Strain
 
     @Test("a strain spike above the trailing-window percentile fires risk")
@@ -175,6 +199,22 @@ struct PlanEvaluatorCycleFreeRulesTests {
         #expect(findings.count == 2)
         #expect(findings.contains { $0.day == day(0) && $0.severity == .risk })
         #expect(findings.contains { $0.day == day(1) && $0.severity == .risk })
+    }
+
+    @Test("race-day TSB exactly at the min or max threshold doesn't fire — comparisons are strict")
+    func raceDayTSBExactlyAtThresholdDoesNotFire() {
+        let metrics = [
+            metric(0, tsb: 5), // exactly the default min
+            metric(1, tsb: 25), // exactly the default max
+        ]
+        let races = [
+            Race(name: "Exactly at min", date: day(0), priority: .a),
+            Race(name: "Exactly at max", date: day(1), priority: .a),
+        ]
+
+        let evaluation = evaluator.evaluate(metrics, races: races)
+
+        #expect(!evaluation.findings.contains { $0.rule == .raceDayTSB })
     }
 
     @Test("a race date with no matching metrics day is skipped")

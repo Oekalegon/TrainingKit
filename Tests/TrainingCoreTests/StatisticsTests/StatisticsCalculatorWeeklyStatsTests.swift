@@ -105,4 +105,33 @@ struct StatisticsCalculatorWeeklyStatsTests {
         #expect(nextWeek?.activityCount == 1)
         #expect((nextWeek?.totalLoad ?? 0) > 0)
     }
+
+    @Test("a partial current week mixes an earlier actual activity with a later planned activity")
+    func partialCurrentWeekMixesActualAndPlanned() {
+        let athlete = athlete()
+        let monday = Date(timeIntervalSince1970: 1_704_067_200) // 2024-01-01
+        let wednesday = monday.addingTimeInterval(2 * 86400)
+        let friday = monday.addingTimeInterval(4 * 86400)
+
+        let pastActivity = activity(start: monday, distanceMeters: 5000, duration: 1800)
+        let workout = StructuredWorkout(
+            name: "Easy run",
+            sport: .running,
+            blocks: [WorkoutBlock(steps: [WorkoutStep(kind: .work, goal: .time(1800), target: .heartRateZone(2))])]
+        )
+        let futurePlan = PlannedActivity(workoutID: workout.id, date: friday)
+        let calculator = StatisticsCalculator()
+
+        // `asOf: wednesday` puts the week's Monday in the past (actual) and its Friday in the
+        // future (planned) — the same week's stats must reflect both, not just whichever side of
+        // `today` happens to be checked first.
+        let weeks = calculator.weeklyStats(activities: [pastActivity], plans: [futurePlan], workouts: [workout], athlete: athlete, asOf: wednesday)
+
+        #expect(weeks.count == 1)
+        let week = weeks[0]
+        #expect(week.isProjected == true)
+        #expect(week.activityCount == 2)
+        #expect(week.totalDistanceMeters > 5000) // the actual 5000 m plus the plan's projected distance
+        #expect(week.totalTime == 3600) // 1800 s actual + 1800 s planned
+    }
 }

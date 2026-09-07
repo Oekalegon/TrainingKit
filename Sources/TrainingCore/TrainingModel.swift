@@ -16,6 +16,15 @@ public final class TrainingModel {
     public private(set) var workouts: [StructuredWorkout] = []
     public private(set) var cycles: [TrainingCycle] = []
     public private(set) var metrics: [FitnessMetrics] = []
+    /// Whether an ``ActivityImporting`` run (e.g. HealthKit) has ever completed successfully for
+    /// this athlete, independent of `activities.isEmpty` — set from ``AthleteStore/importAnchor()``
+    /// by ``load(in:asOf:)`` and ``importActivities(from:asOf:)``.
+    ///
+    /// `activities.isEmpty` only reflects whichever range those two last loaded, so an athlete who
+    /// connected and imported months ago but has no activity in the currently displayed range
+    /// would otherwise look indistinguishable from one who never connected at all. Callers
+    /// building a first-run "connect" prompt (design doc §2.1) should gate on this instead.
+    public internal(set) var hasImportedActivities = false
     /// The athlete this model reflects. A plain, caller-managed property — `TrainingModel` doesn't
     /// automatically load or save it via `AthleteStore`.
     public var athlete: AthleteProfile
@@ -61,11 +70,13 @@ public final class TrainingModel {
         let newPlans = try await stores.planStore.plans(in: range)
         let newWorkouts = try await stores.workoutStore.workouts()
         let newCycles = try await stores.cycleStore.cycles(in: range)
+        let newHasImportedActivities = try await stores.athleteStore.importAnchor() != nil
 
         activities = newActivities
         plans = newPlans
         workouts = newWorkouts
         cycles = newCycles
+        hasImportedActivities = newHasImportedActivities
         loadedRange = range
         await recompute(asOf: today)
     }

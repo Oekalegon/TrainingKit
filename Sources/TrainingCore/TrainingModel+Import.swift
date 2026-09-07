@@ -28,6 +28,7 @@ extension TrainingModel {
             try await stores.activityStore.deleteActivity(source: source)
         }
         try await stores.athleteStore.saveImportAnchor(result.anchor)
+        hasImportedActivities = result.anchor != nil
 
         let range = loadedRange ?? Self.union(of: result.upserted.map { $0.start...$0.start }, fallback: today)
         activities = try await stores.activityStore.activities(in: range)

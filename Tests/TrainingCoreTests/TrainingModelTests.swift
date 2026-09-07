@@ -46,6 +46,25 @@ struct TrainingModelTests {
         #expect(!model.metrics.isEmpty)
     }
 
+    @Test("load(in:) sets hasImportedActivities from the persisted anchor, independent of activities.isEmpty")
+    func loadReflectsPersistedAnchorRegardlessOfLoadedActivities() async throws {
+        let (store, stores) = makeStores()
+        let athlete = AthleteProfile.fixture()
+        // An activity outside the loaded range: activities.isEmpty will be true after load, but a
+        // prior import having happened should still be reflected in hasImportedActivities.
+        let outOfRange = Activity(source: .healthKit(UUID()), sport: .running, start: day(50), duration: 1800)
+        try await store.upsert([outOfRange])
+        try await store.saveImportAnchor(ImportAnchor(data: Data([9])))
+
+        let model = TrainingModel(stores: stores, athlete: athlete)
+        #expect(!model.hasImportedActivities)
+
+        try await model.load(in: day(0)...day(10), asOf: day(3))
+
+        #expect(model.activities.isEmpty)
+        #expect(model.hasImportedActivities)
+    }
+
     @Test("add(_ plan:) persists to the store and updates metrics")
     func addPlanPersistsAndRecomputes() async throws {
         let (store, stores) = makeStores()
@@ -163,6 +182,7 @@ struct TrainingModelTests {
         #expect(try await store.activity(id: existing.id) == nil)
         #expect(try await store.activity(id: imported.id) == imported)
         #expect(try await store.importAnchor() == ImportAnchor(data: Data([1, 2, 3])))
+        #expect(model.hasImportedActivities)
         #expect(await importer.receivedAnchor == nil)
         let importedDayMetrics = model.metrics.first { Calendar(identifier: .gregorian).isDate($0.day, inSameDayAs: day(2)) }
         #expect((importedDayMetrics?.load ?? 0) > 0)

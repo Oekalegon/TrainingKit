@@ -4,11 +4,12 @@ import SwiftData
 
 /// The persisted row for a completed `Activity`.
 ///
-/// Every field beyond `id` and `sourceKey` (needed to look a record up by id or by
-/// `ActivitySource`) is a single JSON-encoded `payload` rather than one SwiftData attribute per
-/// `Activity` field — `Activity` is already `Codable` and round-trips exactly, and exploding every
-/// nested type (`HeartRateSample`, `SpeedSample`, `ElevationStats`, ...) into its own attributes or
-/// relationships would multiply the schema for no query benefit MVP 1 actually needs.
+/// Every field beyond `id`, `sourceKey` (needed to look a record up by id or by `ActivitySource`),
+/// and `start` (needed to filter by date range without decoding `payload`) is a single
+/// JSON-encoded `payload` rather than one SwiftData attribute per `Activity` field — `Activity` is
+/// already `Codable` and round-trips exactly, and exploding every nested type (`HeartRateSample`,
+/// `SpeedSample`, `ElevationStats`, ...) into its own attributes or relationships would multiply
+/// the schema for no query benefit MVP 1 actually needs.
 ///
 /// Every stored property has a default value, and none is `@Attribute(.unique)` — both required
 /// for a SwiftData model to be usable in a CloudKit-backed `ModelConfiguration`. Uniqueness-by-id
@@ -30,12 +31,16 @@ public final class ActivityRecord {
     /// `ActivityStore.activity(source:)`/`deleteActivity(source:)` can look a record up without
     /// decoding `payload`.
     var sourceKey: String = ""
+    /// Mirrors `Activity.start`, so `ActivityStore.activities(in:)` can filter by date range in
+    /// the `FetchDescriptor`'s predicate instead of fetching and decoding every row.
+    var start: Date = Date(timeIntervalSince1970: 0)
     /// The JSON-encoded `Activity`.
     var payload: Data = Data()
 
-    init(id: UUID, sourceKey: String, payload: Data) {
+    init(id: UUID, sourceKey: String, start: Date, payload: Data) {
         self.id = id
         self.sourceKey = sourceKey
+        self.start = start
         self.payload = payload
     }
 }
@@ -45,7 +50,12 @@ extension ActivityRecord {
     ///
     /// - Parameter activity: The activity to persist.
     public convenience init(activity: Activity) throws {
-        self.init(id: activity.id, sourceKey: activity.source.persistenceKey, payload: try PersistenceCoding.encode(activity))
+        self.init(
+            id: activity.id,
+            sourceKey: activity.source.persistenceKey,
+            start: activity.start,
+            payload: try PersistenceCoding.encode(activity)
+        )
     }
 
     /// Decodes `payload` back into an `Activity`.
@@ -53,11 +63,13 @@ extension ActivityRecord {
         try PersistenceCoding.decode(Activity.self, from: payload)
     }
 
-    /// Replaces this record's `sourceKey`/`payload` with `activity`'s, leaving `id` unchanged.
+    /// Replaces this record's `sourceKey`/`start`/`payload` with `activity`'s, leaving `id`
+    /// unchanged.
     ///
     /// - Parameter activity: The activity to update this record from.
     public func update(from activity: Activity) throws {
         sourceKey = activity.source.persistenceKey
+        start = activity.start
         payload = try PersistenceCoding.encode(activity)
     }
 }

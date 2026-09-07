@@ -3,28 +3,45 @@ import Foundation
 /// The observable facade the app builds its UI on: owns the current activities/plans/workouts/
 /// cycles/metrics, and keeps them in sync with the stores.
 ///
-/// `cycleStats`/`evaluation` (design doc §3.3) and `importActivities(from:)` aren't implemented
-/// yet — they depend on ``TrainingCore``'s periodisation-statistics, plan-evaluator, and
-/// `TrainingHealthKit` adapter work, none of which exist yet. They'll be added as small,
-/// additive extensions once those land.
+/// `importActivities(from:)` lives in a separate extension, ``TrainingModel/importActivities(from:asOf:)``.
+///
+/// `cycleStats`/`evaluation` (design doc §3.3) aren't implemented yet — they depend on
+/// ``TrainingCore``'s periodisation-statistics and plan-evaluator work, none of which exist yet.
+/// They'll be added as small, additive extensions once those land.
 @Observable
 @MainActor
 public final class TrainingModel {
-    public private(set) var activities: [Activity] = []
+    public internal(set) var activities: [Activity] = []
     public private(set) var plans: [PlannedActivity] = []
     public private(set) var workouts: [StructuredWorkout] = []
     public private(set) var cycles: [TrainingCycle] = []
     public private(set) var metrics: [FitnessMetrics] = []
+    /// Whether an ``ActivityImporting`` run (e.g. HealthKit) has ever completed successfully for
+    /// this athlete, independent of `activities.isEmpty` — set from ``AthleteStore/importAnchor()``
+    /// by ``load(in:asOf:)``, and never cleared once true by ``importActivities(from:asOf:)``.
+    ///
+    /// `activities.isEmpty` only reflects whichever range those two last loaded, so an athlete who
+    /// connected and imported months ago but has no activity in the currently displayed range
+    /// would otherwise look indistinguishable from one who never connected at all. Callers
+    /// building a first-run "connect" prompt (design doc §2.1) should gate on this instead.
+    ///
+    /// Deliberately monotonic within a session: an ``ActivityImporting`` conformer is allowed to
+    /// return a `nil` ``ImportResult/anchor`` (e.g. one that doesn't support incremental import),
+    /// which would otherwise read back as "never imported" on the very next `load(in:)` even
+    /// though an import just completed. `load(in:)` still re-derives this from the persisted
+    /// anchor on every call, so a `false` from a genuinely never-connected athlete is unaffected —
+    /// only a same-session `true` survives a later `nil`-anchor import.
+    public internal(set) var hasEverImportedActivities = false
     /// The athlete this model reflects. A plain, caller-managed property — `TrainingModel` doesn't
     /// automatically load or save it via `AthleteStore`.
     public var athlete: AthleteProfile
     /// EWMA time constants and monotony window used by ``recompute(asOf:)``.
     public var parameters: LoadModelParameters
 
-    private let stores: StoreSet
+    let stores: StoreSet
     private let estimator: any PlannedLoadEstimator
     private let calculators: [any LoadCalculator]
-    private var loadedRange: ClosedRange<Date>?
+    var loadedRange: ClosedRange<Date>?
 
     /// Creates a training model.
     ///
@@ -60,11 +77,13 @@ public final class TrainingModel {
         let newPlans = try await stores.planStore.plans(in: range)
         let newWorkouts = try await stores.workoutStore.workouts()
         let newCycles = try await stores.cycleStore.cycles(in: range)
+        let newHasEverImportedActivities = try await stores.athleteStore.importAnchor() != nil
 
         activities = newActivities
         plans = newPlans
         workouts = newWorkouts
         cycles = newCycles
+        hasEverImportedActivities = newHasEverImportedActivities
         loadedRange = range
         await recompute(asOf: today)
     }
@@ -119,7 +138,7 @@ public final class TrainingModel {
 
     /// The smallest range covering every range in `ranges`, or `fallback...fallback` if `ranges`
     /// is empty.
-    private static func union(of ranges: [ClosedRange<Date>], fallback: Date) -> ClosedRange<Date> {
+    static func union(of ranges: [ClosedRange<Date>], fallback: Date) -> ClosedRange<Date> {
         guard let first = ranges.first else { return fallback...fallback }
         return ranges.dropFirst().reduce(first) { partial, range in
             min(partial.lowerBound, range.lowerBound)...max(partial.upperBound, range.upperBound)

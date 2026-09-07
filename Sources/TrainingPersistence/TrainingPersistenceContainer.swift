@@ -1,3 +1,4 @@
+import Foundation
 import SwiftData
 
 /// Builds the `ModelContainer` covering every model type `TrainingPersistence` persists.
@@ -41,6 +42,37 @@ public enum TrainingPersistenceContainer {
             isStoredInMemoryOnly: isStoredInMemoryOnly,
             cloudKitDatabase: cloudKitDatabase
         )
-        return try ModelContainer(for: schema, configurations: [configuration])
+        let container = try ModelContainer(for: schema, configurations: [configuration])
+        try backfillActivityStartIfNeeded(in: container)
+        return container
+    }
+
+    /// One-time repair for `ActivityRecord` rows that predate its `start` column.
+    ///
+    /// SwiftData's automatic lightweight migration fills a newly added attribute with its default
+    /// value for every row that already existed on disk — it has no way to derive `start` from
+    /// `payload` the way ``ActivityRecord/init(activity:)`` does. Left alone, every activity
+    /// imported before `start` existed would keep the sentinel default forever, silently
+    /// disappearing from ``SwiftDataStore/activities(in:)``'s range predicate (which only matches
+    /// real dates) without ever throwing or logging anything.
+    ///
+    /// Finds rows still at that sentinel and re-derives `start` from their decoded `payload`,
+    /// exactly what a fresh `upsert` would have written. Idempotent and cheap after the first
+    /// repaired launch: only rows still carrying the sentinel are ever fetched or decoded, so this
+    /// doesn't reintroduce the full-table decode ``activities(in:)`` was fixed to avoid. A row
+    /// whose `payload` fails to decode is left as-is rather than failing the whole container's
+    /// startup over one corrupt record.
+    static func backfillActivityStartIfNeeded(in container: ModelContainer) throws {
+        let sentinel = Date(timeIntervalSince1970: 0)
+        let context = ModelContext(container)
+        let descriptor = FetchDescriptor<ActivityRecord>(predicate: #Predicate { $0.start == sentinel })
+        let staleRecords = try context.fetch(descriptor)
+        guard !staleRecords.isEmpty else { return }
+
+        for record in staleRecords {
+            guard let start = try? record.toActivity().start else { continue }
+            record.start = start
+        }
+        try context.save()
     }
 }

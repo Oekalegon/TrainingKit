@@ -549,7 +549,7 @@ struct StatisticsCalculator: Sendable {
 
 - Week boundary and first weekday come from `AthleteProfile` (add `weekStartsOn: Weekday`, default Monday), same timezone rule as daily bucketing so a Sunday-night run doesn't land in next week.
 - Future weeks are projected from planned activities: distance/time from the workout steps via `PaceModel`, time in zone from the step targets. `isProjected` marks them, and a partial current week mixes actual and planned exactly like the daily series.
-- `WeeklyDelta.distanceFraction` is the "10 % rule" number; `PlanEvaluator` (§8) can add a `maxWeeklyDistanceIncrease` guardrail on it — it's a cruder signal than CTL ramp but runners recognise it.
+- `WeeklyDelta.distanceFraction` is the "10 % rule" number; `PlanEvaluator` (§8.2) can add a `maxWeeklyDistanceIncrease` guardrail on it — it's a cruder signal than CTL ramp but runners recognise it.
 - Rolling views (4-week averages, monthly, year-to-date) are derived from `[WeeklyStats]` in the app rather than being separate calculators.
 
 ### 9.3 Tests
@@ -662,7 +662,7 @@ The delta for a cycle compares against the previous sibling at the same level an
 
 ### 10.4 Evaluator rules that need cycles
 
-Added to `PlanGuardrails` (§8):
+Added to `PlanGuardrails` (§8.2):
 
 | Rule | Signal | Check |
 |---|---|---|
@@ -672,7 +672,7 @@ Added to `PlanGuardrails` (§8):
 | Taper shape | CTL drop across taper micro(s) | small (≤ ~10 %) while TSB rises into the race window |
 | Consecutive load | number of micros since the last recovery-phase micro | ≤ template length, i.e. "you've gone 5 weeks without a rest week" |
 
-`PlanEvaluator.evaluate` gains a `cycles: [TrainingCycle]` parameter; without cycles it falls back to the cycle-free rules from §8.
+`PlanEvaluator.evaluate` gains a `cycles: [TrainingCycle]` parameter; without cycles it falls back to the cycle-free rules from §8.2.
 
 ---
 

@@ -28,7 +28,10 @@ extension TrainingModel {
             try await stores.activityStore.deleteActivity(source: source)
         }
         try await stores.athleteStore.saveImportAnchor(result.anchor)
-        hasImportedActivities = result.anchor != nil
+        // `||=`, not an overwrite: a conformer without incremental-import support is allowed to
+        // return a `nil` anchor even on a successful run, and a completed import shouldn't read
+        // back as "never imported" just because this particular run didn't produce one.
+        hasEverImportedActivities = hasEverImportedActivities || result.anchor != nil
 
         let range = loadedRange ?? Self.union(of: result.upserted.map { $0.start...$0.start }, fallback: today)
         activities = try await stores.activityStore.activities(in: range)

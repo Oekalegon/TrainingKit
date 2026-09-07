@@ -135,6 +135,93 @@ struct TrainingModelTests {
         #expect(model.activities.isEmpty)
         #expect(model.metrics.isEmpty)
     }
+
+    @Test("importActivities(from:) upserts, deletes, persists the anchor, and recomputes")
+    func importActivitiesUpsertsAndPersistsAnchor() async throws {
+        let (store, stores) = makeStores()
+        let athlete = AthleteProfile.fixture()
+        let existing = Activity(source: .healthKit(UUID()), sport: .running, start: day(0), duration: 1800)
+        try await store.upsert([existing])
+
+        let model = TrainingModel(stores: stores, athlete: athlete)
+        try await model.load(in: day(0)...day(10), asOf: day(3))
+        #expect(try await store.importAnchor() == nil)
+
+        let imported = Activity(
+            source: .healthKit(UUID()), sport: .cycling, start: day(2), duration: 3600,
+            perceivedExertion: 5
+        )
+        let importer = FakeImporter(result: ImportResult(
+            upserted: [imported],
+            deletedSources: [existing.source],
+            anchor: ImportAnchor(data: Data([1, 2, 3]))
+        ))
+
+        try await model.importActivities(from: importer, asOf: day(3))
+
+        #expect(model.activities.map(\.id).sorted() == [imported.id].sorted())
+        #expect(try await store.activity(id: existing.id) == nil)
+        #expect(try await store.activity(id: imported.id) == imported)
+        #expect(try await store.importAnchor() == ImportAnchor(data: Data([1, 2, 3])))
+        #expect(await importer.receivedAnchor == nil)
+        let importedDayMetrics = model.metrics.first { Calendar(identifier: .gregorian).isDate($0.day, inSameDayAs: day(2)) }
+        #expect((importedDayMetrics?.load ?? 0) > 0)
+    }
+
+    @Test("importActivities(from:) passes the previously persisted anchor")
+    func importActivitiesPassesPersistedAnchor() async throws {
+        let (store, stores) = makeStores()
+        let athlete = AthleteProfile.fixture()
+        let priorAnchor = ImportAnchor(data: Data([9, 9]))
+        try await store.saveImportAnchor(priorAnchor)
+
+        let model = TrainingModel(stores: stores, athlete: athlete)
+        let importer = FakeImporter(result: ImportResult(upserted: [], deletedSources: [], anchor: nil))
+
+        try await model.importActivities(from: importer, asOf: day(0))
+
+        #expect(await importer.receivedAnchor == priorAnchor)
+        #expect(try await store.importAnchor() == nil)
+    }
+
+    @Test("importActivities(from:) propagates a store failure without saving the anchor")
+    func importActivitiesFailurePropagates() async throws {
+        let (store, stores) = makeStores()
+        let athlete = AthleteProfile.fixture()
+        var throwingStores = stores
+        throwingStores.activityStore = ThrowingActivityStore()
+        let model = TrainingModel(stores: throwingStores, athlete: athlete)
+
+        let imported = Activity(source: .healthKit(UUID()), sport: .running, start: day(0), duration: 1800)
+        let importer = FakeImporter(result: ImportResult(
+            upserted: [imported], deletedSources: [], anchor: ImportAnchor(data: Data([1]))
+        ))
+
+        await #expect(throws: (any Error).self) {
+            try await model.importActivities(from: importer, asOf: day(0))
+        }
+
+        #expect(model.activities.isEmpty)
+        #expect(try await store.importAnchor() == nil)
+    }
+
+    @Test("importActivities(from:) reflects the import even if load(in:) was never called")
+    func importActivitiesWithoutPriorLoad() async throws {
+        let (_, stores) = makeStores()
+        let athlete = AthleteProfile.fixture()
+        let model = TrainingModel(stores: stores, athlete: athlete)
+
+        let imported = Activity(
+            source: .healthKit(UUID()), sport: .running, start: day(0), duration: 1800,
+            perceivedExertion: 5
+        )
+        let importer = FakeImporter(result: ImportResult(upserted: [imported], deletedSources: [], anchor: nil))
+
+        try await model.importActivities(from: importer, asOf: day(0))
+
+        #expect(model.activities.map(\.id) == [imported.id])
+        #expect(model.metrics.contains { $0.load > 0 })
+    }
 }
 
 private struct ThrowingPlanStore: PlanStore {
@@ -143,4 +230,31 @@ private struct ThrowingPlanStore: PlanStore {
     func upsert(_ plans: [PlannedActivity]) async throws {}
     func plan(id: UUID) async throws -> PlannedActivity? { nil }
     func deletePlan(id: UUID) async throws {}
+}
+
+/// Throws on `upsert` (used to test `importActivities(from:)`'s failure path) but otherwise behaves
+/// like an always-empty store, so `activities(in:)` reads after the throw still succeed.
+private struct ThrowingActivityStore: ActivityStore {
+    struct Boom: Error {}
+    func activities(in range: ClosedRange<Date>) async throws -> [Activity] { [] }
+    func upsert(_ activities: [Activity]) async throws { throw Boom() }
+    func activity(source: ActivitySource) async throws -> Activity? { nil }
+    func activity(id: UUID) async throws -> Activity? { nil }
+    func deleteActivity(source: ActivitySource) async throws {}
+}
+
+/// An actor, not a plain class with `@unchecked Sendable`, so `receivedAnchor` is genuinely
+/// data-race-safe even if a future test calls `importActivities(since:)` concurrently.
+private actor FakeImporter: ActivityImporting {
+    private let result: ImportResult
+    private(set) var receivedAnchor: ImportAnchor?
+
+    init(result: ImportResult) {
+        self.result = result
+    }
+
+    func importActivities(since anchor: ImportAnchor?) async throws -> ImportResult {
+        receivedAnchor = anchor
+        return result
+    }
 }

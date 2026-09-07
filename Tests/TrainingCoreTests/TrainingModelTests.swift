@@ -46,6 +46,25 @@ struct TrainingModelTests {
         #expect(!model.metrics.isEmpty)
     }
 
+    @Test("load(in:) sets hasEverImportedActivities from the persisted anchor, independent of activities.isEmpty")
+    func loadReflectsPersistedAnchorRegardlessOfLoadedActivities() async throws {
+        let (store, stores) = makeStores()
+        let athlete = AthleteProfile.fixture()
+        // An activity outside the loaded range: activities.isEmpty will be true after load, but a
+        // prior import having happened should still be reflected in hasEverImportedActivities.
+        let outOfRange = Activity(source: .healthKit(UUID()), sport: .running, start: day(50), duration: 1800)
+        try await store.upsert([outOfRange])
+        try await store.saveImportAnchor(ImportAnchor(data: Data([9])))
+
+        let model = TrainingModel(stores: stores, athlete: athlete)
+        #expect(!model.hasEverImportedActivities)
+
+        try await model.load(in: day(0)...day(10), asOf: day(3))
+
+        #expect(model.activities.isEmpty)
+        #expect(model.hasEverImportedActivities)
+    }
+
     @Test("add(_ plan:) persists to the store and updates metrics")
     func addPlanPersistsAndRecomputes() async throws {
         let (store, stores) = makeStores()
@@ -163,9 +182,32 @@ struct TrainingModelTests {
         #expect(try await store.activity(id: existing.id) == nil)
         #expect(try await store.activity(id: imported.id) == imported)
         #expect(try await store.importAnchor() == ImportAnchor(data: Data([1, 2, 3])))
+        #expect(model.hasEverImportedActivities)
         #expect(await importer.receivedAnchor == nil)
         let importedDayMetrics = model.metrics.first { Calendar(identifier: .gregorian).isDate($0.day, inSameDayAs: day(2)) }
         #expect((importedDayMetrics?.load ?? 0) > 0)
+    }
+
+    @Test("importActivities(from:) doesn't clear hasEverImportedActivities when an importer returns a nil anchor")
+    func importActivitiesWithNilAnchorDoesNotClearHasEverImported() async throws {
+        let (store, stores) = makeStores()
+        let athlete = AthleteProfile.fixture()
+        let model = TrainingModel(stores: stores, athlete: athlete)
+
+        let firstImporter = FakeImporter(result: ImportResult(
+            upserted: [], deletedSources: [], anchor: ImportAnchor(data: Data([1]))
+        ))
+        try await model.importActivities(from: firstImporter, asOf: day(0))
+        #expect(model.hasEverImportedActivities)
+
+        // A second importer that doesn't support incremental import (a valid `ActivityImporting`
+        // conformer per its own doc comment) returns a nil anchor -- the completed import this
+        // represents must not read back as "never imported".
+        let secondImporter = FakeImporter(result: ImportResult(upserted: [], deletedSources: [], anchor: nil))
+        try await model.importActivities(from: secondImporter, asOf: day(0))
+
+        #expect(try await store.importAnchor() == nil)
+        #expect(model.hasEverImportedActivities)
     }
 
     @Test("importActivities(from:) passes the previously persisted anchor")

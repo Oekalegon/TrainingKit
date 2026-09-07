@@ -13,21 +13,30 @@ import SwiftData
 /// this type is created with; `modelContext` (used throughout below) comes from the `ModelActor`
 /// protocol it conforms to.
 ///
-/// Every query fetches every row of the relevant model type and filters/decodes in Swift, exactly
-/// mirroring `InMemoryStore`'s in-memory filtering — deliberately simple rather than pushing
-/// range/dedupe predicates into SwiftData, since a `#Predicate` can't inspect fields inside an
-/// opaque `Data` payload anyway (see ``ActivityRecord``). Fine at the data volumes a single
-/// athlete's training log produces; worth revisiting with indexed date fields if profiling ever
-/// shows otherwise.
+/// Every query but `activities(in:)` fetches every row of the relevant model type and
+/// filters/decodes in Swift, exactly mirroring `InMemoryStore`'s in-memory filtering —
+/// deliberately simple rather than pushing range/dedupe predicates into SwiftData, since a
+/// `#Predicate` can't inspect fields inside an opaque `Data` payload anyway (see
+/// ``ActivityRecord``). Fine at the data volumes those tables produce; worth revisiting with
+/// indexed date fields if profiling ever shows otherwise. `activities(in:)` is the one query that
+/// already needed this: see its doc comment below.
 @ModelActor
 public actor SwiftDataStore: ActivityStore, PlanStore, WorkoutLibraryStore, CycleStore, AthleteStore {
     // MARK: ActivityStore
 
     /// See `ActivityStore/activities(in:)`.
+    ///
+    /// Unlike the other `in:`-range queries below, this pushes the range into the fetch predicate
+    /// against `ActivityRecord.start` rather than fetching every row and filtering in Swift — the
+    /// activity table is large enough (years of imported history) that decoding every `payload` on
+    /// every call is a measurable cost the other, smaller tables don't have.
     public func activities(in range: ClosedRange<Date>) async throws -> [Activity] {
-        try modelContext.fetch(FetchDescriptor<ActivityRecord>())
-            .map { try $0.toActivity() }
-            .filter { range.contains($0.start) }
+        let lowerBound = range.lowerBound
+        let upperBound = range.upperBound
+        let descriptor = FetchDescriptor<ActivityRecord>(
+            predicate: #Predicate { $0.start >= lowerBound && $0.start <= upperBound }
+        )
+        return try modelContext.fetch(descriptor).map { try $0.toActivity() }
     }
 
     /// See `ActivityStore/upsert(_:)`.

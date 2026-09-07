@@ -10,7 +10,7 @@ Scope of MVP 1:
 - Produce one continuous daily fitness series — measured in the past, projected in the future — with CTL / ATL / TSB / monotony / strain per day, plus period and cycle statistics.
 - Evaluate the committed plan against injury-risk and progress guardrails (read-only in MVP 1; the generator that acts on the findings is MVP 2).
 
-Designed so MVP 2 (plan assistant) and MVP 3 (calibration from planned-vs-actual residuals) slot in without reshaping the core.
+Designed so MVP 2 (plan generator), MVP 3 (LLM coach) and MVP 4 (calibration from planned-vs-actual residuals) slot in without reshaping the core.
 
 ---
 
@@ -125,7 +125,7 @@ HR samples are kept on the activity (not just the resulting load) so a recalcula
 struct TrainingLoad: Sendable, Codable {
     var value: Double                 // TRIMP units
     var method: LoadMethod            // .exponentialTRIMP, .estimatedFromPlan, ...
-    var confidence: Double            // 1.0 measured, < 1 for estimates; used by MVP 3
+    var confidence: Double            // 1.0 measured, < 1 for estimates; used by MVP 4
 }
 
 protocol LoadCalculator: Sendable {
@@ -136,7 +136,7 @@ protocol LoadCalculator: Sendable {
 `ExponentialTRIMPCalculator` is the MVP implementation:
 
 - Integrates Banister's exponential TRIMP over the HR stream, trapezoidally between consecutive samples.
-- Coefficients `(0.64, 1.92)` male, `(0.86, 1.67)` female, held in a `TRIMPCoefficients` value so MVP 3 can tune them.
+- Coefficients `(0.64, 1.92)` male, `(0.86, 1.67)` female, held in a `TRIMPCoefficients` value so MVP 4 can tune them.
 - Gaps > 60 s between samples are not integrated (treated as a pause), configurable.
 - Throws `LoadError.noHeartRateData` rather than returning 0, so callers can fall back to `DurationRPECalculator` (duration × RPE) for activities without HR.
 
@@ -147,8 +147,15 @@ struct StructuredWorkout: Identifiable, Sendable, Codable {
     let id: UUID
     var name: String
     var sport: Sport
+    var sessionType: SessionType?     // e.g. .long, .interval, .hillRepeats; nil = unclassified.
+                                       // Used by PlanGenerator (§8.1) to match day preferences —
+                                       // doesn't affect load calculation or WorkoutKit/FIT export.
     var blocks: [WorkoutBlock]
     var workoutKitID: UUID?           // identity of the synced WorkoutKit plan, nil if unsynced
+}
+
+enum SessionType: String, Sendable, Codable {
+    case easy, long, interval, tempo, hillRepeats, recovery, race
 }
 
 struct WorkoutBlock: Sendable, Codable {
@@ -188,7 +195,7 @@ protocol PlannedLoadEstimator: Sendable {
 }
 ```
 
-`TRIMPPlanEstimator` walks the steps: each step's duration comes from its goal (`.time` direct, `.distance` via `PaceModel` at the step's target intensity, `.open` via default), each step's intensity comes from `IntensityTarget` → `deltaHRRatio` (zone midpoint), and the same Banister formula is applied per step. Result is a `TrainingLoad` with `method: .estimatedFromPlan` and `confidence < 1`. MVP 3 replaces this with a calibrated estimator that scales by observed residuals; the protocol boundary is the seam.
+`TRIMPPlanEstimator` walks the steps: each step's duration comes from its goal (`.time` direct, `.distance` via `PaceModel` at the step's target intensity, `.open` via default), each step's intensity comes from `IntensityTarget` → `deltaHRRatio` (zone midpoint), and the same Banister formula is applied per step. Result is a `TrainingLoad` with `method: .estimatedFromPlan` and `confidence < 1`. MVP 4 replaces this with a calibrated estimator that scales by observed residuals; the protocol boundary is the seam.
 
 ---
 
@@ -331,7 +338,7 @@ struct WorkoutKitBridge {
 
 ### 5.3 Reconciliation (`TrainingCore`)
 
-`PlanReconciler` links a completed `Activity` to a `PlannedActivity` on the same day with the same sport; closest duration wins if there are several. Sets `PlannedActivity.completedActivityID` and `Activity.linkedPlanID`. In MVP 1 this only affects the merge rule (today's actual beats today's estimate); in MVP 3 the `(expected, actual)` pairs it produces are the training data for calibration.
+`PlanReconciler` links a completed `Activity` to a `PlannedActivity` on the same day with the same sport; closest duration wins if there are several. Sets `PlannedActivity.completedActivityID` and `Activity.linkedPlanID`. In MVP 1 this only affects the merge rule (today's actual beats today's estimate); in MVP 4 the `(expected, actual)` pairs it produces are the training data for calibration.
 
 ---
 
@@ -380,9 +387,53 @@ Tests/
 
 ---
 
-## 8. Plan evaluation (guardrails for MVP 2, defined in Core now)
+## 8. Plan generation & evaluation (MVP 2, guardrails defined in Core now)
 
 The assistant in MVP 2 doesn't just emit a plan — it proposes one, runs it through the series engine, and checks the *projected* metrics against injury-risk and progress rules before accepting it. Because the evaluation is pure functions over `[FitnessMetrics]`, it belongs in `TrainingCore` and can ship in MVP 1 as a read-only "how does my current plan look" check.
+
+### 8.1 Plan preferences (generator input)
+
+`PlanGuardrails` (below) is the safety ceiling everyone shares; `PlanPreferences` is what one athlete actually wants, and it's what the generator proposes *from*. Preferences are soft — the generator honours them where it can, but backs off before it lets any proposal violate a guardrail. Stored per athlete, versionable like `HeartRateZoneSettings` isn't needed here since a stale preference just produces a worse first proposal, not a wrong load calculation.
+
+```swift
+struct PlanPreferences: Sendable, Codable {
+    var trainingDays: Set<Weekday>                    // which days the athlete trains; count = sessions/week
+    var dayPreferences: [Weekday: DayPreference] = [:] // optional per-day sport/surface/session-type preference
+    var startingSessionVolume: VolumeTarget            // week-1 default: distance/duration of a regular
+                                                        // (non-long, non-special) session
+    var maxSingleSessionDistanceMeters: Double?        // long-run cap; nil = no cap beyond guardrails
+    var maxSingleSessionDuration: TimeInterval?        // cap for time-based steps/sports
+    var startingWeeklyVolume: VolumeTarget             // week-1 target: total distance or duration
+    var weeklyIncrement: VolumeIncrement                // how fast volume ramps toward the meso target
+}
+
+struct DayPreference: Sendable, Codable {
+    var sport: Sport?              // defaults to the athlete's primary sport if nil
+    var surface: RunSurface?       // .road, .trail, .track, .indoor; nil = no preference
+    var sessionType: SessionType?  // e.g. .long on Sunday, .interval on Tuesday, .hillRepeats on Thursday;
+                                    // nil = generator picks freely (typically .easy)
+}
+
+enum RunSurface: String, Sendable, Codable {
+    case road, trail, track, indoor
+}
+
+struct VolumeTarget: Sendable, Codable {
+    enum Unit: String, Sendable, Codable { case distance, duration }
+    var unit: Unit
+    var distanceMeters: Double?    // set when unit == .distance
+    var duration: TimeInterval?    // set when unit == .duration
+}
+
+struct VolumeIncrement: Sendable, Codable {
+    var amountPerWeek: Double?     // absolute increase, same unit as the target
+    var percentPerWeek: Double?    // relative increase (e.g. the "10% rule"); wins if both are set
+}
+```
+
+`PlanGenerator` reads `trainingDays` to decide which calendar days get a session at all, and `startingWeeklyVolume` + `weeklyIncrement` to size each week's total before splitting it across sessions. Days without a `dayPreferences` entry (or with `sessionType == nil`) default to an `.easy` session sized from `startingSessionVolume`, ramped the same way as the weekly total. Days with an explicit `sessionType` (e.g. `.long` on Sunday, `.interval` on Tuesday, `.hillRepeats` on Thursday) are filled from library workouts matching that `sessionType`/`sport`/`surface`, falling back to the closest match if the library has nothing tagged for it. `maxSingleSessionDistanceMeters`/`Duration` bounds any one session — most relevant to `.long` days — regardless of what the ramp would otherwise assign; this is a preference-level cap (e.g. "I don't want a long run over 32km"), independent of and typically tighter than anything `PlanGuardrails` enforces at the series level. None of this bypasses §8.2: a ramp the athlete asked for that would still breach `maxCTLRampPerWeek` or `maxATLtoCTLRatio` gets throttled by the same adjust step as any other proposal.
+
+### 8.2 Guardrails
 
 ```swift
 struct PlanEvaluation: Sendable {
@@ -427,9 +478,9 @@ Rules, all computed from the projected series:
 | Race-day TSB | TSB on `Race.date` | Taper landed: positive but not so high that fitness was lost |
 | Progress | CTL at meso end − CTL at meso start | Guards against a "safe" plan that's actually flat (cycle-aware rules in §10.4) |
 
-Guardrail values are `Codable` and user-editable; MVP 3 can tune them from observed outcomes (e.g. the athlete who tolerates a 1.5 ratio without issue).
+Guardrail values are `Codable` and user-editable; MVP 4 can tune them from observed outcomes (e.g. the athlete who tolerates a 1.5 ratio without issue).
 
-The MVP 2 generator loop is then: propose → `DailyLoadSeries` → `FitnessMetricsCalculator` → `PlanEvaluator` → adjust (drop a session, swap hard for easy, insert a down-week) → repeat until acceptable. Whether the "adjust" step is heuristic or a Claude API call, the evaluator is what keeps it honest.
+The MVP 2 generator loop is then: propose from `PlanPreferences` (§8.1) → `DailyLoadSeries` → `FitnessMetricsCalculator` → `PlanEvaluator` → adjust (drop a session, swap hard for easy, insert a down-week, throttle the requested ramp) → repeat until acceptable. The "adjust" step is a fixed set of heuristics in MVP 2 — no model in the loop. MVP 3 adds an LLM-driven coach that can propose the same kind of edits conversationally, but it drives the identical `PlanEvaluator` gate rather than replacing it.
 
 ---
 
@@ -498,7 +549,7 @@ struct StatisticsCalculator: Sendable {
 
 - Week boundary and first weekday come from `AthleteProfile` (add `weekStartsOn: Weekday`, default Monday), same timezone rule as daily bucketing so a Sunday-night run doesn't land in next week.
 - Future weeks are projected from planned activities: distance/time from the workout steps via `PaceModel`, time in zone from the step targets. `isProjected` marks them, and a partial current week mixes actual and planned exactly like the daily series.
-- `WeeklyDelta.distanceFraction` is the "10 % rule" number; `PlanEvaluator` (§8) can add a `maxWeeklyDistanceIncrease` guardrail on it — it's a cruder signal than CTL ramp but runners recognise it.
+- `WeeklyDelta.distanceFraction` is the "10 % rule" number; `PlanEvaluator` (§8.2) can add a `maxWeeklyDistanceIncrease` guardrail on it — it's a cruder signal than CTL ramp but runners recognise it.
 - Rolling views (4-week averages, monthly, year-to-date) are derived from `[WeeklyStats]` in the app rather than being separate calculators.
 
 ### 9.3 Tests
@@ -611,7 +662,7 @@ The delta for a cycle compares against the previous sibling at the same level an
 
 ### 10.4 Evaluator rules that need cycles
 
-Added to `PlanGuardrails` (§8):
+Added to `PlanGuardrails` (§8.2):
 
 | Rule | Signal | Check |
 |---|---|---|
@@ -621,13 +672,13 @@ Added to `PlanGuardrails` (§8):
 | Taper shape | CTL drop across taper micro(s) | small (≤ ~10 %) while TSB rises into the race window |
 | Consecutive load | number of micros since the last recovery-phase micro | ≤ template length, i.e. "you've gone 5 weeks without a rest week" |
 
-`PlanEvaluator.evaluate` gains a `cycles: [TrainingCycle]` parameter; without cycles it falls back to the cycle-free rules from §8.
+`PlanEvaluator.evaluate` gains a `cycles: [TrainingCycle]` parameter; without cycles it falls back to the cycle-free rules from §8.2.
 
 ---
 
-## 11. LLM tool layer (`TrainingTools`)
+## 11. LLM tool layer (`TrainingTools`, MVP 3)
 
-Everything above is exposed to a language model as a set of typed tools, so the MVP 2 "coach" — or an ad-hoc chat in the app — can read the athlete's data, run what-if simulations, and propose plan changes. The design principle: **the LLM never computes fitness numbers, it calls tools that do**, and every write goes through a sandbox that the user commits explicitly.
+Everything above is exposed to a language model as a set of typed tools, so the MVP 3 "coach" — or an ad-hoc chat in the app — can read the athlete's data, run what-if simulations, and propose plan changes. This is a separate MVP from the plan generator (MVP 2): the generator ships first as a fully deterministic, heuristic-driven loop with no model dependency, and the coach layer is an optional, later addition on top of it. The design principle: **the LLM never computes fitness numbers, it calls tools that do**, and every write goes through a sandbox that the user commits explicitly.
 
 ### 11.1 Provider-neutral core
 
@@ -656,7 +707,7 @@ struct ToolRegistry: Sendable {
 
 `ToolSchema` is generated from `Input` via a small `JSONSchemaEncoder` (reflection over `Codable`, with a `@ToolDescription("...")` property wrapper for per-field hints). One source of truth; the Anthropic and Foundation Models adapters both render from it.
 
-### 11.2 Tool set for MVP 2
+### 11.2 Tool set for MVP 3
 
 Read-only:
 
@@ -722,8 +773,9 @@ Tests: schema round-trips for every tool input, a scripted fake provider that ex
 
 | MVP | Adds | Where it plugs in |
 |---|---|---|
-| 2 — plan assistant | `Race`/`Goal` model, `PlanGenerator` that reuses `CycleLayoutBuilder` (§10.2, already in MVP 1) and then fills each micro with `[PlannedActivity]` from the library, iterated against `PlanEvaluator`; the coach layer is an LLM driving the §11 tools inside a `PlanSandbox` | Emits plain `PlannedActivity` values through `PlanStore`; runs `DailyLoadSeries` with a hypothetical `today` to preview outcomes; `PlanEvaluator` (§8) is the accept/reject gate |
-| 3 — calibration | `ResidualStore` of (expected, actual) pairs from `PlanReconciler`; `CalibratedPlanEstimator` scaling per sport/zone; optional tuning of `TRIMPCoefficients` and `LoadModelParameters` | Swaps the `PlannedLoadEstimator` implementation; nothing upstream changes |
+| 2 — plan generator | `Race`/`Goal` model, `SessionType` tag on `StructuredWorkout` (§2.4), `PlanPreferences` (§8.1: training days, per-day sport/surface/session-type, starting per-session and weekly volume, session caps, weekly ramp), `PlanGenerator` that reuses `CycleLayoutBuilder` (§10.2, already in MVP 1) and then fills each micro with `[PlannedActivity]` from the library, iterated against `PlanEvaluator` via a fixed set of heuristic adjustments (§8.2) — no LLM involved | Emits plain `PlannedActivity` values through `PlanStore`; runs `DailyLoadSeries` with a hypothetical `today` to preview outcomes; `PlanEvaluator` (§8.2) is the accept/reject gate, `PlanPreferences` is what the proposal is seeded from |
+| 3 — LLM coach | `TrainingTools` typed tool layer (§11) driving the same `PlanGenerator`/`PlanEvaluator` conversationally through a `PlanSandbox`; Anthropic and on-device Foundation Models adapters | Reuses MVP 2's `PlanGenerator`/`PlanEvaluator`/`PlanStore` seams unchanged; adds the sandbox and tool dispatch on top |
+| 4 — calibration | `ResidualStore` of (expected, actual) pairs from `PlanReconciler`; `CalibratedPlanEstimator` scaling per sport/zone; optional tuning of `TRIMPCoefficients` and `LoadModelParameters` | Swaps the `PlannedLoadEstimator` implementation; nothing upstream changes |
 | Garmin/COROS | `TrainingFIT` — FIT workout export from `StructuredWorkout`, FIT/TCX activity import | Second `ActivityImporting` implementation; second exporter next to `WorkoutKitBridge` |
 
 Open questions to settle before coding:

@@ -1,5 +1,7 @@
 import Foundation
 
+/// `importActivities(from:)`, split into its own file per the design's note that
+/// `TrainingHealthKit`-dependent facade methods would arrive as additive extensions.
 extension TrainingModel {
     /// Runs an incremental import via `importer`, persists the results, and recomputes.
     ///

@@ -163,7 +163,7 @@ struct TrainingModelTests {
         #expect(try await store.activity(id: existing.id) == nil)
         #expect(try await store.activity(id: imported.id) == imported)
         #expect(try await store.importAnchor() == ImportAnchor(data: Data([1, 2, 3])))
-        #expect(importer.receivedAnchor == nil)
+        #expect(await importer.receivedAnchor == nil)
         let importedDayMetrics = model.metrics.first { Calendar(identifier: .gregorian).isDate($0.day, inSameDayAs: day(2)) }
         #expect((importedDayMetrics?.load ?? 0) > 0)
     }
@@ -180,7 +180,29 @@ struct TrainingModelTests {
 
         try await model.importActivities(from: importer, asOf: day(0))
 
-        #expect(importer.receivedAnchor == priorAnchor)
+        #expect(await importer.receivedAnchor == priorAnchor)
+        #expect(try await store.importAnchor() == nil)
+    }
+
+    @Test("importActivities(from:) propagates a store failure without saving the anchor")
+    func importActivitiesFailurePropagates() async throws {
+        let (store, stores) = makeStores()
+        let athlete = AthleteProfile.fixture()
+        var throwingStores = stores
+        throwingStores.activityStore = ThrowingActivityStore()
+        let model = TrainingModel(stores: throwingStores, athlete: athlete)
+
+        let imported = Activity(source: .healthKit(UUID()), sport: .running, start: day(0), duration: 1800)
+        let importer = FakeImporter(result: ImportResult(
+            upserted: [imported], deletedSources: [], anchor: ImportAnchor(data: Data([1]))
+        ))
+
+        await #expect(throws: (any Error).self) {
+            try await model.importActivities(from: importer, asOf: day(0))
+        }
+
+        #expect(model.activities.isEmpty)
+        #expect(try await store.importAnchor() == nil)
     }
 
     @Test("importActivities(from:) reflects the import even if load(in:) was never called")
@@ -210,7 +232,20 @@ private struct ThrowingPlanStore: PlanStore {
     func deletePlan(id: UUID) async throws {}
 }
 
-private final class FakeImporter: ActivityImporting, @unchecked Sendable {
+/// Throws on `upsert` (used to test `importActivities(from:)`'s failure path) but otherwise behaves
+/// like an always-empty store, so `activities(in:)` reads after the throw still succeed.
+private struct ThrowingActivityStore: ActivityStore {
+    struct Boom: Error {}
+    func activities(in range: ClosedRange<Date>) async throws -> [Activity] { [] }
+    func upsert(_ activities: [Activity]) async throws { throw Boom() }
+    func activity(source: ActivitySource) async throws -> Activity? { nil }
+    func activity(id: UUID) async throws -> Activity? { nil }
+    func deleteActivity(source: ActivitySource) async throws {}
+}
+
+/// An actor, not a plain class with `@unchecked Sendable`, so `receivedAnchor` is genuinely
+/// data-race-safe even if a future test calls `importActivities(since:)` concurrently.
+private actor FakeImporter: ActivityImporting {
     private let result: ImportResult
     private(set) var receivedAnchor: ImportAnchor?
 

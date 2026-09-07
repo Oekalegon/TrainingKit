@@ -3,14 +3,15 @@ import Foundation
 /// The observable facade the app builds its UI on: owns the current activities/plans/workouts/
 /// cycles/metrics, and keeps them in sync with the stores.
 ///
-/// `cycleStats`/`evaluation` (design doc §3.3) and `importActivities(from:)` aren't implemented
-/// yet — they depend on ``TrainingCore``'s periodisation-statistics, plan-evaluator, and
-/// `TrainingHealthKit` adapter work, none of which exist yet. They'll be added as small,
-/// additive extensions once those land.
+/// `importActivities(from:)` lives in a separate extension, ``TrainingModel/importActivities(from:asOf:)``.
+///
+/// `cycleStats`/`evaluation` (design doc §3.3) aren't implemented yet — they depend on
+/// ``TrainingCore``'s periodisation-statistics and plan-evaluator work, none of which exist yet.
+/// They'll be added as small, additive extensions once those land.
 @Observable
 @MainActor
 public final class TrainingModel {
-    public private(set) var activities: [Activity] = []
+    public internal(set) var activities: [Activity] = []
     public private(set) var plans: [PlannedActivity] = []
     public private(set) var workouts: [StructuredWorkout] = []
     public private(set) var cycles: [TrainingCycle] = []
@@ -21,10 +22,10 @@ public final class TrainingModel {
     /// EWMA time constants and monotony window used by ``recompute(asOf:)``.
     public var parameters: LoadModelParameters
 
-    private let stores: StoreSet
+    let stores: StoreSet
     private let estimator: any PlannedLoadEstimator
     private let calculators: [any LoadCalculator]
-    private var loadedRange: ClosedRange<Date>?
+    var loadedRange: ClosedRange<Date>?
 
     /// Creates a training model.
     ///
@@ -119,7 +120,7 @@ public final class TrainingModel {
 
     /// The smallest range covering every range in `ranges`, or `fallback...fallback` if `ranges`
     /// is empty.
-    private static func union(of ranges: [ClosedRange<Date>], fallback: Date) -> ClosedRange<Date> {
+    static func union(of ranges: [ClosedRange<Date>], fallback: Date) -> ClosedRange<Date> {
         guard let first = ranges.first else { return fallback...fallback }
         return ranges.dropFirst().reduce(first) { partial, range in
             min(partial.lowerBound, range.lowerBound)...max(partial.upperBound, range.upperBound)

@@ -54,7 +54,11 @@ extension TrainingModel {
     /// - Parameters:
     ///   - importer: The external source to import from, e.g. `HealthKitActivityImporter`.
     ///   - today: Passed through to ``recompute(asOf:)``.
-    /// - Throws: Whatever `importActivities(from:asOf:)` throws.
+    /// - Throws: Whatever `importActivities(from:asOf:)` throws, or whatever
+    ///   ``AthleteStore/saveImportAnchor(_:)`` throws clearing the anchor beforehand. In either
+    ///   case the anchor stays cleared — the next import (resync or otherwise) will also be a full
+    ///   one, which `upsert`'s id-matched replace makes harmless, same as a failed anchor save in
+    ///   ``importActivities(from:asOf:)`` itself.
     public func resyncActivities(from importer: any ActivityImporting, asOf today: Date = .now) async throws {
         try await stores.athleteStore.saveImportAnchor(nil)
         try await importActivities(from: importer, asOf: today)

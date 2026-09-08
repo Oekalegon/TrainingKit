@@ -303,6 +303,23 @@ struct TrainingModelTests {
         #expect(all.map(\.id) == [stale.id])
         #expect(all.first?.sport == .hiking)
     }
+
+    @Test("resyncActivities(from:) propagates a failure clearing the anchor, without calling the importer")
+    func resyncActivitiesAnchorClearFailurePropagates() async throws {
+        let (_, stores) = makeStores()
+        let athlete = AthleteProfile.fixture()
+        var throwingStores = stores
+        throwingStores.athleteStore = ThrowingAthleteStore()
+        let model = TrainingModel(stores: throwingStores, athlete: athlete)
+
+        let importer = FakeImporter(result: ImportResult(upserted: [], deletedSources: [], anchor: nil))
+
+        await #expect(throws: (any Error).self) {
+            try await model.resyncActivities(from: importer, asOf: day(0))
+        }
+
+        #expect(await importer.callCount == 0)
+    }
 }
 
 private struct ThrowingPlanStore: PlanStore {
@@ -324,11 +341,22 @@ private struct ThrowingActivityStore: ActivityStore {
     func deleteActivity(source: ActivitySource) async throws {}
 }
 
+/// Throws on `saveImportAnchor` (used to test `resyncActivities(from:)`'s anchor-clear failure
+/// path) but otherwise behaves like an always-empty store.
+private struct ThrowingAthleteStore: AthleteStore {
+    struct Boom: Error {}
+    func athleteProfile() async throws -> AthleteProfile? { nil }
+    func save(_ profile: AthleteProfile) async throws {}
+    func importAnchor() async throws -> ImportAnchor? { nil }
+    func saveImportAnchor(_ anchor: ImportAnchor?) async throws { throw Boom() }
+}
+
 /// An actor, not a plain class with `@unchecked Sendable`, so `receivedAnchor` is genuinely
 /// data-race-safe even if a future test calls `importActivities(since:)` concurrently.
 private actor FakeImporter: ActivityImporting {
     private let result: ImportResult
     private(set) var receivedAnchor: ImportAnchor?
+    private(set) var callCount = 0
 
     init(result: ImportResult) {
         self.result = result
@@ -336,6 +364,7 @@ private actor FakeImporter: ActivityImporting {
 
     func importActivities(since anchor: ImportAnchor?) async throws -> ImportResult {
         receivedAnchor = anchor
+        callCount += 1
         return result
     }
 }

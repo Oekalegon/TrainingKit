@@ -95,18 +95,10 @@ public struct DailyLoadSeries: Sendable {
         athlete: AthleteProfile,
         calculators: [any LoadCalculator]
     ) -> Double? {
-        var lastError: (any Error)?
         for calculator in calculators {
-            do {
-                return try calculator.load(for: activity, athlete: athlete).value
-            } catch {
-                lastError = error
+            if let load = try? calculator.load(for: activity, athlete: athlete) {
+                return load.value
             }
-        }
-        if let lastError {
-            Logging.series.debug(
-                "No load calculator produced a value for activity \(activity.id, privacy: .public): \(String(describing: lastError), privacy: .public)"
-            )
         }
         return nil
     }

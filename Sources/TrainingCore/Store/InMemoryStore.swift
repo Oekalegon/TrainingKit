@@ -6,13 +6,16 @@ import Foundation
 /// above are named distinctly (`deletePlan`/`deleteWorkout`/`deleteCycle` rather than a shared
 /// `delete(id:)`) — Swift can't satisfy identically-shaped requirements from different protocols
 /// with different implementations on one conforming type.
-public actor InMemoryStore: ActivityStore, PlanStore, WorkoutLibraryStore, CycleStore, AthleteStore {
+public actor InMemoryStore: ActivityStore, PlanStore, WorkoutLibraryStore, CycleStore, AthleteStore,
+    FitnessMetricsCacheStore {
     private var activitiesByID: [UUID: Activity] = [:]
     private var plansByID: [UUID: PlannedActivity] = [:]
     private var workoutsByID: [UUID: StructuredWorkout] = [:]
     private var cyclesByID: [UUID: TrainingCycle] = [:]
     private var profile: AthleteProfile?
     private var anchor: ImportAnchor?
+    private var cachedMetricsByDay: [Date: FitnessMetrics] = [:]
+    private var cacheDirtyWatermark: Date?
 
     /// Creates an empty in-memory store.
     public init() {}
@@ -144,5 +147,63 @@ public actor InMemoryStore: ActivityStore, PlanStore, WorkoutLibraryStore, Cycle
     /// See ``AthleteStore/saveImportAnchor(_:)``.
     public func saveImportAnchor(_ anchor: ImportAnchor?) async throws {
         self.anchor = anchor
+    }
+
+    // MARK: FitnessMetricsCacheStore
+
+    /// See ``FitnessMetricsCacheStore/cachedMetrics(in:)``.
+    public func cachedMetrics(in range: ClosedRange<Date>) async throws -> [FitnessMetrics] {
+        cachedMetricsByDay.values.filter { range.contains($0.day) }
+    }
+
+    /// See ``FitnessMetricsCacheStore/cachedMetrics(immediatelyBefore:)``.
+    public func cachedMetrics(immediatelyBefore date: Date) async throws -> FitnessMetrics? {
+        cachedMetricsByDay.values.filter { $0.day < date }.max { $0.day < $1.day }
+    }
+
+    /// See ``FitnessMetricsCacheStore/recentLoads(before:count:)``.
+    public func recentLoads(before date: Date, count: Int) async throws -> [Double] {
+        cachedMetricsByDay.values
+            .filter { $0.day < date }
+            .sorted { $0.day < $1.day }
+            .suffix(count)
+            .map(\.load)
+    }
+
+    /// See ``FitnessMetricsCacheStore/latestCachedDay()``.
+    public func latestCachedDay() async throws -> Date? {
+        cachedMetricsByDay.keys.max()
+    }
+
+    /// See ``FitnessMetricsCacheStore/earliestCachedDay()``.
+    public func earliestCachedDay() async throws -> Date? {
+        cachedMetricsByDay.keys.min()
+    }
+
+    /// See ``FitnessMetricsCacheStore/upsert(_:)``.
+    public func upsert(_ metrics: [FitnessMetrics]) async throws {
+        for metric in metrics {
+            cachedMetricsByDay[metric.day] = metric
+        }
+    }
+
+    /// See ``FitnessMetricsCacheStore/deleteCachedMetrics(from:)``.
+    public func deleteCachedMetrics(from date: Date) async throws {
+        cachedMetricsByDay = cachedMetricsByDay.filter { $0.key < date }
+    }
+
+    /// See ``FitnessMetricsCacheStore/dirtyWatermark()``.
+    public func dirtyWatermark() async throws -> Date? {
+        cacheDirtyWatermark
+    }
+
+    /// See ``FitnessMetricsCacheStore/markDirty(from:)``.
+    public func markDirty(from date: Date) async throws {
+        cacheDirtyWatermark = min(cacheDirtyWatermark ?? .distantFuture, date)
+    }
+
+    /// See ``FitnessMetricsCacheStore/clearDirtyWatermark()``.
+    public func clearDirtyWatermark() async throws {
+        cacheDirtyWatermark = nil
     }
 }

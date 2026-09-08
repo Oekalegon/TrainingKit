@@ -68,4 +68,11 @@ struct TrainingPersistenceContainerTests {
         let container = try TrainingPersistenceContainer.make(cloudKitDatabase: .automatic, isStoredInMemoryOnly: true)
         _ = SwiftDataStore(modelContainer: container)
     }
+
+    @Test("modelTypes includes the fitness-metrics cache's two model types")
+    func modelTypesIncludesFitnessMetricsCacheModels() {
+        let types = TrainingPersistenceContainer.modelTypes.map { String(describing: $0) }
+        #expect(types.contains("FitnessMetricsRecord"))
+        #expect(types.contains("FitnessMetricsCacheStateRecord"))
+    }
 }

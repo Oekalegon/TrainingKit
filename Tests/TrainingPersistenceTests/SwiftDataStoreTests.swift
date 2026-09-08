@@ -268,4 +268,63 @@ struct SwiftDataStoreTests {
         try await store.deleteCycle(id: meso.id)
         #expect(try await store.cycle(id: meso.id) == nil)
     }
+
+    // MARK: FitnessMetricsCacheStore
+
+    private func metrics(day: Date, load: Double = 50) -> FitnessMetrics {
+        FitnessMetrics(
+            day: day, load: load, ctl: load, atl: load, tsb: 0,
+            monotony: .nan, strain: .nan, isProjected: false, isWarmingUp: false
+        )
+    }
+
+    @Test("FitnessMetricsCacheStore upsert/fetch round-trips and replaces by day rather than duplicating")
+    func fitnessMetricsCacheUpsertRoundTrips() async throws {
+        let store = try makeStore()
+        try await store.upsert([metrics(day: day(0), load: 10), metrics(day: day(1), load: 20)])
+
+        let fetched = try await store.cachedMetrics(in: day(0)...day(1))
+        #expect(Set(fetched.map(\.day)) == Set([day(0), day(1)]))
+
+        try await store.upsert([metrics(day: day(0), load: 999)])
+        let refetched = try await store.cachedMetrics(in: day(0)...day(0))
+        #expect(refetched.count == 1)
+        #expect(refetched.first?.load == 999)
+    }
+
+    @Test("FitnessMetricsCacheStore's monotony/strain (which can be NaN) round-trips through persistence")
+    func fitnessMetricsCacheRoundTripsNaN() async throws {
+        let store = try makeStore()
+        try await store.upsert([metrics(day: day(0))]) // .nan monotony/strain
+
+        let fetched = try await store.cachedMetrics(in: day(0)...day(0))
+        #expect(fetched.first?.monotony.isNaN == true)
+        #expect(fetched.first?.strain.isNaN == true)
+    }
+
+    @Test("FitnessMetricsCacheStore.deleteCachedMetrics(from:) removes every row with day >= date")
+    func fitnessMetricsCacheDeleteFromBoundary() async throws {
+        let store = try makeStore()
+        try await store.upsert([metrics(day: day(0)), metrics(day: day(1)), metrics(day: day(2))])
+
+        try await store.deleteCachedMetrics(from: day(1))
+
+        let remaining = try await store.cachedMetrics(in: day(0)...day(2))
+        #expect(remaining.map(\.day) == [day(0)])
+    }
+
+    @Test("FitnessMetricsCacheStore dirty watermark is a fetch-or-create singleton, mirroring AthleteStore")
+    func fitnessMetricsCacheWatermarkSingleton() async throws {
+        let store = try makeStore()
+        #expect(try await store.dirtyWatermark() == nil)
+
+        try await store.markDirty(from: day(5))
+        #expect(try await store.dirtyWatermark() == day(5))
+
+        try await store.markDirty(from: day(10)) // later — must not raise the watermark
+        #expect(try await store.dirtyWatermark() == day(5))
+
+        try await store.clearDirtyWatermark()
+        #expect(try await store.dirtyWatermark() == nil)
+    }
 }

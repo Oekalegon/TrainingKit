@@ -21,7 +21,14 @@ public enum HealthKitAuthorization {
     ///
     /// - Parameter healthStore: The health store to request authorization on.
     public static func requestAuthorization(for healthStore: HKHealthStore) async throws {
-        try await healthStore.requestAuthorization(toShare: [], read: readTypes)
+        Logging.importer.debug("requestAuthorization(for:) starting")
+        do {
+            try await healthStore.requestAuthorization(toShare: [], read: readTypes)
+            Logging.importer.debug("requestAuthorization(for:) returned successfully")
+        } catch {
+            Logging.importer.debug("requestAuthorization(for:) threw \(String(describing: error), privacy: .public)")
+            throw error
+        }
     }
 }
 #endif

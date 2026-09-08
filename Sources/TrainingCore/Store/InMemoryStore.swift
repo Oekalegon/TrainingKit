@@ -27,10 +27,24 @@ public actor InMemoryStore: ActivityStore, PlanStore, WorkoutLibraryStore, Cycle
         activitiesByID.values.filter { range.contains($0.start) }
     }
 
-    /// See ``ActivityStore/upsert(_:)``.
+    /// See ``ActivityStore/upsert(_:)``. Builds a `source` → `id` index once up front (kept in
+    /// sync as each activity is applied, so two incoming activities that share a `source` within
+    /// the same batch also dedupe against each other, not just against what was already stored)
+    /// rather than a linear scan per activity.
     public func upsert(_ activities: [Activity]) async throws {
+        var idBySource: [ActivitySource: UUID] = [:]
+        for (id, existing) in activitiesByID where existing.source != .manual {
+            idBySource[existing.source] = id
+        }
+
         for activity in activities {
+            if activity.source != .manual, let staleID = idBySource[activity.source], staleID != activity.id {
+                activitiesByID.removeValue(forKey: staleID)
+            }
             activitiesByID[activity.id] = activity
+            if activity.source != .manual {
+                idBySource[activity.source] = activity.id
+            }
         }
     }
 

@@ -304,6 +304,74 @@ struct TrainingModelTests {
         #expect(all.first?.sport == .hiking)
     }
 
+    @Test("overlapping importActivities(from:) calls are serialized, not interleaved")
+    func overlappingImportsAreSerialized() async throws {
+        let (store, stores) = makeStores()
+        let athlete = AthleteProfile.fixture()
+        let model = TrainingModel(stores: stores, athlete: athlete)
+
+        let firstImporter = GatedImporter(result: ImportResult(
+            upserted: [], deletedSources: [], anchor: ImportAnchor(data: Data([1]))
+        ))
+        async let firstImport: Void = model.importActivities(from: firstImporter, asOf: day(0))
+        await firstImporter.waitUntilCalled()
+
+        let secondImporter = FakeImporter(result: ImportResult(
+            upserted: [], deletedSources: [], anchor: ImportAnchor(data: Data([2]))
+        ))
+        async let secondImport: Void = model.importActivities(from: secondImporter, asOf: day(0))
+
+        // The second call's Task has already started running, but it must be queued behind the
+        // first -- it shouldn't have reached its own importer call yet. This is not a timing
+        // guess: with the queue broken, the second call would race ahead and call its importer
+        // immediately regardless of how long this sleeps, so any nonzero sleep reliably catches
+        // that regression.
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(await secondImporter.callCount == 0)
+
+        await firstImporter.release()
+        _ = try await (firstImport, secondImport)
+
+        // The second call's importer received the first call's freshly-saved anchor, not the nil
+        // anchor that was persisted when the second call started -- proof its anchor read only
+        // happened after the first call's anchor save completed, which is exactly the window
+        // MVP1-26 closes: before this fix, both calls could read the same stale anchor and act on
+        // it concurrently.
+        #expect(await secondImporter.receivedAnchor == ImportAnchor(data: Data([1])))
+        #expect(try await store.importAnchor() == ImportAnchor(data: Data([2])))
+    }
+
+    @Test("resyncActivities(from:) racing an in-flight importActivities(from:) is queued behind it")
+    func resyncRacingImportIsQueued() async throws {
+        let (store, stores) = makeStores()
+        let athlete = AthleteProfile.fixture()
+        let model = TrainingModel(stores: stores, athlete: athlete)
+
+        let firstImporter = GatedImporter(result: ImportResult(
+            upserted: [], deletedSources: [], anchor: ImportAnchor(data: Data([1]))
+        ))
+        async let firstImport: Void = model.importActivities(from: firstImporter, asOf: day(0))
+        await firstImporter.waitUntilCalled()
+
+        let resyncImporter = FakeImporter(result: ImportResult(
+            upserted: [], deletedSources: [], anchor: ImportAnchor(data: Data([2]))
+        ))
+        async let resync: Void = model.resyncActivities(from: resyncImporter, asOf: day(0))
+
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(await resyncImporter.callCount == 0) // still queued behind the first import
+
+        await firstImporter.release()
+        _ = try await (firstImport, resync)
+
+        // The resync's anchor-clear ran only after the first import's own anchor save -- had it
+        // run immediately instead of being queued, the first import's later `saveImportAnchor`
+        // would have silently undone the resync's clear, and the resync's importer would have seen
+        // a non-nil anchor instead of the nil a full resync promises.
+        #expect(await resyncImporter.receivedAnchor == nil)
+        #expect(try await store.importAnchor() == ImportAnchor(data: Data([2])))
+    }
+
     @Test("resyncActivities(from:) propagates a failure clearing the anchor, without calling the importer")
     func resyncActivitiesAnchorClearFailurePropagates() async throws {
         let (_, stores) = makeStores()
@@ -366,5 +434,43 @@ private actor FakeImporter: ActivityImporting {
         receivedAnchor = anchor
         callCount += 1
         return result
+    }
+}
+
+/// An `ActivityImporting` that suspends inside `importActivities(since:)` until ``release()`` is
+/// called, so a test can deterministically hold one `TrainingModel.importActivities(from:)`/
+/// `resyncActivities(from:)` call open mid-flight and observe whether a second, overlapping call
+/// is allowed to race ahead of it or is queued behind it instead.
+private actor GatedImporter: ActivityImporting {
+    private let result: ImportResult
+    private(set) var callCount = 0
+    private(set) var receivedAnchor: ImportAnchor?
+    private var continuation: CheckedContinuation<Void, Never>?
+    /// Resolved once `importActivities(since:)` has actually been entered, so callers can wait
+    /// past the "the async let Task exists but hasn't run yet" gap instead of guessing with a
+    /// sleep or a spin loop.
+    private var calledContinuation: CheckedContinuation<Void, Never>?
+
+    init(result: ImportResult) {
+        self.result = result
+    }
+
+    func importActivities(since anchor: ImportAnchor?) async throws -> ImportResult {
+        receivedAnchor = anchor
+        callCount += 1
+        calledContinuation?.resume()
+        calledContinuation = nil
+        await withCheckedContinuation { continuation = $0 }
+        return result
+    }
+
+    func waitUntilCalled() async {
+        if callCount > 0 { return }
+        await withCheckedContinuation { calledContinuation = $0 }
+    }
+
+    func release() {
+        continuation?.resume()
+        continuation = nil
     }
 }

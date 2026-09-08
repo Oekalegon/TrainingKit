@@ -3,7 +3,7 @@ import Testing
 @testable import TrainingCore
 
 @MainActor
-@Suite("TrainingModel")
+@Suite("TrainingModel", .serialized)
 struct TrainingModelTests {
     private func day(_ offset: Int) -> Date {
         Date(timeIntervalSince1970: 1_700_000_000 + Double(offset) * 86400)

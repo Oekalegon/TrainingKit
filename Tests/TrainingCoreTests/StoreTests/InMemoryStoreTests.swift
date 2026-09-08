@@ -33,6 +33,55 @@ struct InMemoryStoreTests {
         #expect(try await store.activity(source: .manual) == nil)
     }
 
+    @Test("ActivityStore upsert replaces a stale record when a new activity reuses its source under a different id")
+    func activityStoreUpsertDedupesOnSourceAcrossDifferentIDs() async throws {
+        let store = InMemoryStore()
+        let source = ActivitySource.healthKit(UUID())
+        let stale = Activity(source: source, sport: .running, start: day(0), duration: 1800)
+        try await store.upsert([stale])
+
+        // Same source, a different id -- the shape the pre-MVP1-26 TOCTOU race could produce: two
+        // overlapping imports both look up `source`, both find nothing yet, and both build a fresh
+        // id for the same workout. `upsert` needs to collapse this to one row on its own, as
+        // defense-in-depth alongside that race's fix.
+        let duplicate = Activity(source: source, sport: .cycling, start: day(0), duration: 3600)
+        try await store.upsert([duplicate])
+
+        let all = try await store.activities(in: day(0)...day(0))
+        #expect(all.map(\.id) == [duplicate.id])
+        #expect(try await store.activity(id: stale.id) == nil)
+        #expect(try await store.activity(source: source) == duplicate)
+    }
+
+    @Test("ActivityStore upsert dedupes two new activities that share a source within one batch")
+    func activityStoreUpsertDedupesOnSourceWithinOneBatch() async throws {
+        let store = InMemoryStore()
+        let source = ActivitySource.healthKit(UUID())
+        let first = Activity(source: source, sport: .running, start: day(0), duration: 1800)
+        let second = Activity(source: source, sport: .cycling, start: day(0), duration: 3600)
+
+        // Neither exists in the store yet -- exercises the batch-local index, not the
+        // already-stored path the test above covers.
+        try await store.upsert([first, second])
+
+        let all = try await store.activities(in: day(0)...day(0))
+        #expect(all.map(\.id) == [second.id])
+    }
+
+    @Test("ActivityStore upsert never dedupes .manual activities against each other")
+    func activityStoreUpsertDoesNotDedupeManualActivities() async throws {
+        let store = InMemoryStore()
+        let first = Activity(source: .manual, sport: .running, start: day(0), duration: 1800)
+        let second = Activity(source: .manual, sport: .cycling, start: day(0), duration: 3600)
+
+        // `.manual` has no natural key -- two distinct manually-entered activities must both
+        // survive, not collapse into one just because they share `source == .manual`.
+        try await store.upsert([first, second])
+
+        let all = try await store.activities(in: day(0)...day(0))
+        #expect(Set(all.map(\.id)) == Set([first.id, second.id]))
+    }
+
     @Test("ActivityStore deleteActivity removes by source, no-ops if not found")
     func activityStoreDeleteActivity() async throws {
         let store = InMemoryStore()

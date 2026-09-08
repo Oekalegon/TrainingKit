@@ -84,6 +84,10 @@ public final class TrainingModel {
     /// the store immediately) because `didSet` can't `await`, and `TrainingModel` being
     /// `@MainActor` makes this synchronous stash-then-consume safe from races.
     private var pendingCacheInvalidation: Date?
+    /// The most recently scheduled ``importActivities(from:asOf:)``/``resyncActivities(from:asOf:)``
+    /// run, if one hasn't finished yet. Chained (not replaced) by each new call so imports always
+    /// execute one at a time — see the doc comment on ``importActivities(from:asOf:)`` for why.
+    var pendingImport: Task<Void, Error>?
 
     /// Creates a training model.
     ///

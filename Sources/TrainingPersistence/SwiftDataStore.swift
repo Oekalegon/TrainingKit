@@ -50,19 +50,40 @@ public actor SwiftDataStore: ActivityStore, PlanStore, WorkoutLibraryStore, Cycl
     /// id neither of which is in the store yet still resolve to a single row (update, not a second
     /// insert) — matching what a live per-item fetch would have found, and what `ActivityRecord`'s
     /// own doc comment promises about uniqueness-by-id.
+    ///
+    /// Also indexes existing records by `sourceKey` (skipping `.manual`, which has no natural key)
+    /// so an incoming activity whose source already belongs to a *different* stored id deletes that
+    /// stale record instead of leaving it behind as a duplicate — see ``ActivityStore/upsert(_:)``'s
+    /// doc comment for why this defense-in-depth exists alongside the primary id match.
     public func upsert(_ activities: [Activity]) async throws {
         var recordsByID: [UUID: ActivityRecord] = [:]
+        var recordsBySourceKey: [String: ActivityRecord] = [:]
+        let manualKey = ActivitySource.manual.persistenceKey
         for record in try modelContext.fetch(FetchDescriptor<ActivityRecord>()) {
             recordsByID[record.id] = record
+            if record.sourceKey != manualKey {
+                recordsBySourceKey[record.sourceKey] = record
+            }
         }
 
         for activity in activities {
+            let sourceKey = activity.source.persistenceKey
+            if sourceKey != manualKey, let stale = recordsBySourceKey[sourceKey], stale.id != activity.id {
+                modelContext.delete(stale)
+                recordsByID.removeValue(forKey: stale.id)
+            }
+
+            let record: ActivityRecord
             if let existing = recordsByID[activity.id] {
                 try existing.update(from: activity)
+                record = existing
             } else {
-                let record = try ActivityRecord(activity: activity)
+                record = try ActivityRecord(activity: activity)
                 modelContext.insert(record)
-                recordsByID[activity.id] = record
+            }
+            recordsByID[activity.id] = record
+            if sourceKey != manualKey {
+                recordsBySourceKey[sourceKey] = record
             }
         }
         try modelContext.save()

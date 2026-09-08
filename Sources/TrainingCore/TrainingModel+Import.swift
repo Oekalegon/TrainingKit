@@ -21,6 +21,16 @@ extension TrainingModel {
         let anchor = try await stores.athleteStore.importAnchor()
         let result = try await importer.importActivities(since: anchor)
 
+        // Captured before deleting: once an activity is gone, the store can no longer answer what
+        // day it occupied, and a persisted fitness-metrics cache needs that date to know how far
+        // back to invalidate.
+        var deletedStarts: [Date] = []
+        for source in result.deletedSources {
+            if let existing = try await stores.activityStore.activity(source: source) {
+                deletedStarts.append(existing.start)
+            }
+        }
+
         if !result.upserted.isEmpty {
             try await stores.activityStore.upsert(result.upserted)
         }
@@ -28,6 +38,11 @@ extension TrainingModel {
             try await stores.activityStore.deleteActivity(source: source)
         }
         try await stores.athleteStore.saveImportAnchor(result.anchor)
+
+        let affectedDates = result.upserted.map(\.start) + deletedStarts
+        if let cache = stores.fitnessMetricsCacheStore, let earliest = affectedDates.min() {
+            try? await cache.markDirty(from: earliest)
+        }
         // `||=`, not an overwrite: a conformer without incremental-import support is allowed to
         // return a `nil` anchor even on a successful run, and a completed import shouldn't read
         // back as "never imported" just because this particular run didn't produce one.

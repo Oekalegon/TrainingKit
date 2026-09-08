@@ -12,7 +12,7 @@ struct WorkoutKitMappingTests {
 
     @Test("common Sport cases map to their direct HKWorkoutActivityType, and back")
     func sportDirectMappingsRoundTrip() {
-        let sports: [Sport] = [.running, .cycling, .swimming, .strength, .walking, .rowing]
+        let sports: [Sport] = [.running, .cycling, .swimming, .strength, .walking, .rowing, .hiking]
         for sport in sports {
             let activityType = sport.workoutKitActivityType
             #expect(Sport(workoutKitActivityType: activityType) == sport)

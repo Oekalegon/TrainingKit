@@ -25,6 +25,8 @@ extension Sport {
             self = .walking
         case .rowing:
             self = .rowing
+        case .hiking:
+            self = .hiking
         default:
             self = .other(Sport.otherLabel(rawValue: type.rawValue))
         }

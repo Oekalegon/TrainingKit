@@ -7,5 +7,6 @@ public enum Sport: Sendable, Codable, Hashable {
     case strength
     case walking
     case rowing
+    case hiking
     case other(String)
 }

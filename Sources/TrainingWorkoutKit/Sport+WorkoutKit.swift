@@ -24,6 +24,8 @@ extension Sport {
             self = .walking
         case .rowing:
             self = .rowing
+        case .hiking:
+            self = .hiking
         default:
             self = .other(Sport.otherLabel(rawValue: type.rawValue))
         }
@@ -49,6 +51,8 @@ extension Sport {
             return .walking
         case .rowing:
             return .rowing
+        case .hiking:
+            return .hiking
         case .other:
             return otherRawValue.flatMap { HKWorkoutActivityType(rawValue: $0) } ?? .other
         }

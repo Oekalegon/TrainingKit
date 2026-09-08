@@ -1,7 +1,7 @@
 import Foundation
 
 /// One day's fitness metrics, produced by ``FitnessMetricsCalculator``.
-public struct FitnessMetrics: Sendable, Hashable {
+public struct FitnessMetrics: Sendable, Hashable, Codable {
     /// Start of the day, in the athlete's timezone.
     public let day: Date
     /// The total load for this day, in TRIMP units.

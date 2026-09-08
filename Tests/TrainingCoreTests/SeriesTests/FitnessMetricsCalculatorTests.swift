@@ -76,4 +76,66 @@ struct FitnessMetricsCalculatorTests {
         let unseeded = calculator.metrics(for: series(loads: loads), parameters: parameters, seed: nil)
         #expect(unseeded.first!.isWarmingUp == true)
     }
+
+    /// `==` on `Double` treats NaN as unequal to itself, which would make an elementwise
+    /// comparison of monotony/strain series (legitimately NaN on day 1, a flat week, etc.) fail
+    /// even when both sides agree. This treats NaN-vs-NaN as a match.
+    private func sameSequence(_ lhs: [Double], _ rhs: [Double]) -> Bool {
+        guard lhs.count == rhs.count else { return false }
+        return zip(lhs, rhs).allSatisfy { $0 == $1 || ($0.isNaN && $1.isNaN) }
+    }
+
+    @Test("recentLoads defaults to empty, matching today's always-cold monotony/strain")
+    func recentLoadsDefaultsToEmpty() {
+        let loads = [50.0, 80.0, 20.0]
+        let withDefault = calculator.metrics(for: series(loads: loads), parameters: parameters, seed: nil)
+        let withExplicitEmpty = calculator.metrics(
+            for: series(loads: loads), parameters: parameters, seed: nil, recentLoads: []
+        )
+        #expect(sameSequence(withDefault.map(\.monotony), withExplicitEmpty.map(\.monotony)))
+        #expect(sameSequence(withDefault.map(\.strain), withExplicitEmpty.map(\.strain)))
+    }
+
+    @Test("recentLoads pre-fills the monotony window, matching an unbroken run over the combined series")
+    func recentLoadsMatchesUnbrokenRun() {
+        let priorLoads = [40.0, 60.0, 50.0]
+        let newLoads = [70.0, 30.0]
+
+        // One unbroken run over the combined series is the ground truth: whatever the resumed
+        // computation produces for `newLoads` should exactly match the tail of this.
+        let combined = calculator.metrics(for: series(loads: priorLoads + newLoads), parameters: parameters, seed: nil)
+        let priorTail = Array(priorLoads.suffix(parameters.monotonyWindowDays))
+
+        // Resume from a seed matching combined's state after `priorLoads`, plus the raw loads
+        // needed to rebuild the monotony window.
+        let seed = (ctl: combined[priorLoads.count - 1].ctl, atl: combined[priorLoads.count - 1].atl)
+        let resumed = calculator.metrics(
+            for: series(loads: newLoads), parameters: parameters, seed: seed, recentLoads: priorTail
+        )
+
+        let expectedTail = combined.suffix(newLoads.count)
+        for (resumedDay, expectedDay) in zip(resumed, expectedTail) {
+            #expect(abs(resumedDay.ctl - expectedDay.ctl) < 1e-9)
+            #expect(abs(resumedDay.atl - expectedDay.atl) < 1e-9)
+            #expect(abs(resumedDay.monotony - expectedDay.monotony) < 1e-9 || (resumedDay.monotony.isNaN && expectedDay.monotony.isNaN))
+            #expect(abs(resumedDay.strain - expectedDay.strain) < 1e-9 || (resumedDay.strain.isNaN && expectedDay.strain.isNaN))
+        }
+    }
+
+    @Test("recentLoads longer than monotonyWindowDays is truncated to the trailing window")
+    func recentLoadsTruncatedToWindow() {
+        let loads = [1.0]
+        let exactWindow = Array(repeating: 99.0, count: parameters.monotonyWindowDays)
+        let overlong = Array(repeating: 1.0, count: 50) + exactWindow
+
+        let withExactWindow = calculator.metrics(
+            for: series(loads: loads), parameters: parameters, seed: nil, recentLoads: exactWindow
+        )
+        let withOverlong = calculator.metrics(
+            for: series(loads: loads), parameters: parameters, seed: nil, recentLoads: overlong
+        )
+
+        #expect(withExactWindow.first!.monotony == withOverlong.first!.monotony)
+        #expect(withExactWindow.first!.strain == withOverlong.first!.strain)
+    }
 }

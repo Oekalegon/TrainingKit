@@ -57,6 +57,9 @@ public struct StatisticsCalculator: Sendable {
     ///   - athlete: Supplies the heart-rate zone settings effective on `activity.start` and is
     ///     passed through to `calculators`.
     public func summary(for activity: Activity, athlete: AthleteProfile) -> ActivitySummary {
+        Logging.statistics.debug(
+            "summary(for:athlete:) activity \(activity.id, privacy: .public) dated \(activity.start, privacy: .public) has \(activity.heartRate.count, privacy: .public) heart-rate samples"
+        )
         let load = firstSuccessfulLoad(for: activity, athlete: athlete)
         if load == nil {
             Logging.statistics.warning("summary(for:athlete:) found no successful calculator for activity \(activity.id, privacy: .public); reporting a zero-confidence 0")
@@ -273,10 +276,18 @@ public struct StatisticsCalculator: Sendable {
     }
 
     private func firstSuccessfulLoad(for activity: Activity, athlete: AthleteProfile) -> TrainingLoad? {
+        var lastError: (any Error)?
         for calculator in calculators {
-            if let load = try? calculator.load(for: activity, athlete: athlete) {
-                return load
+            do {
+                return try calculator.load(for: activity, athlete: athlete)
+            } catch {
+                lastError = error
             }
+        }
+        if let lastError {
+            Logging.statistics.debug(
+                "No load calculator produced a value for activity \(activity.id, privacy: .public): \(String(describing: lastError), privacy: .public)"
+            )
         }
         return nil
     }

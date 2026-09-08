@@ -3,9 +3,6 @@ import Foundation
 
 #if canImport(HealthKit)
 import HealthKit
-import os
-
-private let importLogger = Logger(subsystem: "com.trainingKit", category: "Import")
 
 /// Imports completed workouts and their heart-rate samples from HealthKit.
 ///
@@ -25,8 +22,10 @@ private let importLogger = Logger(subsystem: "com.trainingKit", category: "Impor
 public struct HealthKitActivityImporter: ActivityImporting {
     /// How many workouts are fetched (heart rate + existing-id lookup) concurrently during
     /// `importActivities(since:)`. See that method's doc comment for why this is bounded rather
-    /// than unbounded.
-    private static let maxConcurrentWorkouts = 8
+    /// than unbounded; defaults to `8` — a conservative starting point chosen empirically rather
+    /// than from any documented HealthKit concurrency limit (there isn't one), exposed here so a
+    /// caller (or a test) can tune it without editing this type.
+    private let maxConcurrentWorkouts: Int
 
     private let healthStore: HKHealthStore
     private let activityStore: (any ActivityStore)?
@@ -40,9 +39,11 @@ public struct HealthKitActivityImporter: ActivityImporting {
     ///     constructing a re-imported workout's `Activity`, so `ActivityStore.upsert(_:)` replaces
     ///     it rather than adding a duplicate. Pass `nil` only if the caller reconciles ids itself
     ///     before upserting `ImportResult.upserted`.
-    public init(healthStore: HKHealthStore, activityStore: (any ActivityStore)? = nil) {
+    ///   - maxConcurrentWorkouts: See this property's own doc comment; defaults to `8`.
+    public init(healthStore: HKHealthStore, activityStore: (any ActivityStore)? = nil, maxConcurrentWorkouts: Int = 8) {
         self.healthStore = healthStore
         self.activityStore = activityStore
+        self.maxConcurrentWorkouts = maxConcurrentWorkouts
     }
 
     /// See `ActivityImporting.importActivities(since:)`.
@@ -51,7 +52,7 @@ public struct HealthKitActivityImporter: ActivityImporting {
     ///   `HKQueryAnchor`; any error HealthKit itself throws (e.g. denied authorization).
     public func importActivities(since anchor: ImportAnchor?) async throws -> ImportResult {
         let workoutAuthStatus = healthStore.authorizationStatus(for: HKObjectType.workoutType())
-        importLogger.debug(
+        Logging.importer.debug(
             "importActivities(since:) starting, anchor is \(anchor == nil ? "nil (full import)" : "set", privacy: .public), workoutType authorizationStatus \(workoutAuthStatus.rawValue, privacy: .public)"
         )
 
@@ -61,9 +62,9 @@ public struct HealthKitActivityImporter: ActivityImporting {
             predicates: [.workout()],
             anchor: hkAnchor
         )
-        importLogger.debug("importActivities(since:) awaiting anchored workout query result...")
+        Logging.importer.debug("importActivities(since:) awaiting anchored workout query result...")
         let result = try await descriptor.result(for: healthStore)
-        importLogger.debug(
+        Logging.importer.debug(
             "importActivities(since:) anchored workout query returned \(result.addedSamples.count, privacy: .public) added, \(result.deletedObjects.count, privacy: .public) deleted"
         )
 
@@ -73,36 +74,42 @@ public struct HealthKitActivityImporter: ActivityImporting {
         // and, if `activityStore` is set, an existing-id lookup against a single serialized actor.
         // Launching all of them at once floods both HealthKit's query queue and that actor's mailbox
         // — in practice this manifested as the importer appearing to hang indefinitely on a full
-        // historical re-sync. Capping how many workouts are in flight at once keeps the concurrency
-        // win the unbounded version was going for without the fan-out that caused that.
-        let activities = try await withThrowingTaskGroup(of: Activity.self) { group in
-            var remaining = result.addedSamples.makeIterator()
-            func addNextTask() {
-                guard let workout = remaining.next() else { return }
-                group.addTask {
-                    async let heartRateTask = heartRateSamples(for: workout)
-                    async let existingIDTask = activityStore?.activity(source: .healthKit(workout.uuid))?.id
-                    let heartRate = try await heartRateTask
-                    let existingID = try await existingIDTask
-                    return Activity(healthKitWorkout: workout, heartRate: heartRate, existingID: existingID)
-                }
-            }
-            for _ in 0..<Self.maxConcurrentWorkouts {
-                addNextTask()
-            }
-            var activities: [Activity] = []
-            activities.reserveCapacity(result.addedSamples.count)
-            for try await activity in group {
-                activities.append(activity)
-                addNextTask()
-            }
-            return activities
+        // historical re-sync. `mapBounded` caps how many workouts are in flight at once, keeping the
+        // concurrency win the original unbounded version was going for without the fan-out that
+        // caused that.
+        //
+        // A failed `heartRateSamples(for:)` call is caught per-workout (see `heartRateOrEmpty(for:)`)
+        // rather than left to propagate: with the extra per-series round-trips this PR adds, a single
+        // transient HealthKit error would otherwise abort the *entire* import via `mapBounded`'s
+        // task-group semantics, discarding every already-fetched workout. `existingIDTask` still
+        // propagates on failure — a persistence-layer error is a different, less transient class of
+        // problem than one workout's heart-rate query timing out.
+        let activities = try await mapBounded(result.addedSamples, maxConcurrent: maxConcurrentWorkouts) { workout in
+            async let heartRateTask = self.heartRateOrEmpty(for: workout)
+            async let existingIDTask = self.activityStore?.activity(source: .healthKit(workout.uuid))?.id
+            let heartRate = await heartRateTask
+            let existingID = try await existingIDTask
+            return Activity(healthKitWorkout: workout, heartRate: heartRate, existingID: existingID)
         }
 
         let deletedSources = result.deletedObjects.map { ActivitySource.healthKit($0.uuid) }
         let newAnchor = try Self.encode(result.newAnchor)
 
         return ImportResult(upserted: activities, deletedSources: deletedSources, anchor: newAnchor)
+    }
+
+    /// Like ``heartRateSamples(for:)``, but a failed query is caught and logged rather than thrown,
+    /// returning an empty array instead — see the doc comment on `importActivities(since:)`'s task
+    /// group for why per-workout heart-rate failures are isolated rather than aborting the import.
+    private func heartRateOrEmpty(for workout: HKWorkout) async -> [HeartRateSample] {
+        do {
+            return try await heartRateSamples(for: workout)
+        } catch {
+            Logging.importer.error(
+                "heartRateSamples(for:) failed for workout \(workout.uuid, privacy: .public): \(String(describing: error), privacy: .public); continuing with no heart-rate data for this workout"
+            )
+            return []
+        }
     }
 
     private func heartRateSamples(for workout: HKWorkout) async throws -> [HeartRateSample] {
@@ -114,7 +121,7 @@ public struct HealthKitActivityImporter: ActivityImporting {
         let samples = try await descriptor.result(for: healthStore)
         let firstSampleDate = samples.first?.startDate
         let lastSampleDate = samples.last?.startDate
-        importLogger.debug(
+        Logging.importer.debug(
             """
             heartRateSamples(for:) workout \(workout.uuid, privacy: .public) \
             window \(workout.startDate, privacy: .public)...\(workout.endDate, privacy: .public) \

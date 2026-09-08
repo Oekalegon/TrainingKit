@@ -136,6 +136,24 @@ struct TrainingModelTests {
         #expect(model.metrics.contains { $0.load > 0 })
     }
 
+    @Test("recompute(asOf:) pads metrics through the loaded range even with no activity/plan near its end")
+    func recomputePadsThroughLoadedRangeWithoutCache() async throws {
+        let (_, stores) = makeStores()
+        let athlete = AthleteProfile.fixture()
+        let model = TrainingModel(stores: stores, athlete: athlete)
+
+        // No activities or plans anywhere -- DailyLoadSeries has nothing of its own to anchor the
+        // far end of day(0)...day(10) with, so without padding the series would stop at `today`
+        // (day(0)) and day(10) would simply be missing from `model.metrics`.
+        try await model.load(in: day(0)...day(10), asOf: day(0))
+
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = athlete.timeZone
+        let lastDay = try #require(model.metrics.map(\.day).max())
+        #expect(calendar.isDate(lastDay, inSameDayAs: day(10)))
+        #expect(model.metrics.last?.load == 0)
+    }
+
     @Test("a failed load(in:) leaves the model unchanged rather than partially updated")
     func failedLoadLeavesModelUnchanged() async throws {
         let (store, stores) = makeStores()

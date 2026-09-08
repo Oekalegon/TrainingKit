@@ -88,6 +88,17 @@ public final class TrainingModel {
     /// run, if one hasn't finished yet. Chained (not replaced) by each new call so imports always
     /// execute one at a time — see the doc comment on ``importActivities(from:asOf:)`` for why.
     var pendingImport: Task<Void, Error>?
+    /// The most recently scheduled ``recompute(asOf:)`` run, if one hasn't finished yet. Chained
+    /// (not replaced) by each new call, the same way ``TrainingModel/pendingImport`` chains
+    /// `importActivities(from:)`/`resyncActivities(from:)` calls, and for the same reason: without
+    /// it, two overlapping recomputes (e.g. one triggered by `add(_ plan:)`, another by an import
+    /// finishing at nearly the same moment) could both read the fitness-metrics cache's dirty
+    /// watermark before either has cleared it, race on `upsert`-ing the same recomputed days, or
+    /// have the second's `clearDirtyWatermark()` drop an invalidation the first was still working
+    /// through. Deliberately a *separate* chain from ``pendingImport``, not the same one: every
+    /// import already calls `recompute(asOf:)` itself at its tail, and reusing `pendingImport` here
+    /// would make that call wait on its own still-in-flight import task — a guaranteed deadlock.
+    private var pendingRecompute: Task<Void, Never>?
 
     /// Creates a training model.
     ///
@@ -177,11 +188,28 @@ public final class TrainingModel {
     /// cached day — persists newly-final (`day < today`) results, and assembles ``metrics`` for
     /// `loadedRange` from cached rows plus the freshly computed, never-persisted volatile tail
     /// (`today` and any projected/future day).
+    ///
+    /// Serialized against any other in-flight `recompute(asOf:)` call via ``pendingRecompute``, for
+    /// the same TOCTOU reason ``importActivities(from:asOf:)`` serializes against
+    /// ``pendingImport``: without it, two overlapping recomputes could both read
+    /// ``pendingCacheInvalidation``/the cache's dirty watermark before either has cleared it, and
+    /// the second's completion could drop an invalidation the first was still working through.
     public func recompute(asOf today: Date = .now) async {
+        let previous = pendingRecompute
+        let task = Task {
+            await previous?.value
+            await self.performRecompute(asOf: today)
+        }
+        pendingRecompute = task
+        await task.value
+    }
+
+    private func performRecompute(asOf today: Date) async {
         guard let cache = stores.fitnessMetricsCacheStore else {
             metrics = await Self.buildMetricsWithoutCache(
                 activities: activities,
                 plans: plans,
+                publishRange: loadedRange ?? (today...today),
                 workouts: workouts,
                 estimator: estimator,
                 calculators: calculators,
@@ -225,9 +253,17 @@ public final class TrainingModel {
     ///
     /// The no-cache path: recomputes the entire series from `activities`/`plans` every call,
     /// unseeded — exactly ``recompute(asOf:)``'s behavior before the persisted cache existed.
+    ///
+    /// `publishRange` only pads the *tail*: ``DailyLoadSeries/days(activities:plans:workouts:estimator:calculators:athlete:today:)``
+    /// already spans back to the earliest activity/plan (or `today`, whichever is earlier) on its
+    /// own, but stops at the latest activity/plan (or `today`, whichever is *later*) — a
+    /// `publishRange` extending further into the future than the last planned activity would
+    /// otherwise leave those trailing days missing from `metrics` entirely rather than present with
+    /// zero load. See ``paddedForward(_:through:calendar:)``.
     private nonisolated static func buildMetricsWithoutCache(
         activities: [Activity],
         plans: [PlannedActivity],
+        publishRange: ClosedRange<Date>,
         workouts: [StructuredWorkout],
         estimator: any PlannedLoadEstimator,
         calculators: [any LoadCalculator],
@@ -235,7 +271,10 @@ public final class TrainingModel {
         parameters: LoadModelParameters,
         today: Date
     ) async -> [FitnessMetrics] {
-        let days = DailyLoadSeries().days(
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = athlete.timeZone
+
+        var days = DailyLoadSeries().days(
             activities: activities,
             plans: plans,
             workouts: workouts,
@@ -244,7 +283,33 @@ public final class TrainingModel {
             athlete: athlete,
             today: today
         )
+        days = paddedForward(days, through: publishRange.upperBound, calendar: calendar)
         return FitnessMetricsCalculator().metrics(for: days, parameters: parameters, seed: nil)
+    }
+
+    /// Appends zero-load, projected days to `days` from the day after its last entry through
+    /// the calendar day containing `upperBound`, inclusive — a no-op if `days` is already empty or
+    /// already reaches that day. Shared by both `buildMetrics*` paths so a `publishRange`-like upper
+    /// bound extending past the last real activity/plan doesn't silently truncate the published
+    /// series instead of zero-filling it.
+    ///
+    /// `upperBound` is day-aligned internally (via `calendar.startOfDay(for:)`) rather than compared
+    /// raw: every `DayLoad`/`FitnessMetrics.day` in this system is a startOfDay-aligned Date, but
+    /// `upperBound` (e.g. `publishRange.upperBound`) is a caller-supplied instant that's rarely
+    /// exactly midnight — comparing against it raw would overshoot by one extra day whenever it
+    /// falls after midnight on its own calendar day.
+    private nonisolated static func paddedForward(
+        _ days: [DayLoad], through upperBound: Date, calendar: Calendar
+    ) -> [DayLoad] {
+        let targetDay = calendar.startOfDay(for: upperBound)
+        guard var day = days.last?.day, day < targetDay else { return days }
+        var result = days
+        while day < targetDay {
+            guard let next = calendar.date(byAdding: .day, value: 1, to: day) else { break }
+            day = next
+            result.append(DayLoad(day: day, load: 0, isProjected: true))
+        }
+        return result
     }
 
     /// The cache-aware path, used by ``recompute(asOf:)`` when a
@@ -346,6 +411,13 @@ public final class TrainingModel {
         } else if days.isEmpty {
             days = [DayLoad(day: fetchFromStart, load: 0, isProjected: false)]
         }
+
+        // Same reasoning as the front-padding above, but at the tail: `DailyLoadSeries` also stops
+        // at the latest activity/plan (or `today`, whichever is later), which can be short of
+        // `upperBound` if `publishRange` extends further into the future than the last planned
+        // activity — without this, those trailing days would be missing from `freshPortion` below
+        // entirely, rather than present with zero load.
+        days = paddedForward(days, through: upperBound, calendar: calendar)
 
         let seed: (ctl: Double, atl: Double)?
         let recentLoads: [Double]

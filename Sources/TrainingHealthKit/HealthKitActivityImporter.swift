@@ -50,22 +50,13 @@ public struct HealthKitActivityImporter: ActivityImporting {
     /// - Throws: ``HealthKitImportError/corruptAnchor`` if `anchor` doesn't decode as an
     ///   `HKQueryAnchor`; any error HealthKit itself throws (e.g. denied authorization).
     public func importActivities(since anchor: ImportAnchor?) async throws -> ImportResult {
-        let workoutAuthStatus = healthStore.authorizationStatus(for: HKObjectType.workoutType())
-        importLogger.debug(
-            "importActivities(since:) starting, anchor is \(anchor == nil ? "nil (full import)" : "set", privacy: .public), workoutType authorizationStatus \(workoutAuthStatus.rawValue, privacy: .public)"
-        )
-
         let hkAnchor = try anchor.map(Self.decode)
 
         let descriptor = HKAnchoredObjectQueryDescriptor(
             predicates: [.workout()],
             anchor: hkAnchor
         )
-        importLogger.debug("importActivities(since:) awaiting anchored workout query result...")
         let result = try await descriptor.result(for: healthStore)
-        importLogger.debug(
-            "importActivities(since:) anchored workout query returned \(result.addedSamples.count, privacy: .public) added, \(result.deletedObjects.count, privacy: .public) deleted"
-        )
 
         // Concurrent per workout, but capped at `maxConcurrentWorkouts`: a full first import can be
         // hundreds or thousands of sessions, each needing its own heart-rate query (itself now

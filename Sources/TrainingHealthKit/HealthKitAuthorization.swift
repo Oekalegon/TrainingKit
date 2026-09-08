@@ -1,8 +1,5 @@
 #if canImport(HealthKit)
 import HealthKit
-import os
-
-private let authLogger = Logger(subsystem: "com.trainingKit", category: "Import")
 
 /// Requests the read authorizations `TrainingHealthKit` needs.
 ///
@@ -24,14 +21,7 @@ public enum HealthKitAuthorization {
     ///
     /// - Parameter healthStore: The health store to request authorization on.
     public static func requestAuthorization(for healthStore: HKHealthStore) async throws {
-        authLogger.debug("requestAuthorization(for:) starting")
-        do {
-            try await healthStore.requestAuthorization(toShare: [], read: readTypes)
-            authLogger.debug("requestAuthorization(for:) returned successfully")
-        } catch {
-            authLogger.debug("requestAuthorization(for:) threw \(String(describing: error), privacy: .public)")
-            throw error
-        }
+        try await healthStore.requestAuthorization(toShare: [], read: readTypes)
     }
 }
 #endif

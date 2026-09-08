@@ -27,4 +27,17 @@ public protocol ActivityStore: Sendable {
     /// Removes the activity from this source, if any — the delete half of an ``ActivityImporting``
     /// run that reports a source as removed at the origin.
     func deleteActivity(source: ActivitySource) async throws
+
+    /// Removes duplicate records that share the same non-manual `source`, keeping exactly one per
+    /// source.
+    ///
+    /// A one-time cleanup for duplicates already persisted before `upsert(_:)`'s defense-in-depth
+    /// dedup existed — `upsert` only clears a stale duplicate when a *new* activity for that
+    /// source arrives, so it never retroactively fixes rows already sitting in the store from
+    /// before that logic shipped.
+    ///
+    /// - Returns: The activities that were removed, sorted by `start`, so a caller can invalidate
+    ///   anything keyed on their dates (e.g. a fitness-metrics cache).
+    @discardableResult
+    func deduplicateActivities() async throws -> [Activity]
 }

@@ -97,6 +97,24 @@ struct InMemoryStoreTests {
         #expect(try await store.activity(id: activity.id) == nil)
     }
 
+    @Test("ActivityStore deduplicateActivities is a no-op when there are no duplicates")
+    func activityStoreDeduplicateActivitiesNoOp() async throws {
+        // InMemoryStore's own upsert already prevents two activities from ever sharing a source
+        // (see the dedupe tests above), so there's no way to get it into a duplicated state via
+        // its public API — this only exercises the empty-input/nothing-to-do path. The meaningful
+        // removal behavior is covered against SwiftDataStore, where duplicates can be seeded
+        // directly via a raw ModelContext, bypassing upsert's dedup the way pre-fix data would
+        // have.
+        let store = InMemoryStore()
+        let activity = Activity(source: .healthKit(UUID()), sport: .running, start: day(0), duration: 1800)
+        try await store.upsert([activity])
+
+        let removed = try await store.deduplicateActivities()
+
+        #expect(removed.isEmpty)
+        #expect(try await store.activity(id: activity.id) == activity)
+    }
+
     @Test("AthleteStore import anchor round-trips and clears to nil")
     func athleteStoreImportAnchor() async throws {
         let store = InMemoryStore()

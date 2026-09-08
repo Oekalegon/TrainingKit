@@ -66,7 +66,11 @@ extension TrainingModel {
     /// Runs `operation` after waiting for whatever's already in ``pendingImport``, and leaves this
     /// call as the new ``pendingImport`` for the next one to wait on. `previous`'s error (if any) is
     /// swallowed, not rethrown — a prior import failing shouldn't prevent this one from running.
-    private func runQueued(_ operation: @escaping () async throws -> Void) async throws {
+    ///
+    /// Not `private`: also used by ``TrainingModel/deduplicateActivities(asOf:)`` (a plain store
+    /// operation with no `ActivityImporting` dependency, hence its own file) to serialize against
+    /// imports the same way two imports serialize against each other.
+    func runQueued(_ operation: @escaping () async throws -> Void) async throws {
         let previous = pendingImport
         let task = Task {
             _ = try? await previous?.value

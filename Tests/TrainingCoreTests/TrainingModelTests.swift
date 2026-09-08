@@ -406,6 +406,73 @@ struct TrainingModelTests {
 
         #expect(await importer.callCount == 0)
     }
+
+    @Test("deduplicateActivities(asOf:) reloads activities and recomputes when duplicates are removed")
+    func deduplicateActivitiesReloadsAndRecomputes() async throws {
+        let athlete = AthleteProfile.fixture()
+        let kept = Activity(
+            source: .healthKit(UUID()), sport: .running, start: day(0), duration: 1800,
+            perceivedExertion: 5
+        )
+        let duplicate = Activity(
+            source: .healthKit(UUID()), sport: .cycling, start: day(0), duration: 3600,
+            perceivedExertion: 5
+        )
+        let fakeActivityStore = DeduplicatingActivityStore(activities: [kept, duplicate], toRemove: [duplicate])
+        let otherStores = InMemoryStore()
+        let stores = StoreSet(
+            activityStore: fakeActivityStore, planStore: otherStores, workoutStore: otherStores,
+            cycleStore: otherStores, athleteStore: otherStores
+        )
+
+        let model = TrainingModel(stores: stores, athlete: athlete)
+        try await model.load(in: day(0)...day(0), asOf: day(0))
+        #expect(model.activities.map(\.id).sorted() == [kept.id, duplicate.id].sorted())
+
+        try await model.deduplicateActivities(asOf: day(0))
+
+        #expect(model.activities.map(\.id) == [kept.id])
+        let dayMetrics = model.metrics.first { Calendar(identifier: .gregorian).isDate($0.day, inSameDayAs: day(0)) }
+        // The duplicate's cycling load is gone from the day's total -- what's left is only the
+        // kept running activity's own load, not the inflated sum of both.
+        #expect((dayMetrics?.load ?? 0) > 0)
+        #expect(try await fakeActivityStore.activity(id: duplicate.id) == nil)
+    }
+}
+
+/// Reports a fixed set of "removed" activities from `deduplicateActivities()` and removes them
+/// from its own backing set, so `activities(in:)` reflects the removal afterward — used to test
+/// `TrainingModel.deduplicateActivities(asOf:)` since `InMemoryStore`'s own `upsert` dedup makes
+/// it impossible to get real duplicates into the store to begin with (see `InMemoryStoreTests`'
+/// and `SwiftDataStoreTests`' own `deduplicateActivities` coverage for the store-level behavior).
+private actor DeduplicatingActivityStore: ActivityStore {
+    private var activitiesByID: [UUID: Activity]
+    private let toRemove: [Activity]
+
+    init(activities: [Activity], toRemove: [Activity]) {
+        activitiesByID = Dictionary(uniqueKeysWithValues: activities.map { ($0.id, $0) })
+        self.toRemove = toRemove
+    }
+
+    func activities(in range: ClosedRange<Date>) async throws -> [Activity] {
+        activitiesByID.values.filter { range.contains($0.start) }
+    }
+    func upsert(_ activities: [Activity]) async throws {
+        for activity in activities { activitiesByID[activity.id] = activity }
+    }
+    func activity(source: ActivitySource) async throws -> Activity? {
+        activitiesByID.values.first { $0.source == source }
+    }
+    func activity(id: UUID) async throws -> Activity? { activitiesByID[id] }
+    func deleteActivity(source: ActivitySource) async throws {
+        if let id = activitiesByID.values.first(where: { $0.source == source })?.id {
+            activitiesByID.removeValue(forKey: id)
+        }
+    }
+    func deduplicateActivities() async throws -> [Activity] {
+        for activity in toRemove { activitiesByID.removeValue(forKey: activity.id) }
+        return toRemove
+    }
 }
 
 private struct ThrowingPlanStore: PlanStore {
@@ -425,6 +492,7 @@ private struct ThrowingActivityStore: ActivityStore {
     func activity(source: ActivitySource) async throws -> Activity? { nil }
     func activity(id: UUID) async throws -> Activity? { nil }
     func deleteActivity(source: ActivitySource) async throws {}
+    func deduplicateActivities() async throws -> [Activity] { [] }
 }
 
 /// Throws on `saveImportAnchor` (used to test `resyncActivities(from:)`'s anchor-clear failure

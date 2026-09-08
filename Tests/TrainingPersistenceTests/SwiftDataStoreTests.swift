@@ -109,6 +109,50 @@ struct SwiftDataStoreTests {
         #expect(try await store.activity(source: source) == duplicate)
     }
 
+    @Test("ActivityStore deduplicateActivities removes extras sharing a source, keeping exactly one")
+    func activityStoreDeduplicateActivitiesRemovesDuplicates() async throws {
+        let store = try makeStore()
+        let source = ActivitySource.healthKit(UUID())
+        let manual = Activity(source: .manual, sport: .running, start: day(2), duration: 1800)
+        try await store.upsert([manual])
+
+        // Simulates duplicates left over from before upsert's defense-in-depth dedup existed:
+        // seeded directly via a raw ModelContext against the same container, bypassing upsert
+        // (which would never let this state occur today) the way pre-fix persisted/CloudKit-synced
+        // data actually does.
+        let context = ModelContext(store.modelContainer)
+        let first = try ActivityRecord(
+            activity: Activity(source: source, sport: .running, start: day(0), duration: 1800)
+        )
+        let second = try ActivityRecord(
+            activity: Activity(source: source, sport: .cycling, start: day(1), duration: 3600)
+        )
+        context.insert(first)
+        context.insert(second)
+        try context.save()
+
+        let removed = try await store.deduplicateActivities()
+
+        #expect(removed.count == 1)
+        // Manual activities are untouched -- only the non-manual duplicate group is deduped.
+        let remaining = try await store.activities(in: day(0)...day(2))
+        #expect(remaining.count == 2)
+        #expect(remaining.contains { $0.source == .manual })
+        #expect(remaining.contains { $0.source == source })
+    }
+
+    @Test("ActivityStore deduplicateActivities is a no-op when there are no duplicates")
+    func activityStoreDeduplicateActivitiesNoOp() async throws {
+        let store = try makeStore()
+        let activity = Activity(source: .healthKit(UUID()), sport: .running, start: day(0), duration: 1800)
+        try await store.upsert([activity])
+
+        let removed = try await store.deduplicateActivities()
+
+        #expect(removed.isEmpty)
+        #expect(try await store.activity(id: activity.id) == activity)
+    }
+
     @Test("ActivityStore upsert dedupes two new activities that share a source within one batch")
     func activityStoreUpsertDedupesOnSourceWithinOneBatch() async throws {
         let store = try makeStore()

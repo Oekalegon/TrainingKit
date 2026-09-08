@@ -11,6 +11,10 @@ public struct StoreSet: Sendable {
     public var cycleStore: any CycleStore
     /// Storage for the athlete profile.
     public var athleteStore: any AthleteStore
+    /// Storage for the persisted CTL/ATL/TSB/monotony/strain cache. `nil` disables caching
+    /// entirely — ``TrainingModel`` recomputes the full daily series from scratch on every
+    /// `recompute(asOf:)`, exactly as it did before this store existed.
+    public var fitnessMetricsCacheStore: (any FitnessMetricsCacheStore)?
 
     /// Creates a store set.
     ///
@@ -20,17 +24,21 @@ public struct StoreSet: Sendable {
     ///   - workoutStore: Storage for the workout library.
     ///   - cycleStore: Storage for training cycles.
     ///   - athleteStore: Storage for the athlete profile.
+    ///   - fitnessMetricsCacheStore: Storage for the persisted fitness-metrics cache; defaults to
+    ///     `nil` (caching disabled), so every existing caller is unaffected.
     public init(
         activityStore: any ActivityStore,
         planStore: any PlanStore,
         workoutStore: any WorkoutLibraryStore,
         cycleStore: any CycleStore,
-        athleteStore: any AthleteStore
+        athleteStore: any AthleteStore,
+        fitnessMetricsCacheStore: (any FitnessMetricsCacheStore)? = nil
     ) {
         self.activityStore = activityStore
         self.planStore = planStore
         self.workoutStore = workoutStore
         self.cycleStore = cycleStore
         self.athleteStore = athleteStore
+        self.fitnessMetricsCacheStore = fitnessMetricsCacheStore
     }
 }

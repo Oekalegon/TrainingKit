@@ -21,7 +21,8 @@ import SwiftData
 /// indexed date fields if profiling ever shows otherwise. `activities(in:)` is the one query that
 /// already needed this: see its doc comment below.
 @ModelActor
-public actor SwiftDataStore: ActivityStore, PlanStore, WorkoutLibraryStore, CycleStore, AthleteStore {
+public actor SwiftDataStore: ActivityStore, PlanStore, WorkoutLibraryStore, CycleStore, AthleteStore,
+    FitnessMetricsCacheStore {
     // MARK: ActivityStore
 
     /// See `ActivityStore/activities(in:)`.
@@ -300,6 +301,131 @@ public actor SwiftDataStore: ActivityStore, PlanStore, WorkoutLibraryStore, Cycl
             return existing
         }
         let record = AthleteProfileRecord()
+        modelContext.insert(record)
+        return record
+    }
+
+    // MARK: FitnessMetricsCacheStore
+    //
+    // Unlike most other `in:`-range queries in this file, these push their date bound into the
+    // fetch predicate/sort rather than fetching every row and filtering in Swift — `day` (unlike
+    // most other records' date fields) is a plain queryable column, not something buried inside an
+    // opaque `Data` payload, so there's no reason not to, and the cache is exactly the table most
+    // likely to accumulate years of one-row-per-day history.
+
+    /// See `FitnessMetricsCacheStore/cachedMetrics(in:)`.
+    public func cachedMetrics(in range: ClosedRange<Date>) async throws -> [FitnessMetrics] {
+        let lowerBound = range.lowerBound
+        let upperBound = range.upperBound
+        let descriptor = FetchDescriptor<FitnessMetricsRecord>(
+            predicate: #Predicate { $0.day >= lowerBound && $0.day <= upperBound }
+        )
+        return try modelContext.fetch(descriptor).map { try $0.toMetrics() }
+    }
+
+    /// See `FitnessMetricsCacheStore/cachedMetrics(immediatelyBefore:)`.
+    public func cachedMetrics(immediatelyBefore date: Date) async throws -> FitnessMetrics? {
+        var descriptor = FetchDescriptor<FitnessMetricsRecord>(predicate: #Predicate { $0.day < date })
+        descriptor.sortBy = [SortDescriptor(\.day, order: .reverse)]
+        descriptor.fetchLimit = 1
+        return try modelContext.fetch(descriptor).first.map { try $0.toMetrics() }
+    }
+
+    /// See `FitnessMetricsCacheStore/recentLoads(before:count:)`. Reads the queryable `load`
+    /// column directly rather than `toMetrics()`, so this never decodes a payload just for one
+    /// `Double`.
+    public func recentLoads(before date: Date, count: Int) async throws -> [Double] {
+        var descriptor = FetchDescriptor<FitnessMetricsRecord>(predicate: #Predicate { $0.day < date })
+        descriptor.sortBy = [SortDescriptor(\.day, order: .reverse)]
+        descriptor.fetchLimit = count
+        // Fetched newest-first (to get the *trailing* `count` via `fetchLimit`) — reversed back to
+        // the oldest-first order the protocol documents.
+        return try modelContext.fetch(descriptor).map(\.load).reversed()
+    }
+
+    /// See `FitnessMetricsCacheStore/latestCachedDay()`.
+    public func latestCachedDay() async throws -> Date? {
+        var descriptor = FetchDescriptor<FitnessMetricsRecord>()
+        descriptor.sortBy = [SortDescriptor(\.day, order: .reverse)]
+        descriptor.fetchLimit = 1
+        return try modelContext.fetch(descriptor).first?.day
+    }
+
+    /// See `FitnessMetricsCacheStore/earliestCachedDay()`.
+    public func earliestCachedDay() async throws -> Date? {
+        var descriptor = FetchDescriptor<FitnessMetricsRecord>()
+        descriptor.sortBy = [SortDescriptor(\.day)]
+        descriptor.fetchLimit = 1
+        return try modelContext.fetch(descriptor).first?.day
+    }
+
+    /// See `FitnessMetricsCacheStore/upsert(_:)`. See ``upsert(_:)`` (`ActivityStore`'s) for why
+    /// this looks up every existing record with one fetch rather than one fetch per incoming day,
+    /// and why newly inserted records are added back into that lookup as they're created.
+    public func upsert(_ metrics: [FitnessMetrics]) async throws {
+        var recordsByDay: [Date: FitnessMetricsRecord] = [:]
+        for record in try modelContext.fetch(FetchDescriptor<FitnessMetricsRecord>()) {
+            recordsByDay[record.day] = record
+        }
+
+        for metric in metrics {
+            if let existing = recordsByDay[metric.day] {
+                try existing.update(from: metric)
+            } else {
+                let record = try FitnessMetricsRecord(metrics: metric)
+                modelContext.insert(record)
+                recordsByDay[metric.day] = record
+            }
+        }
+        try modelContext.save()
+    }
+
+    /// See `FitnessMetricsCacheStore/deleteCachedMetrics(from:)`.
+    ///
+    /// Not currently called by ``TrainingModel``'s own cache-fill algorithm — every previously
+    /// cached day within a recompute's range gets overwritten via ``upsert(_:)`` rather than
+    /// needing an explicit delete-then-reinsert, since a recompute always extends at least through
+    /// whatever was last cached. Kept as public store API surface (tested at this layer) for a
+    /// future explicit "clear the cache" action or a full-resync path that wants to start clean.
+    public func deleteCachedMetrics(from date: Date) async throws {
+        let descriptor = FetchDescriptor<FitnessMetricsRecord>(predicate: #Predicate { $0.day >= date })
+        let records = try modelContext.fetch(descriptor)
+        for record in records {
+            modelContext.delete(record)
+        }
+        try modelContext.save()
+    }
+
+    /// See `FitnessMetricsCacheStore/dirtyWatermark()`.
+    public func dirtyWatermark() async throws -> Date? {
+        try cacheStateSingletonRecordIfExists()?.dirtyWatermark
+    }
+
+    /// See `FitnessMetricsCacheStore/markDirty(from:)`.
+    public func markDirty(from date: Date) async throws {
+        let record = try cacheStateSingletonRecord()
+        record.dirtyWatermark = min(record.dirtyWatermark ?? .distantFuture, date)
+        try modelContext.save()
+    }
+
+    /// See `FitnessMetricsCacheStore/clearDirtyWatermark()`.
+    public func clearDirtyWatermark() async throws {
+        guard let record = try cacheStateSingletonRecordIfExists() else { return }
+        record.dirtyWatermark = nil
+        try modelContext.save()
+    }
+
+    private func cacheStateSingletonRecordIfExists() throws -> FitnessMetricsCacheStateRecord? {
+        try modelContext.fetch(FetchDescriptor<FitnessMetricsCacheStateRecord>()).first
+    }
+
+    /// Fetches the one ``FitnessMetricsCacheStateRecord``, creating (but not yet saving) it if this
+    /// is the first time the watermark is written.
+    private func cacheStateSingletonRecord() throws -> FitnessMetricsCacheStateRecord {
+        if let existing = try cacheStateSingletonRecordIfExists() {
+            return existing
+        }
+        let record = FitnessMetricsCacheStateRecord()
         modelContext.insert(record)
         return record
     }

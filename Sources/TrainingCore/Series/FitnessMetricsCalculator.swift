@@ -17,14 +17,20 @@ public struct FitnessMetricsCalculator: Sendable {
     ///   - seed: Starting `(ctl, atl)` as of the day before `series` begins, for a user who only
     ///     imports recent history. Without a seed, the first `ctlTimeConstantDays` days are
     ///     marked ``FitnessMetrics/isWarmingUp``.
+    ///   - recentLoads: The trailing up-to-`monotonyWindowDays` raw loads immediately before
+    ///     `series` begins, oldest first — pre-fills the monotony/strain rolling window so it
+    ///     doesn't restart empty at a cache/import boundary the way `seed` alone would leave it.
+    ///     Defaults to `[]`, matching today's always-cold monotony/strain behavior. Only the
+    ///     trailing `monotonyWindowDays` entries are used if more are passed.
     public func metrics(
         for series: [DayLoad],
         parameters: LoadModelParameters,
-        seed: (ctl: Double, atl: Double)?
+        seed: (ctl: Double, atl: Double)?,
+        recentLoads: [Double] = []
     ) -> [FitnessMetrics] {
         var previousCTL = seed?.ctl ?? 0
         var previousATL = seed?.atl ?? 0
-        var loadWindow: [Double] = []
+        var loadWindow: [Double] = Array(recentLoads.suffix(parameters.monotonyWindowDays))
         var result: [FitnessMetrics] = []
         result.reserveCapacity(series.count)
 

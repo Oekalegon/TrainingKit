@@ -4,11 +4,27 @@ import Foundation
 /// records agree on the same `JSONEncoder`/`JSONDecoder` configuration rather than each
 /// constructing its own.
 enum PersistenceCoding {
+    /// `FitnessMetrics.monotony`/`.strain` can legitimately be `.nan` (a perfectly flat week —
+    /// see that type's doc comment), which the default `.throw` strategy would reject outright.
+    private static let nonConformingFloatSentinels = (positiveInfinity: "inf", negativeInfinity: "-inf", nan: "nan")
+
     static func encode<T: Encodable>(_ value: T) throws -> Data {
-        try JSONEncoder().encode(value)
+        let encoder = JSONEncoder()
+        encoder.nonConformingFloatEncodingStrategy = .convertToString(
+            positiveInfinity: nonConformingFloatSentinels.positiveInfinity,
+            negativeInfinity: nonConformingFloatSentinels.negativeInfinity,
+            nan: nonConformingFloatSentinels.nan
+        )
+        return try encoder.encode(value)
     }
 
     static func decode<T: Decodable>(_ type: T.Type, from data: Data) throws -> T {
-        try JSONDecoder().decode(type, from: data)
+        let decoder = JSONDecoder()
+        decoder.nonConformingFloatDecodingStrategy = .convertFromString(
+            positiveInfinity: nonConformingFloatSentinels.positiveInfinity,
+            negativeInfinity: nonConformingFloatSentinels.negativeInfinity,
+            nan: nonConformingFloatSentinels.nan
+        )
+        return try decoder.decode(type, from: data)
     }
 }

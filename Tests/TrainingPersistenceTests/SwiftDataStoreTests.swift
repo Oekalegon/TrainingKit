@@ -46,6 +46,24 @@ struct SwiftDataStoreTests {
         #expect(all.first?.duration == 3600)
     }
 
+    @Test("ActivityStore upsert doesn't duplicate when two new activities share an id in one batch")
+    func activityStoreUpsertDedupesWithinOneBatch() async throws {
+        let store = try makeStore()
+        let id = UUID()
+        let first = Activity(id: id, source: .manual, sport: .running, start: day(0), duration: 1800)
+        var second = first
+        second.duration = 3600
+
+        // Neither `first` nor `second` exists in the store yet -- this exercises the in-memory
+        // lookup `upsert` builds for the whole batch, not the id == existing-record path the
+        // "replaces an existing record" test above covers.
+        try await store.upsert([first, second])
+
+        let all = try await store.activities(in: day(0)...day(0))
+        #expect(all.count == 1)
+        #expect(all.first?.duration == 3600)
+    }
+
     @Test("ActivityStore dedupes on source")
     func activityStoreDedupeOnSource() async throws {
         let store = try makeStore()

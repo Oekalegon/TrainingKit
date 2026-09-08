@@ -4,7 +4,10 @@ import SwiftData
 import CoreData
 import TrainingCore
 import TrainingHealthKit
-import TrainingPersistence
+// `@testable` so this throwaway harness can call SwiftDataStore.deleteAllActivities(), which is
+// deliberately internal (not part of any shipped app's public surface) -- see that method's doc
+// comment in TrainingPersistence.
+@testable import TrainingPersistence
 
 /// A throwaway harness for exercising `TrainingHealthKit` and `TrainingPersistence` against real
 /// HealthKit data and a real CloudKit-backed SwiftData store — the things `swift test` on its own

@@ -22,7 +22,7 @@ targets:
         com.apple.security.app-sandbox: true
         com.apple.security.network.client: true
         com.apple.developer.icloud-container-identifiers:
-          - iCloud.org.oekalegon.trainingkit.shared
+          - iCloud.org.oekalegon.trainingkit.testharness
         com.apple.developer.icloud-services:
           - CloudKit
         com.apple.developer.aps-environment: development

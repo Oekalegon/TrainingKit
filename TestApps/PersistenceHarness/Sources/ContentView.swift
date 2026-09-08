@@ -2,7 +2,10 @@ import SwiftUI
 import SwiftData
 import CoreData
 import TrainingCore
-import TrainingPersistence
+// `@testable` so this throwaway harness can call SwiftDataStore.deleteAllActivities(), which is
+// deliberately internal (not part of any shipped app's public surface) -- see that method's doc
+// comment in TrainingPersistence.
+@testable import TrainingPersistence
 
 /// A throwaway harness for confirming `TrainingPersistence`'s CloudKit sync actually crosses
 /// devices: `HealthKitHarness` (the iOS test app, same repo, same shared CloudKit container) saves

@@ -44,7 +44,11 @@ public actor SwiftDataStore: ActivityStore, PlanStore, WorkoutLibraryStore, Cycl
     /// Looks up every existing record with one fetch of the whole table, rather than one fetch
     /// per incoming activity — for an import of hundreds or thousands of activities (a full
     /// HealthKit history import, say), N individual fetches each pay their own query overhead,
-    /// while one fetch plus an in-memory dictionary lookup does not.
+    /// while one fetch plus an in-memory dictionary lookup does not. Every newly inserted record
+    /// is added to that same dictionary as it's created, so two incoming activities that share an
+    /// id neither of which is in the store yet still resolve to a single row (update, not a second
+    /// insert) — matching what a live per-item fetch would have found, and what `ActivityRecord`'s
+    /// own doc comment promises about uniqueness-by-id.
     public func upsert(_ activities: [Activity]) async throws {
         var recordsByID: [UUID: ActivityRecord] = [:]
         for record in try modelContext.fetch(FetchDescriptor<ActivityRecord>()) {
@@ -55,7 +59,9 @@ public actor SwiftDataStore: ActivityStore, PlanStore, WorkoutLibraryStore, Cycl
             if let existing = recordsByID[activity.id] {
                 try existing.update(from: activity)
             } else {
-                modelContext.insert(try ActivityRecord(activity: activity))
+                let record = try ActivityRecord(activity: activity)
+                modelContext.insert(record)
+                recordsByID[activity.id] = record
             }
         }
         try modelContext.save()
@@ -80,13 +86,14 @@ public actor SwiftDataStore: ActivityStore, PlanStore, WorkoutLibraryStore, Cycl
 
     /// Deletes every activity in this store, returning how many were removed.
     ///
-    /// Not part of `ActivityStore` — no Core protocol needs a bulk-clear operation — but useful
-    /// for cleaning up after a since-fixed import bug duplicated records, or for a test harness
-    /// that wants to reset between runs. Deletes are tracked individually by SwiftData's CloudKit
-    /// mirroring exactly like `deleteActivity(source:)`, so they propagate to every other device
-    /// syncing this store.
+    /// Not part of `ActivityStore` — no Core protocol needs a bulk-clear operation, and no shipped
+    /// app should either. Exists only for `TestApps/HealthKitHarness`/`PersistenceHarness` to reset
+    /// between manual test runs (via `@testable import TrainingPersistence`), and for tests here —
+    /// deliberately `internal`, not `public`, so it can't become a real button in a real app by
+    /// accident. Deletes are tracked individually by SwiftData's CloudKit mirroring exactly like
+    /// `deleteActivity(source:)`, so they propagate to every other device syncing this store.
     @discardableResult
-    public func deleteAllActivities() async throws -> Int {
+    func deleteAllActivities() async throws -> Int {
         let records = try modelContext.fetch(FetchDescriptor<ActivityRecord>())
         for record in records {
             modelContext.delete(record)
@@ -116,7 +123,8 @@ public actor SwiftDataStore: ActivityStore, PlanStore, WorkoutLibraryStore, Cycl
     }
 
     /// See `PlanStore/upsert(_:)`. See ``upsert(_:)`` (`ActivityStore`'s) for why this looks up
-    /// every existing record with one fetch rather than one fetch per incoming plan.
+    /// every existing record with one fetch rather than one fetch per incoming plan, and why newly
+    /// inserted records are added back into that lookup as they're created.
     public func upsert(_ plans: [PlannedActivity]) async throws {
         var recordsByID: [UUID: PlannedActivityRecord] = [:]
         for record in try modelContext.fetch(FetchDescriptor<PlannedActivityRecord>()) {
@@ -127,7 +135,9 @@ public actor SwiftDataStore: ActivityStore, PlanStore, WorkoutLibraryStore, Cycl
             if let existing = recordsByID[plan.id] {
                 try existing.update(from: plan)
             } else {
-                modelContext.insert(try PlannedActivityRecord(plan: plan))
+                let record = try PlannedActivityRecord(plan: plan)
+                modelContext.insert(record)
+                recordsByID[plan.id] = record
             }
         }
         try modelContext.save()
@@ -163,7 +173,8 @@ public actor SwiftDataStore: ActivityStore, PlanStore, WorkoutLibraryStore, Cycl
     }
 
     /// See `WorkoutLibraryStore/upsert(_:)`. See ``upsert(_:)`` (`ActivityStore`'s) for why this
-    /// looks up every existing record with one fetch rather than one fetch per incoming workout.
+    /// looks up every existing record with one fetch rather than one fetch per incoming workout,
+    /// and why newly inserted records are added back into that lookup as they're created.
     public func upsert(_ workouts: [StructuredWorkout]) async throws {
         var recordsByID: [UUID: StructuredWorkoutRecord] = [:]
         for record in try modelContext.fetch(FetchDescriptor<StructuredWorkoutRecord>()) {
@@ -174,7 +185,9 @@ public actor SwiftDataStore: ActivityStore, PlanStore, WorkoutLibraryStore, Cycl
             if let existing = recordsByID[workout.id] {
                 try existing.update(from: workout)
             } else {
-                modelContext.insert(try StructuredWorkoutRecord(workout: workout))
+                let record = try StructuredWorkoutRecord(workout: workout)
+                modelContext.insert(record)
+                recordsByID[workout.id] = record
             }
         }
         try modelContext.save()
@@ -209,7 +222,8 @@ public actor SwiftDataStore: ActivityStore, PlanStore, WorkoutLibraryStore, Cycl
     /// See `CycleStore/upsert(_:)`. Nesting/overlap validation is shared with every other
     /// `CycleStore` conformer via `CycleNestingValidator`. Reuses the one fetch this needs anyway
     /// (to decode every existing cycle for validation) as the update lookup too, rather than
-    /// fetching again per cycle — see ``upsert(_:)`` (`ActivityStore`'s) for why that matters.
+    /// fetching again per cycle — see ``upsert(_:)`` (`ActivityStore`'s) for why that matters, and
+    /// why newly inserted records are added back into that lookup as they're created.
     public func upsert(_ cycles: [TrainingCycle]) async throws {
         var existingRecordsByID: [UUID: TrainingCycleRecord] = [:]
         var existingByID: [UUID: TrainingCycle] = [:]
@@ -223,7 +237,9 @@ public actor SwiftDataStore: ActivityStore, PlanStore, WorkoutLibraryStore, Cycl
             if let existing = existingRecordsByID[cycle.id] {
                 try existing.update(from: cycle)
             } else {
-                modelContext.insert(try TrainingCycleRecord(cycle: cycle))
+                let record = try TrainingCycleRecord(cycle: cycle)
+                modelContext.insert(record)
+                existingRecordsByID[cycle.id] = record
             }
         }
         try modelContext.save()

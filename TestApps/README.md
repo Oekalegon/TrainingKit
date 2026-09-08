@@ -25,10 +25,19 @@ concurrently from the one workspace without conflict.
 
 ## CloudKit setup this requires
 
-Both apps share one CloudKit container, `iCloud.org.oekalegon.trainingkit.shared` — set in both
+Both apps share one CloudKit container, `iCloud.org.oekalegon.trainingkit.testharness` — set in both
 `project.yml` files' entitlements *and* in each app's `Sources/PersistenceContainer.swift` (kept as
 a small duplicated constant since the two are separate app targets that can't share a source file
 directly; if you ever change one, change the other).
+
+**This container is deliberately separate from `TrainingApp`'s production container**
+(`iCloud.org.oekalegon.trainingkit.shared`) — never point either harness at that identifier. Both
+harnesses require signing into the same iCloud account on every test device, which in practice is
+your own real account, the same one the real `TrainingApp` runs under; if the containers matched,
+every "Delete ALL Activities" tap or repeated re-import test here would read, write, and delete the
+*same* private-database records `TrainingApp` shows you as your actual training history. Sharing a
+container is not a shortcut worth taking — register a second container identifier under the paid
+team if you ever need to change this.
 
 - **A paid Apple Developer Program membership is required.** Personal (free) Team IDs cannot use
   the iCloud/CloudKit capability at all — provisioning fails outright with "Personal development

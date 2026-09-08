@@ -124,6 +124,31 @@ public actor SwiftDataStore: ActivityStore, PlanStore, WorkoutLibraryStore, Cycl
         return records.count
     }
 
+    /// See `ActivityStore/deduplicateActivities()`. Keeps, per `sourceKey`, whichever duplicate
+    /// has the smallest `id` — an arbitrary but deterministic tie-break, since duplicates of the
+    /// same source are expected to carry equivalent data.
+    @discardableResult
+    public func deduplicateActivities() async throws -> [Activity] {
+        let manualKey = ActivitySource.manual.persistenceKey
+        var bySourceKey: [String: [ActivityRecord]] = [:]
+        for record in try modelContext.fetch(FetchDescriptor<ActivityRecord>()) where record.sourceKey != manualKey {
+            bySourceKey[record.sourceKey, default: []].append(record)
+        }
+
+        var removed: [Activity] = []
+        for group in bySourceKey.values where group.count > 1 {
+            let sorted = group.sorted { $0.id.uuidString < $1.id.uuidString }
+            for duplicate in sorted.dropFirst() {
+                removed.append(try duplicate.toActivity())
+                modelContext.delete(duplicate)
+            }
+        }
+        if !removed.isEmpty {
+            try modelContext.save()
+        }
+        return removed.sorted { $0.start < $1.start }
+    }
+
     private func fetchActivityRecord(id: UUID) throws -> ActivityRecord? {
         let descriptor = FetchDescriptor<ActivityRecord>(predicate: #Predicate { $0.id == id })
         return try modelContext.fetch(descriptor).first

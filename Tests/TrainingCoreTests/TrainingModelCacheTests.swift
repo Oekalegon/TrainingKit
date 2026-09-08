@@ -3,7 +3,7 @@ import Testing
 @testable import TrainingCore
 
 @MainActor
-@Suite("TrainingModel + FitnessMetricsCacheStore")
+@Suite("TrainingModel + FitnessMetricsCacheStore", .serialized)
 struct TrainingModelCacheTests {
     /// Exact UTC-midnight-aligned days, matching how `TrainingModel`'s cache algorithm computes
     /// `calendar.startOfDay(for:)` (the athlete fixture below uses the UTC time zone) — unlike the
@@ -215,6 +215,94 @@ struct TrainingModelCacheTests {
         // producing a visibly different (wrong) result — assert we're nowhere near that.
         let wrongCTLFromSelfSeed = 52 + (newTotalLoad - 52) / LoadModelParameters().ctlTimeConstantDays
         #expect(abs(recomputedDayZero.ctl - wrongCTLFromSelfSeed) > 0.01)
+    }
+
+    @Test("changing the athlete's time zone wipes the cache rather than leaving old-boundary rows behind")
+    func timeZoneChangeWipesStaleCacheRows() async throws {
+        let cache = InMemoryStore()
+        // A row cached under the athlete's original UTC day boundaries.
+        try await cache.upsert([seedMetrics(day: day(-1), ctl: 42, atl: 42)])
+        let (_, stores) = makeStores(cache: cache)
+        var athlete = AthleteProfile.fixture(timeZoneIdentifier: "UTC")
+        let model = TrainingModel(stores: stores, athlete: athlete)
+
+        athlete.timeZone = TimeZone(identifier: "America/Los_Angeles")!
+        model.athlete = athlete
+        await model.recompute(asOf: day(0))
+
+        // The old row's `ctl: 42` marker must not survive: `upsert` matches purely by `day`, and a
+        // timezone change shifts every recomputed `day` value relative to the old (UTC-aligned)
+        // rows, so without an explicit wipe the stale row would sit alongside the freshly
+        // recomputed ones under a slightly different Date key forever, rather than being replaced.
+        let allCached = try await cache.cachedMetrics(in: .distantPast...day(10))
+        #expect(allCached.allSatisfy { $0.ctl != 42 })
+    }
+
+    @Test("a heart-rate-zone entry effective in the future doesn't crash recompute even when it's beyond the published range")
+    func futureZoneEffectiveDateDoesNotCrashRecompute() async throws {
+        let cache = InMemoryStore()
+        let (_, stores) = makeStores(cache: cache)
+        var athlete = AthleteProfile.fixture()
+        let model = TrainingModel(stores: stores, athlete: athlete)
+        try await model.load(in: day(0)...day(0), asOf: day(0)) // narrow loadedRange, doesn't reach the future
+
+        // A zone change effective well beyond both `today` and the currently loaded range -- a
+        // legitimate real flow ("my zones change starting next month"). Before the fix, the dirty
+        // watermark this produces (`day(365)`) fed straight into `fetchFromStart` unclamped, and
+        // `fetchFromStart...upperBound` (`upperBound` being `today`/`publishRange`'s upper bound,
+        // both far short of `day(365)`) trapped building an invalid `ClosedRange`.
+        athlete.heartRateZoneHistory.append(
+            HeartRateZoneSettings(effectiveDate: day(365), restingHeartRateBPM: 48, maxHeartRateBPM: 195)
+        )
+        model.athlete = athlete
+        await model.recompute(asOf: day(0))
+
+        #expect(model.metrics.contains { $0.day == day(0) })
+    }
+
+    @Test("recompute(asOf:) pads the cache path through the loaded range even with no activity/plan near its end")
+    func recomputePadsThroughLoadedRangeWithCache() async throws {
+        let cache = InMemoryStore()
+        let (_, stores) = makeStores(cache: cache)
+        let athlete = AthleteProfile.fixture()
+        let model = TrainingModel(stores: stores, athlete: athlete)
+
+        // No activities or plans anywhere -- DailyLoadSeries has nothing of its own to anchor the
+        // far end of day(0)...day(10) with, so without padding day(10) would simply be missing
+        // from `model.metrics`/`freshPortion` rather than present with zero load.
+        try await model.load(in: day(0)...day(10), asOf: day(0))
+
+        #expect(model.metrics.contains { $0.day == day(10) })
+        #expect(model.metrics.first { $0.day == day(10) }?.load == 0)
+    }
+
+    @Test("two concurrently-triggered recompute(asOf:) calls against a shared cache complete cleanly")
+    func concurrentRecomputesCompleteCleanly() async throws {
+        // Proves `pendingRecompute` doesn't corrupt state or hang under real concurrent calls,
+        // without a continuation-gated double: an earlier version of this test used a custom
+        // actor that suspended inside `dirtyWatermark()` to prove strict ordering deterministically
+        // (mirroring `TrainingModelTests.swift`'s `GatedImporter`-based import tests), but that
+        // combination -- two `async let`s each driving their own `Task` chain through a shared
+        // actor's manually-suspended continuation, under swift-testing's full-suite parallel
+        // execution -- reproduced a rare `SIGSEGV` locally and in CI. Dropped in favor of this
+        // weaker but crash-free smoke check; ``TrainingModel/pendingImport``'s equivalent ordering
+        // proof for imports still stands, since that pattern hasn't shown the same instability.
+        let cache = InMemoryStore()
+        let (store, stores) = makeStores(cache: cache)
+        let athlete = AthleteProfile.fixture()
+        let activity = Activity(
+            source: .manual, sport: .running, start: day(0), duration: 1200, perceivedExertion: 5
+        )
+        try await store.upsert([activity])
+        let model = TrainingModel(stores: stores, athlete: athlete)
+        try await model.load(in: day(0)...day(0), asOf: day(0))
+
+        async let first: Void = model.recompute(asOf: day(0))
+        async let second: Void = model.recompute(asOf: day(0))
+        _ = await (first, second)
+
+        #expect(model.metrics.contains { $0.day == day(0) })
+        #expect(try await cache.dirtyWatermark() == nil)
     }
 
     @Test("a full (.distantPast) invalidation only reaches back to the cache's own earliest day, not the beginning of time")

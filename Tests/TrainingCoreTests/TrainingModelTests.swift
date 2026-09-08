@@ -264,6 +264,45 @@ struct TrainingModelTests {
         #expect(model.activities.map(\.id) == [imported.id])
         #expect(model.metrics.contains { $0.load > 0 })
     }
+
+    @Test("resyncActivities(from:) clears the persisted anchor before importing, so the importer sees a full import")
+    func resyncActivitiesClearsAnchorFirst() async throws {
+        let (store, stores) = makeStores()
+        let athlete = AthleteProfile.fixture()
+        try await store.saveImportAnchor(ImportAnchor(data: Data([9, 9])))
+
+        let model = TrainingModel(stores: stores, athlete: athlete)
+        let imported = Activity(source: .healthKit(UUID()), sport: .hiking, start: day(0), duration: 1800)
+        let importer = FakeImporter(result: ImportResult(
+            upserted: [imported], deletedSources: [], anchor: ImportAnchor(data: Data([1]))
+        ))
+
+        try await model.resyncActivities(from: importer, asOf: day(0))
+
+        #expect(await importer.receivedAnchor == nil)
+        #expect(try await store.activity(id: imported.id) == imported)
+        #expect(try await store.importAnchor() == ImportAnchor(data: Data([1])))
+    }
+
+    @Test("resyncActivities(from:) replaces an existing record's stale Sport rather than duplicating it")
+    func resyncActivitiesReplacesStaleRecordInPlace() async throws {
+        let (store, stores) = makeStores()
+        let athlete = AthleteProfile.fixture()
+        let source = ActivitySource.healthKit(UUID())
+        let stale = Activity(source: source, sport: .other(Sport.otherLabel(rawValue: 52)), start: day(0), duration: 1800)
+        try await store.upsert([stale])
+        try await store.saveImportAnchor(ImportAnchor(data: Data([9, 9])))
+
+        let model = TrainingModel(stores: stores, athlete: athlete)
+        let corrected = Activity(id: stale.id, source: source, sport: .hiking, start: day(0), duration: 1800)
+        let importer = FakeImporter(result: ImportResult(upserted: [corrected], deletedSources: [], anchor: nil))
+
+        try await model.resyncActivities(from: importer, asOf: day(0))
+
+        let all = try await store.activities(in: day(0)...day(0))
+        #expect(all.map(\.id) == [stale.id])
+        #expect(all.first?.sport == .hiking)
+    }
 }
 
 private struct ThrowingPlanStore: PlanStore {

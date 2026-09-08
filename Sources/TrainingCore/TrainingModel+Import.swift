@@ -38,4 +38,29 @@ extension TrainingModel {
         loadedRange = range
         await recompute(asOf: today)
     }
+
+    /// Clears the persisted import anchor, then runs ``importActivities(from:asOf:)``.
+    ///
+    /// A cleared anchor makes `importer.importActivities(since:)` treat the run as a full import —
+    /// e.g. `HealthKitActivityImporter` passes `nil` to `HKAnchoredObjectQueryDescriptor`, which
+    /// redelivers every matching HealthKit sample rather than only what changed since some prior
+    /// point. `ActivityStore.upsert(_:)` still matches by id, so re-delivered activities replace
+    /// their existing records in place rather than duplicating them.
+    ///
+    /// Use this to pick up a mapping change (e.g. a `Sport` case that used to fall back to
+    /// `.other`) for activities that were already imported before the fix, since `Sport` is
+    /// resolved once at import time and persisted, not recomputed on every read.
+    ///
+    /// - Parameters:
+    ///   - importer: The external source to import from, e.g. `HealthKitActivityImporter`.
+    ///   - today: Passed through to ``recompute(asOf:)``.
+    /// - Throws: Whatever `importActivities(from:asOf:)` throws, or whatever
+    ///   ``AthleteStore/saveImportAnchor(_:)`` throws clearing the anchor beforehand. In either
+    ///   case the anchor stays cleared — the next import (resync or otherwise) will also be a full
+    ///   one, which `upsert`'s id-matched replace makes harmless, same as a failed anchor save in
+    ///   ``importActivities(from:asOf:)`` itself.
+    public func resyncActivities(from importer: any ActivityImporting, asOf today: Date = .now) async throws {
+        try await stores.athleteStore.saveImportAnchor(nil)
+        try await importActivities(from: importer, asOf: today)
+    }
 }

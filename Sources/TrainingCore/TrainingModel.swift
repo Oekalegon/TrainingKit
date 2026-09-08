@@ -250,15 +250,19 @@ public final class TrainingModel {
     /// The cache-aware path, used by ``recompute(asOf:)`` when a
     /// ``StoreSet/fitnessMetricsCacheStore`` is configured.
     ///
-    /// Recomputes only from `effectiveFetchFrom` forward — the cache's dirty watermark if one is
-    /// pending, else the day after whatever's already cached (clamped to `today`, so an
+    /// Recomputes only from `effectiveFetchFrom` forward (clamped to never exceed `today`/
+    /// `publishRange`'s upper bound) — the cache's dirty watermark if one is pending (a full,
+    /// `.distantPast` invalidation wipes the cache first, so a change that shifts every `day`
+    /// boundary, like a timezone change, can't leave stale rows behind under old boundaries, then
+    /// still only recomputes from the wiped cache's own former earliest day forward, not the
+    /// literal epoch), else the day after whatever's already cached (clamped to `today`, so an
     /// already-caught-up cache only ever recomputes the volatile today/future tail), else the Unix
     /// epoch if the cache is empty (the one true full-history bootstrap, which only ever happens
     /// once). Fetches activities/plans for that range directly from `stores` — never from
-    /// `TrainingModel.activities`/`.plans`, which may only be a UI-driven subset — seeds CTL/ATL
-    /// and the monotony window from the cache, computes forward, persists whatever's newly final
-    /// (`day < today`), and assembles the result for `publishRange` from cached rows plus the fresh
-    /// tail.
+    /// `TrainingModel.activities`/`.plans`, which may
+    /// only be a UI-driven subset — seeds CTL/ATL and the monotony window from the cache, computes
+    /// forward, persists whatever's newly final (`day < today`), and assembles the result for
+    /// `publishRange` from cached rows plus the fresh tail.
     private nonisolated static func buildMetricsWithCache(
         cache: any FitnessMetricsCacheStore,
         stores: StoreSet,
@@ -278,13 +282,25 @@ public final class TrainingModel {
         let effectiveFetchFrom: Date
         if let watermark = try? await cache.dirtyWatermark() {
             // A blanket full-invalidate (`athlete`/`parameters`'s `didSet` uses `.distantPast` to
-            // mean "recompute everything cached") only ever needs to reach back as far as the
-            // cache's own earliest row — using the literal `.distantPast` sentinel here would pad
-            // and recompute every day since roughly year 1, which is an unbounded, unrealistic
-            // amount of work (and, via `upsert`, an unbounded write) for what should be "redo
-            // however many days are actually cached."
+            // mean "recompute everything cached") wipes the cache outright rather than reusing
+            // `upsert`'s replace-by-day matching to overwrite it in place: `upsert` matches purely
+            // on the `FitnessMetrics.day` Date value, which is computed with `athlete.timeZone` at
+            // write time. A timezone change is exactly one of the things that triggers this
+            // `.distantPast` path, and it shifts every future `day` value relative to the old rows
+            // — `upsert` would then insert alongside the stale rows instead of replacing them,
+            // leaving orphaned, wrong-boundary duplicates behind. Deleting first sidesteps that
+            // regardless of why the full invalidation happened.
+            //
+            // Still bounded by the cache's own earliest row (captured before the wipe), not the
+            // literal `.distantPast` sentinel: recomputing from there would pad and recompute every
+            // day since roughly year 1, which is an unbounded, unrealistic amount of work (and, via
+            // `upsert`, an unbounded write) for what should be "redo however many days were actually
+            // cached" — the wipe only needs to guarantee no *stale* row survives, not that the
+            // recompute itself reaches back further than the old cache did.
             if watermark == .distantPast {
-                effectiveFetchFrom = (try? await cache.earliestCachedDay()) ?? bootstrapSentinel
+                let earliestBeforeWipe = try? await cache.earliestCachedDay()
+                try? await cache.deleteCachedMetrics(from: .distantPast)
+                effectiveFetchFrom = earliestBeforeWipe ?? bootstrapSentinel
             } else {
                 effectiveFetchFrom = watermark
             }
@@ -294,9 +310,14 @@ public final class TrainingModel {
         } else {
             effectiveFetchFrom = bootstrapSentinel
         }
-        let fetchFromStart = calendar.startOfDay(for: effectiveFetchFrom)
 
         let upperBound = max(todayStart, publishRange.upperBound)
+        // Clamped to `upperBound`, not just day-aligned: `effectiveFetchFrom` can come straight
+        // from a dirty watermark (e.g. a newly added `HeartRateZoneSettings.effectiveDate`, which
+        // a caller can legitimately set in the future), and an unclamped `fetchFromStart` beyond
+        // `upperBound` would build an invalid (`lowerBound > upperBound`) `ClosedRange` below and
+        // trap.
+        let fetchFromStart = min(calendar.startOfDay(for: effectiveFetchFrom), upperBound)
         let rawActivities = (try? await stores.activityStore.activities(in: fetchFromStart...upperBound)) ?? []
         let rawPlans = (try? await stores.planStore.plans(in: fetchFromStart...upperBound)) ?? []
 

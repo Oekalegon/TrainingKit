@@ -217,6 +217,49 @@ struct TrainingModelCacheTests {
         #expect(abs(recomputedDayZero.ctl - wrongCTLFromSelfSeed) > 0.01)
     }
 
+    @Test("changing the athlete's time zone wipes the cache rather than leaving old-boundary rows behind")
+    func timeZoneChangeWipesStaleCacheRows() async throws {
+        let cache = InMemoryStore()
+        // A row cached under the athlete's original UTC day boundaries.
+        try await cache.upsert([seedMetrics(day: day(-1), ctl: 42, atl: 42)])
+        let (_, stores) = makeStores(cache: cache)
+        var athlete = AthleteProfile.fixture(timeZoneIdentifier: "UTC")
+        let model = TrainingModel(stores: stores, athlete: athlete)
+
+        athlete.timeZone = TimeZone(identifier: "America/Los_Angeles")!
+        model.athlete = athlete
+        await model.recompute(asOf: day(0))
+
+        // The old row's `ctl: 42` marker must not survive: `upsert` matches purely by `day`, and a
+        // timezone change shifts every recomputed `day` value relative to the old (UTC-aligned)
+        // rows, so without an explicit wipe the stale row would sit alongside the freshly
+        // recomputed ones under a slightly different Date key forever, rather than being replaced.
+        let allCached = try await cache.cachedMetrics(in: .distantPast...day(10))
+        #expect(allCached.allSatisfy { $0.ctl != 42 })
+    }
+
+    @Test("a heart-rate-zone entry effective in the future doesn't crash recompute even when it's beyond the published range")
+    func futureZoneEffectiveDateDoesNotCrashRecompute() async throws {
+        let cache = InMemoryStore()
+        let (_, stores) = makeStores(cache: cache)
+        var athlete = AthleteProfile.fixture()
+        let model = TrainingModel(stores: stores, athlete: athlete)
+        try await model.load(in: day(0)...day(0), asOf: day(0)) // narrow loadedRange, doesn't reach the future
+
+        // A zone change effective well beyond both `today` and the currently loaded range -- a
+        // legitimate real flow ("my zones change starting next month"). Before the fix, the dirty
+        // watermark this produces (`day(365)`) fed straight into `fetchFromStart` unclamped, and
+        // `fetchFromStart...upperBound` (`upperBound` being `today`/`publishRange`'s upper bound,
+        // both far short of `day(365)`) trapped building an invalid `ClosedRange`.
+        athlete.heartRateZoneHistory.append(
+            HeartRateZoneSettings(effectiveDate: day(365), restingHeartRateBPM: 48, maxHeartRateBPM: 195)
+        )
+        model.athlete = athlete
+        await model.recompute(asOf: day(0))
+
+        #expect(model.metrics.contains { $0.day == day(0) })
+    }
+
     @Test("a full (.distantPast) invalidation only reaches back to the cache's own earliest day, not the beginning of time")
     func fullInvalidationIsBoundedByEarliestCachedDay() async throws {
         let cache = InMemoryStore()

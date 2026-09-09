@@ -52,7 +52,7 @@ public actor SwiftDataStore: ActivityStore, PlanStore, WorkoutLibraryStore, Cycl
     /// own doc comment promises about uniqueness-by-id.
     ///
     /// Also indexes existing records by `sourceKey` (skipping sources with no natural key, e.g.
-    /// `.manual`/`.testing`; see `ActivitySource.hasNaturalKey`) so an incoming activity whose
+    /// `.manual`/`.testing`; see ``ActivitySource/hasNaturalKey``) so an incoming activity whose
     /// source already belongs to a *different* stored id deletes that stale record instead of
     /// leaving it behind as a duplicate — see ``ActivityStore/upsert(_:)``'s doc comment for why
     /// this defense-in-depth exists alongside the primary id match.

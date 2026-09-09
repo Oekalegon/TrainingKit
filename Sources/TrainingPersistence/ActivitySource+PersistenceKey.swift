@@ -24,8 +24,8 @@ extension ActivitySource {
         }
     }
 
-    /// Persistence keys for sources with no natural key of their own (see `hasNaturalKey`), so
-    /// code working with `ActivityRecord.sourceKey` strings can exclude them without decoding
-    /// the payload back into an `ActivitySource`.
+    /// Persistence keys for sources with no natural key of their own (see
+    /// ``ActivitySource/hasNaturalKey``), so code working with `ActivityRecord.sourceKey` strings
+    /// can exclude them without decoding the payload back into an `ActivitySource`.
     static let keysWithoutNaturalKey: Set<String> = Set([ActivitySource.manual, .testing].map(\.persistenceKey))
 }

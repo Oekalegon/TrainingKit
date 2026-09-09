@@ -18,7 +18,12 @@ public enum ActivitySource: Sendable, Codable, Hashable {
     ///
     /// `.manual` and `.testing` entries have no such identity — each one is independent, so
     /// ``ActivityStore/upsert(_:)`` never matches or dedupes them against another entry of the
-    /// same case.
+    /// same case. The flip side: every entry sharing a source without a natural key compares
+    /// equal on `source`, so ``ActivityStore/activity(source:)``/
+    /// ``ActivityStore/deleteActivity(source:)`` match *an* entry for that source, not a specific
+    /// one. Removing every `.testing` activity, for example, means calling
+    /// `deleteActivity(source: .testing)` in a loop until `activity(source: .testing)` returns
+    /// `nil`, not a single call.
     public var hasNaturalKey: Bool {
         switch self {
         case .healthKit, .fitFile:

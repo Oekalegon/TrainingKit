@@ -59,4 +59,9 @@ public struct FitnessMetrics: Sendable, Hashable, Codable {
         self.isProjected = isProjected
         self.isWarmingUp = isWarmingUp
     }
+
+    /// This day's ``tsb`` classified into a ``TSBZone``.
+    public var tsbZone: TSBZone {
+        TSBZone(tsb: tsb)
+    }
 }

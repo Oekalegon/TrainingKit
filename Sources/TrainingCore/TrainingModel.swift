@@ -344,27 +344,30 @@ public final class TrainingModel {
         let todayStart = calendar.startOfDay(for: today)
         let bootstrapSentinel = Date(timeIntervalSince1970: 0)
 
+        let watermark = try? await cache.dirtyWatermark()
+        // A blanket full-invalidate (`athlete`/`parameters`'s `didSet` uses `.distantPast` to mean
+        // "recompute everything cached") needs the cache wiped outright rather than reusing
+        // `upsert`'s replace-by-day matching to overwrite it in place: `upsert` matches purely on
+        // the `FitnessMetrics.day` Date value, which is computed with `athlete.timeZone` at write
+        // time. A timezone change is exactly one of the things that triggers this `.distantPast`
+        // path, and it shifts every future `day` value relative to the old rows — `upsert` would
+        // then insert alongside the stale rows instead of replacing them, leaving orphaned,
+        // wrong-boundary duplicates behind. The actual delete is deferred to below, alongside the
+        // rest of this function's cache writes, and only runs once the activity fetch has
+        // succeeded — see the `cacheWriteBlocked` guard there: deleting eagerly here, before
+        // knowing whether the fetch that's about to compute a replacement even succeeds, would
+        // leave the cache empty (not just stale) for as long as the fetch keeps failing.
         let effectiveFetchFrom: Date
-        if let watermark = try? await cache.dirtyWatermark() {
-            // A blanket full-invalidate (`athlete`/`parameters`'s `didSet` uses `.distantPast` to
-            // mean "recompute everything cached") wipes the cache outright rather than reusing
-            // `upsert`'s replace-by-day matching to overwrite it in place: `upsert` matches purely
-            // on the `FitnessMetrics.day` Date value, which is computed with `athlete.timeZone` at
-            // write time. A timezone change is exactly one of the things that triggers this
-            // `.distantPast` path, and it shifts every future `day` value relative to the old rows
-            // — `upsert` would then insert alongside the stale rows instead of replacing them,
-            // leaving orphaned, wrong-boundary duplicates behind. Deleting first sidesteps that
-            // regardless of why the full invalidation happened.
-            //
-            // Still bounded by the cache's own earliest row (captured before the wipe), not the
-            // literal `.distantPast` sentinel: recomputing from there would pad and recompute every
-            // day since roughly year 1, which is an unbounded, unrealistic amount of work (and, via
-            // `upsert`, an unbounded write) for what should be "redo however many days were actually
-            // cached" — the wipe only needs to guarantee no *stale* row survives, not that the
-            // recompute itself reaches back further than the old cache did.
+        if let watermark {
             if watermark == .distantPast {
+                // Still bounded by the cache's own earliest row (read now, before it's deleted),
+                // not the literal `.distantPast` sentinel: recomputing from there would pad and
+                // recompute every day since roughly year 1, which is an unbounded, unrealistic
+                // amount of work (and, via `upsert`, an unbounded write) for what should be "redo
+                // however many days were actually cached" — the wipe only needs to guarantee no
+                // *stale* row survives, not that the recompute itself reaches back further than
+                // the old cache did.
                 let earliestBeforeWipe = try? await cache.earliestCachedDay()
-                try? await cache.deleteCachedMetrics(from: .distantPast)
                 effectiveFetchFrom = earliestBeforeWipe ?? bootstrapSentinel
             } else {
                 effectiveFetchFrom = watermark
@@ -383,8 +386,17 @@ public final class TrainingModel {
         // `upperBound` would build an invalid (`lowerBound > upperBound`) `ClosedRange` below and
         // trap.
         let fetchFromStart = min(calendar.startOfDay(for: effectiveFetchFrom), upperBound)
-        let rawActivities = (try? await stores.activityStore.activities(in: fetchFromStart...upperBound)) ?? []
-        let rawPlans = (try? await stores.planStore.plans(in: fetchFromStart...upperBound)) ?? []
+        // Tracked separately from `?? []` so a failed fetch can't get baked into the cache as if
+        // it were a genuine all-rest-day stretch — see the `toCache` guard below. Only the
+        // activity fetch gates that guard: `DailyLoadSeries` never reads `plans` for a
+        // `day < todayStart` (the only days ever written to the cache), so a `plans`-only failure
+        // can't taint what's about to be cached — it only degrades today's/future's *published*
+        // estimate, handled separately below.
+        let fetchedActivities = try? await stores.activityStore.activities(in: fetchFromStart...upperBound)
+        let fetchedPlans = try? await stores.planStore.plans(in: fetchFromStart...upperBound)
+        let cacheWriteBlocked = fetchedActivities == nil
+        let rawActivities = fetchedActivities ?? []
+        let rawPlans = fetchedPlans ?? []
 
         var days = DailyLoadSeries().days(
             activities: rawActivities,
@@ -440,11 +452,37 @@ public final class TrainingModel {
             for: days, parameters: parameters, seed: seed, recentLoads: recentLoads
         )
 
+        // Every cache mutation below is skipped when `activities(in:)` failed:
+        // `rawActivities`/`rawPlans` are then an empty stand-in for "unknown," not "no
+        // activities," and `result`'s `day < todayStart` portion was computed from that stand-in —
+        // persisting it would permanently overwrite this range's real history with a bogus
+        // all-rest-day series, since `effectiveFetchFrom` only ever advances forward from the
+        // latest *cached* day. Leaving the watermark and any pending `.distantPast` wipe untouched
+        // here means the next `recompute(asOf:)` retries this exact range (with the old cache rows
+        // — stale, but not empty — still in place) instead of silently keeping wrong data or
+        // discarding good data it can't yet replace. A `plans(in:)`-only failure doesn't block any
+        // of this: `DailyLoadSeries` never reads `plans` for a `day < todayStart`, so it can't have
+        // tainted what's about to be cached — it only degrades today's/future's *published*
+        // estimate, which is recomputed fresh (never cached) on every call regardless.
         let toCache = result.filter { $0.day < todayStart }
-        if !toCache.isEmpty {
-            try? await cache.upsert(toCache)
+        if cacheWriteBlocked {
+            Logging.series.warning(
+                "Skipping fitness-metrics cache write for \(fetchFromStart, privacy: .public)...\(upperBound, privacy: .public): activity fetch failed, will retry on next recompute"
+            )
+        } else {
+            if watermark == .distantPast {
+                try? await cache.deleteCachedMetrics(from: .distantPast)
+            }
+            if !toCache.isEmpty {
+                try? await cache.upsert(toCache)
+            }
+            try? await cache.clearDirtyWatermark()
         }
-        try? await cache.clearDirtyWatermark()
+        if fetchedPlans == nil {
+            Logging.series.warning(
+                "Fitness-metrics recompute for \(fetchFromStart, privacy: .public)...\(upperBound, privacy: .public) proceeded with an empty plan set: plan fetch failed, today's/future's published estimate may be understated until the next recompute"
+            )
+        }
 
         var cachedPortion: [FitnessMetrics] = []
         if let cachedUpperExclusive = calendar.date(byAdding: .day, value: -1, to: fetchFromStart),

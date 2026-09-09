@@ -85,6 +85,117 @@ struct TrainingModelCacheTests {
         #expect(afterSecondRun.count == beforeSecondRun.count)
     }
 
+    @Test("a failed activity/plan fetch during recompute is never cached, so it retries instead of permanently poisoning history with a bogus all-zero result")
+    func failedFetchDuringRecomputeIsNotCached() async throws {
+        let backing = InMemoryStore()
+        let athlete = AthleteProfile.fixture()
+        // duration/60 * RPE = 20 * 4 = 80 TRIMP.
+        let activity = Activity(
+            source: .manual, sport: .running, start: day(0), duration: 1200, perceivedExertion: 4
+        )
+        try await backing.upsert([activity])
+
+        let failingActivityStore = FailingFetchActivityStore(wrapping: backing)
+        let cache = InMemoryStore()
+        let stores = StoreSet(
+            activityStore: failingActivityStore, planStore: backing, workoutStore: backing,
+            cycleStore: backing, athleteStore: backing, fitnessMetricsCacheStore: cache
+        )
+        let model = TrainingModel(stores: stores, athlete: athlete)
+
+        // day(0) is final relative to day(1) ("today"), so it's eligible to be cached -- but the
+        // fetch that would supply its real activity fails.
+        await model.recompute(asOf: day(1))
+
+        // Nothing must have been cached for day(0): caching the fetch failure's bogus zero-load
+        // result would permanently overwrite the real history -- recompute only ever advances its
+        // fetch forward from the latest *cached* day, so a bad row here would never self-heal.
+        let cachedAfterFailure = try await cache.cachedMetrics(in: day(0)...day(0))
+        #expect(cachedAfterFailure.isEmpty)
+
+        // Once the fetch succeeds, a later recompute must retry (not skip) day(0) and cache the
+        // correct value -- proving the failure didn't advance the cache's watermark past it.
+        await failingActivityStore.setShouldFailFetch(false)
+        await model.recompute(asOf: day(1))
+
+        let cachedAfterRetry = try await cache.cachedMetrics(in: day(0)...day(0))
+        let expectedCTL = 80 / LoadModelParameters().ctlTimeConstantDays
+        #expect(cachedAfterRetry.count == 1)
+        #expect(abs((cachedAfterRetry.first?.ctl ?? -1) - expectedCTL) < 1e-9)
+    }
+
+    @Test("a pending dirty watermark survives a failed fetch, so retry resumes from the same point instead of the day after whatever's cached")
+    func dirtyWatermarkSurvivesFailedFetch() async throws {
+        let backing = InMemoryStore()
+        let athlete = AthleteProfile.fixture()
+        let cache = InMemoryStore()
+        // A day already cached from before some backdated edit -- `markDirty(from:)` below is what
+        // a caller (e.g. an import touching day(0)) would have done to flag it for recompute.
+        try await cache.upsert([seedMetrics(day: day(-1), ctl: 75, atl: 78, load: 80)])
+        try await cache.markDirty(from: day(0))
+        // duration/60 * RPE = 20 * 4 = 80 TRIMP.
+        try await backing.upsert([
+            Activity(source: .manual, sport: .running, start: day(0), duration: 1200, perceivedExertion: 4)
+        ])
+
+        let failingActivityStore = FailingFetchActivityStore(wrapping: backing)
+        let stores = StoreSet(
+            activityStore: failingActivityStore, planStore: backing, workoutStore: backing,
+            cycleStore: backing, athleteStore: backing, fitnessMetricsCacheStore: cache
+        )
+        let model = TrainingModel(stores: stores, athlete: athlete)
+
+        await model.recompute(asOf: day(1))
+        #expect(try await cache.dirtyWatermark() == day(0))
+        #expect(try await cache.cachedMetrics(in: day(0)...day(0)).isEmpty)
+
+        // A later successful recompute must still start from the preserved watermark (day(0)), not
+        // silently fall back to "the day after latestCachedDay()" (also day(0) here, so this alone
+        // wouldn't distinguish the two paths -- the watermark being correctly cleared afterward is
+        // what proves it was actually consumed rather than ignored).
+        await failingActivityStore.setShouldFailFetch(false)
+        await model.recompute(asOf: day(1))
+        #expect(try await cache.dirtyWatermark() == nil)
+        let expectedCTL = 75 + (80 - 75) / LoadModelParameters().ctlTimeConstantDays
+        let cached = try await cache.cachedMetrics(in: day(0)...day(0))
+        #expect(cached.count == 1)
+        #expect(abs((cached.first?.ctl ?? -1) - expectedCTL) < 1e-9)
+    }
+
+    @Test("a `.distantPast` invalidation racing a failed fetch leaves the old cached rows in place, so retry doesn't regress to rebuilding from the Unix epoch")
+    func distantPastInvalidationSurvivesFailedFetch() async throws {
+        let backing = InMemoryStore()
+        let athlete = AthleteProfile.fixture()
+        let cache = InMemoryStore()
+        // Pre-existing cached history, as if computed by an earlier, successful run.
+        try await cache.upsert([
+            seedMetrics(day: day(-2), ctl: 50, atl: 52, load: 60),
+            seedMetrics(day: day(-1), ctl: 55, atl: 54, load: 65),
+        ])
+        try await cache.markDirty(from: .distantPast)
+
+        let failingActivityStore = FailingFetchActivityStore(wrapping: backing)
+        let stores = StoreSet(
+            activityStore: failingActivityStore, planStore: backing, workoutStore: backing,
+            cycleStore: backing, athleteStore: backing, fitnessMetricsCacheStore: cache
+        )
+        let model = TrainingModel(stores: stores, athlete: athlete)
+
+        await model.recompute(asOf: day(1))
+
+        // The old rows must still be there: a failed fetch must never leave the cache emptier than
+        // it started, even mid-invalidation.
+        let cachedAfterFailure = try await cache.cachedMetrics(in: day(-2)...day(-1))
+        #expect(Set(cachedAfterFailure.map(\.day)) == Set([day(-2), day(-1)]))
+        #expect(try await cache.dirtyWatermark() == .distantPast)
+
+        // A later successful recompute must resume from the *old* cache's earliest day (day(-2)),
+        // not regress to rebuilding from the Unix epoch just because the first attempt failed.
+        await failingActivityStore.setShouldFailFetch(false)
+        await model.recompute(asOf: day(1))
+        #expect(try await cache.earliestCachedDay() == day(-2))
+    }
+
     @Test("add(_ plan:) and add(_ cycles:) never write to the fitness-metrics cache")
     func plansAndCyclesNeverTouchCache() async throws {
         let spy = SpyCacheStore(wrapping: InMemoryStore())
@@ -339,6 +450,45 @@ private actor FakeCacheTestImporter: ActivityImporting {
     }
     func importActivities(since anchor: ImportAnchor?) async throws -> ImportResult {
         result
+    }
+}
+
+/// Wraps another `ActivityStore`, forwarding every call except `activities(in:)`, which throws
+/// while `shouldFailFetch` is `true` — simulates a transient fetch failure during
+/// `TrainingModel`'s cache-aware recompute, independent of whatever's already in the wrapped
+/// store.
+private actor FailingFetchActivityStore: ActivityStore {
+    struct Boom: Error {}
+    private let wrapped: any ActivityStore
+    private var shouldFailFetch: Bool
+
+    init(wrapping wrapped: any ActivityStore, shouldFailFetch: Bool = true) {
+        self.wrapped = wrapped
+        self.shouldFailFetch = shouldFailFetch
+    }
+
+    func setShouldFailFetch(_ value: Bool) {
+        shouldFailFetch = value
+    }
+
+    func activities(in range: ClosedRange<Date>) async throws -> [Activity] {
+        if shouldFailFetch { throw Boom() }
+        return try await wrapped.activities(in: range)
+    }
+    func upsert(_ activities: [Activity]) async throws {
+        try await wrapped.upsert(activities)
+    }
+    func activity(source: ActivitySource) async throws -> Activity? {
+        try await wrapped.activity(source: source)
+    }
+    func activity(id: UUID) async throws -> Activity? {
+        try await wrapped.activity(id: id)
+    }
+    func deleteActivity(source: ActivitySource) async throws {
+        try await wrapped.deleteActivity(source: source)
+    }
+    func deduplicateActivities() async throws -> [Activity] {
+        try await wrapped.deduplicateActivities()
     }
 }
 

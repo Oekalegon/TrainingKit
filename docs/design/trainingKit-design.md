@@ -75,6 +75,9 @@ struct AthleteProfile: Sendable, Codable {
     var paceModel: PaceModel                        // used to turn distance steps into time
     var timeZone: TimeZone                          // daily bucketing boundary
     var weekStartsOn: Weekday                       // weekly stats boundary, default .monday
+    var mainSport: Sport                            // primary sport, e.g. for a weekly overview
+                                                       // highlighting one sport's duration/distance/
+                                                       // TRIMP change above the rest; default .running
     var heartRateZoneHistory: [HeartRateZoneSettings] // resting/max HR + zone method, dated so
                                                        // recomputing an old activity's load uses the
                                                        // settings effective on its date, not today's

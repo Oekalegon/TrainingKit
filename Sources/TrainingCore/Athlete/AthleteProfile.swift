@@ -24,6 +24,9 @@ public struct AthleteProfile: Sendable, Codable, Equatable {
     public var timeZone: TimeZone
     /// Boundary for weekly statistics; default is Monday.
     public var weekStartsOn: Weekday
+    /// The athlete's primary sport, e.g. for a weekly overview that highlights one sport's
+    /// duration/distance/TRIMP change above the rest. Defaults to running.
+    public var mainSport: Sport
     /// Every ``HeartRateZoneSettings`` this athlete has recorded, in any order. Recomputing an
     /// activity's load looks up the settings effective on that activity's date via
     /// ``heartRateZoneSettings(asOf:)`` rather than always using the latest entry, so that
@@ -40,6 +43,7 @@ public struct AthleteProfile: Sendable, Codable, Equatable {
     ///   - paceModel: Turns a distance into a duration at a given heart-rate zone.
     ///   - timeZone: Boundary for daily bucketing in the fitness series.
     ///   - weekStartsOn: Boundary for weekly statistics; defaults to Monday.
+    ///   - mainSport: The athlete's primary sport; defaults to running.
     ///   - heartRateZoneHistory: Every ``HeartRateZoneSettings`` this athlete has recorded.
     public init(
         id: UUID = UUID(),
@@ -48,6 +52,7 @@ public struct AthleteProfile: Sendable, Codable, Equatable {
         paceModel: PaceModel,
         timeZone: TimeZone,
         weekStartsOn: Weekday = .monday,
+        mainSport: Sport = .running,
         heartRateZoneHistory: [HeartRateZoneSettings]
     ) {
         self.id = id
@@ -56,7 +61,26 @@ public struct AthleteProfile: Sendable, Codable, Equatable {
         self.paceModel = paceModel
         self.timeZone = timeZone
         self.weekStartsOn = weekStartsOn
+        self.mainSport = mainSport
         self.heartRateZoneHistory = heartRateZoneHistory
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, name, sex, paceModel, timeZone, weekStartsOn, mainSport, heartRateZoneHistory
+    }
+
+    /// Custom decoding so profiles persisted before `mainSport` existed still decode, defaulting
+    /// the missing field to running rather than failing to load the athlete's whole profile.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        sex = try container.decode(BiologicalSex.self, forKey: .sex)
+        paceModel = try container.decode(PaceModel.self, forKey: .paceModel)
+        timeZone = try container.decode(TimeZone.self, forKey: .timeZone)
+        weekStartsOn = try container.decode(Weekday.self, forKey: .weekStartsOn)
+        mainSport = try container.decodeIfPresent(Sport.self, forKey: .mainSport) ?? .running
+        heartRateZoneHistory = try container.decode([HeartRateZoneSettings].self, forKey: .heartRateZoneHistory)
     }
 
     /// The most recently effective ``HeartRateZoneSettings``, used for planning (which is always

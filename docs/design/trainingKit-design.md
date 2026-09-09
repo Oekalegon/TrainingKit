@@ -105,7 +105,7 @@ database — is unscoped future work with no design here yet.
 ```swift
 struct Activity: Identifiable, Sendable, Codable {
     let id: UUID
-    var source: ActivitySource        // .healthKit(uuid), .fitFile(url), .manual
+    var source: ActivitySource        // .healthKit(uuid), .fitFile(url), .manual, .testing
     var sport: Sport
     var start: Date
     var duration: TimeInterval

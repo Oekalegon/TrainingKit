@@ -7,8 +7,9 @@ public protocol ActivityStore: Sendable {
 
     /// Inserts new activities or replaces existing ones matched by `id`.
     ///
-    /// Also matched by `source` (except `.manual`, which has no natural key of its own and is
-    /// never deduped against other manual entries): an incoming activity whose `source` already
+    /// Also matched by `source` (except sources with no natural key of their own — `.manual` and
+    /// `.testing`, see ``ActivitySource/hasNaturalKey`` — which are never deduped against other
+    /// entries of the same case): an incoming activity whose `source` already
     /// belongs to a *different* existing `id` replaces that record instead of inserting a second
     /// one. This is defense-in-depth, not the primary dedupe path — callers are expected to look up
     /// ``activity(source:)`` and reuse its `id` before calling this, and ``TrainingModel``'s own
@@ -28,8 +29,8 @@ public protocol ActivityStore: Sendable {
     /// run that reports a source as removed at the origin.
     func deleteActivity(source: ActivitySource) async throws
 
-    /// Removes duplicate records that share the same non-manual `source`, keeping exactly one per
-    /// source.
+    /// Removes duplicate records that share the same `source` with a natural key (see
+    /// ``ActivitySource/hasNaturalKey``), keeping exactly one per source.
     ///
     /// A one-time cleanup for duplicates already persisted before `upsert(_:)`'s defense-in-depth
     /// dedup existed — `upsert` only clears a stale duplicate when a *new* activity for that

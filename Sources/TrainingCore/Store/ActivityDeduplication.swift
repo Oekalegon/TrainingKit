@@ -2,7 +2,7 @@ import Foundation
 
 /// Shared tie-break for ``ActivityStore/deduplicateActivities()`` implementations, so
 /// `InMemoryStore` and `SwiftDataStore` agree on which of a group of duplicate `Activity` rows
-/// (same non-manual `source`) survives.
+/// (same `source` with a natural key, see ``ActivitySource/hasNaturalKey``) survives.
 public enum ActivityDeduplication {
     /// Orders `group` (all sharing one `source`) so the activity to keep is `first`.
     ///

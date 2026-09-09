@@ -74,6 +74,7 @@ struct SwiftDataStoreTests {
 
         #expect(try await store.activity(source: source) == activity)
         #expect(try await store.activity(source: .manual) == nil)
+        #expect(try await store.activity(source: .testing) == nil)
     }
 
     @Test("ActivityStore dedupes .fitFile sources that differ only in URL representation")
@@ -114,7 +115,8 @@ struct SwiftDataStoreTests {
         let store = try makeStore()
         let source = ActivitySource.healthKit(UUID())
         let manual = Activity(source: .manual, sport: .running, start: day(2), duration: 1800)
-        try await store.upsert([manual])
+        let testing = Activity(source: .testing, sport: .running, start: day(3), duration: 1800)
+        try await store.upsert([manual, testing])
 
         // Simulates duplicates left over from before upsert's defense-in-depth dedup existed:
         // seeded directly via a raw ModelContext against the same container, bypassing upsert
@@ -134,10 +136,12 @@ struct SwiftDataStoreTests {
         let removed = try await store.deduplicateActivities()
 
         #expect(removed.count == 1)
-        // Manual activities are untouched -- only the non-manual duplicate group is deduped.
-        let remaining = try await store.activities(in: day(0)...day(2))
-        #expect(remaining.count == 2)
+        // Manual and testing activities are untouched -- only the duplicate group sharing a
+        // source with a natural key is deduped.
+        let remaining = try await store.activities(in: day(0)...day(3))
+        #expect(remaining.count == 3)
         #expect(remaining.contains { $0.source == .manual })
+        #expect(remaining.contains { $0.source == .testing })
         #expect(remaining.contains { $0.source == source })
     }
 
@@ -205,6 +209,21 @@ struct SwiftDataStoreTests {
 
         // `.manual` has no natural key -- two distinct manually-entered activities must both
         // survive, not collapse into one just because they share `source == .manual`.
+        try await store.upsert([first, second])
+
+        let all = try await store.activities(in: day(0)...day(0))
+        #expect(Set(all.map(\.id)) == Set([first.id, second.id]))
+    }
+
+    @Test("ActivityStore upsert never dedupes .testing activities against each other")
+    func activityStoreUpsertDoesNotDedupeTestingActivities() async throws {
+        let store = try makeStore()
+        let first = Activity(source: .testing, sport: .running, start: day(0), duration: 1800)
+        let second = Activity(source: .testing, sport: .cycling, start: day(0), duration: 3600)
+
+        // `.testing` has no natural key, same as `.manual` -- two distinct activities seeded for
+        // testing the app must both survive, not collapse into one just because they share
+        // `source == .testing`.
         try await store.upsert([first, second])
 
         let all = try await store.activities(in: day(0)...day(0))

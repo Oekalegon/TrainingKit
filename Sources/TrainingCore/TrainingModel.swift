@@ -383,8 +383,13 @@ public final class TrainingModel {
         // `upperBound` would build an invalid (`lowerBound > upperBound`) `ClosedRange` below and
         // trap.
         let fetchFromStart = min(calendar.startOfDay(for: effectiveFetchFrom), upperBound)
-        let rawActivities = (try? await stores.activityStore.activities(in: fetchFromStart...upperBound)) ?? []
-        let rawPlans = (try? await stores.planStore.plans(in: fetchFromStart...upperBound)) ?? []
+        // Tracked separately from `?? []` so a failed fetch can't get baked into the cache as if
+        // it were a genuine all-rest-day stretch — see the `toCache` guard below.
+        let fetchedActivities = try? await stores.activityStore.activities(in: fetchFromStart...upperBound)
+        let fetchedPlans = try? await stores.planStore.plans(in: fetchFromStart...upperBound)
+        let fetchFailed = fetchedActivities == nil || fetchedPlans == nil
+        let rawActivities = fetchedActivities ?? []
+        let rawPlans = fetchedPlans ?? []
 
         var days = DailyLoadSeries().days(
             activities: rawActivities,
@@ -440,11 +445,27 @@ public final class TrainingModel {
             for: days, parameters: parameters, seed: seed, recentLoads: recentLoads
         )
 
+        // Skipped entirely when the fetch above failed: `rawActivities`/`rawPlans` are then an
+        // empty stand-in for "unknown," not "no activities," and `result` was computed from that
+        // stand-in — persisting it would permanently overwrite this range's real history with a
+        // bogus all-rest-day series, since `effectiveFetchFrom` only ever advances forward from
+        // the latest *cached* day. Leaving the cache's watermark untouched here means the next
+        // `recompute(asOf:)` retries this exact range instead of silently keeping wrong data.
         let toCache = result.filter { $0.day < todayStart }
-        if !toCache.isEmpty {
+        if fetchFailed {
+            Logging.series.debug(
+                "Skipping fitness-metrics cache write for \(fetchFromStart, privacy: .public)...\(upperBound, privacy: .public): activity/plan fetch failed, will retry on next recompute"
+            )
+        } else if !toCache.isEmpty {
             try? await cache.upsert(toCache)
         }
-        try? await cache.clearDirtyWatermark()
+        // Also skipped on a failed fetch: clearing the watermark here would let the next
+        // recompute fall back to "the day after whatever's cached," which can be later than the
+        // dirty watermark actually pointed to (e.g. a backdated edit earlier than the cache's
+        // current tail) — leaving the watermark in place preserves that starting point for retry.
+        if !fetchFailed {
+            try? await cache.clearDirtyWatermark()
+        }
 
         var cachedPortion: [FitnessMetrics] = []
         if let cachedUpperExclusive = calendar.date(byAdding: .day, value: -1, to: fetchFromStart),

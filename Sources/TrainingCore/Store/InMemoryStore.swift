@@ -33,16 +33,16 @@ public actor InMemoryStore: ActivityStore, PlanStore, WorkoutLibraryStore, Cycle
     /// rather than a linear scan per activity.
     public func upsert(_ activities: [Activity]) async throws {
         var idBySource: [ActivitySource: UUID] = [:]
-        for (id, existing) in activitiesByID where existing.source != .manual {
+        for (id, existing) in activitiesByID where existing.source.hasNaturalKey {
             idBySource[existing.source] = id
         }
 
         for activity in activities {
-            if activity.source != .manual, let staleID = idBySource[activity.source], staleID != activity.id {
+            if activity.source.hasNaturalKey, let staleID = idBySource[activity.source], staleID != activity.id {
                 activitiesByID.removeValue(forKey: staleID)
             }
             activitiesByID[activity.id] = activity
-            if activity.source != .manual {
+            if activity.source.hasNaturalKey {
                 idBySource[activity.source] = activity.id
             }
         }
@@ -69,7 +69,7 @@ public actor InMemoryStore: ActivityStore, PlanStore, WorkoutLibraryStore, Cycle
     @discardableResult
     public func deduplicateActivities() async throws -> [Activity] {
         var bySource: [ActivitySource: [Activity]] = [:]
-        for activity in activitiesByID.values where activity.source != .manual {
+        for activity in activitiesByID.values where activity.source.hasNaturalKey {
             bySource[activity.source, default: []].append(activity)
         }
 

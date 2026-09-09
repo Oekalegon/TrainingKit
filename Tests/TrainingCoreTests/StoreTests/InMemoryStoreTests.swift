@@ -82,6 +82,21 @@ struct InMemoryStoreTests {
         #expect(Set(all.map(\.id)) == Set([first.id, second.id]))
     }
 
+    @Test("ActivityStore upsert never dedupes .testing activities against each other")
+    func activityStoreUpsertDoesNotDedupeTestingActivities() async throws {
+        let store = InMemoryStore()
+        let first = Activity(source: .testing, sport: .running, start: day(0), duration: 1800)
+        let second = Activity(source: .testing, sport: .cycling, start: day(0), duration: 3600)
+
+        // `.testing` has no natural key, same as `.manual` -- two distinct activities seeded for
+        // testing the app must both survive, not collapse into one just because they share
+        // `source == .testing`.
+        try await store.upsert([first, second])
+
+        let all = try await store.activities(in: day(0)...day(0))
+        #expect(Set(all.map(\.id)) == Set([first.id, second.id]))
+    }
+
     @Test("ActivityStore deleteActivity removes by source, no-ops if not found")
     func activityStoreDeleteActivity() async throws {
         let store = InMemoryStore()

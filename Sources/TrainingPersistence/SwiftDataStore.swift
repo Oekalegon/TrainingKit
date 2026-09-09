@@ -51,24 +51,25 @@ public actor SwiftDataStore: ActivityStore, PlanStore, WorkoutLibraryStore, Cycl
     /// insert) — matching what a live per-item fetch would have found, and what `ActivityRecord`'s
     /// own doc comment promises about uniqueness-by-id.
     ///
-    /// Also indexes existing records by `sourceKey` (skipping `.manual`, which has no natural key)
-    /// so an incoming activity whose source already belongs to a *different* stored id deletes that
-    /// stale record instead of leaving it behind as a duplicate — see ``ActivityStore/upsert(_:)``'s
-    /// doc comment for why this defense-in-depth exists alongside the primary id match.
+    /// Also indexes existing records by `sourceKey` (skipping sources with no natural key, e.g.
+    /// `.manual`/`.testing`; see ``ActivitySource/hasNaturalKey``) so an incoming activity whose
+    /// source already belongs to a *different* stored id deletes that stale record instead of
+    /// leaving it behind as a duplicate — see ``ActivityStore/upsert(_:)``'s doc comment for why
+    /// this defense-in-depth exists alongside the primary id match.
     public func upsert(_ activities: [Activity]) async throws {
         var recordsByID: [UUID: ActivityRecord] = [:]
         var recordsBySourceKey: [String: ActivityRecord] = [:]
-        let manualKey = ActivitySource.manual.persistenceKey
+        let keysWithoutNaturalKey = ActivitySource.keysWithoutNaturalKey
         for record in try modelContext.fetch(FetchDescriptor<ActivityRecord>()) {
             recordsByID[record.id] = record
-            if record.sourceKey != manualKey {
+            if !keysWithoutNaturalKey.contains(record.sourceKey) {
                 recordsBySourceKey[record.sourceKey] = record
             }
         }
 
         for activity in activities {
             let sourceKey = activity.source.persistenceKey
-            if sourceKey != manualKey, let stale = recordsBySourceKey[sourceKey], stale.id != activity.id {
+            if !keysWithoutNaturalKey.contains(sourceKey), let stale = recordsBySourceKey[sourceKey], stale.id != activity.id {
                 modelContext.delete(stale)
                 recordsByID.removeValue(forKey: stale.id)
             }
@@ -82,7 +83,7 @@ public actor SwiftDataStore: ActivityStore, PlanStore, WorkoutLibraryStore, Cycl
                 modelContext.insert(record)
             }
             recordsByID[activity.id] = record
-            if sourceKey != manualKey {
+            if !keysWithoutNaturalKey.contains(sourceKey) {
                 recordsBySourceKey[sourceKey] = record
             }
         }
@@ -130,9 +131,10 @@ public actor SwiftDataStore: ActivityStore, PlanStore, WorkoutLibraryStore, Cycl
     /// duplicate group is expected to be tiny (a handful of rows at most), so this is cheap.
     @discardableResult
     public func deduplicateActivities() async throws -> [Activity] {
-        let manualKey = ActivitySource.manual.persistenceKey
+        let keysWithoutNaturalKey = ActivitySource.keysWithoutNaturalKey
         var bySourceKey: [String: [ActivityRecord]] = [:]
-        for record in try modelContext.fetch(FetchDescriptor<ActivityRecord>()) where record.sourceKey != manualKey {
+        for record in try modelContext.fetch(FetchDescriptor<ActivityRecord>())
+        where !keysWithoutNaturalKey.contains(record.sourceKey) {
             bySourceKey[record.sourceKey, default: []].append(record)
         }
 

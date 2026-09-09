@@ -61,7 +61,11 @@ public struct FitnessMetrics: Sendable, Hashable, Codable {
     }
 
     /// This day's ``tsb`` classified into a ``TSBZone``.
-    public var tsbZone: TSBZone {
-        TSBZone(tsb: tsb)
+    ///
+    /// - Parameter guardrails: Where the zone's race-ready boundaries come from; defaults to
+    ///   `PlanGuardrails()`. Pass the athlete's own (possibly tuned) guardrails so this agrees
+    ///   with what ``PlanEvaluator`` considers race-ready for them.
+    public func tsbZone(guardrails: PlanGuardrails = PlanGuardrails()) -> TSBZone {
+        TSBZone(tsb: tsb, guardrails: guardrails)
     }
 }

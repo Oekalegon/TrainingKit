@@ -124,9 +124,10 @@ public actor SwiftDataStore: ActivityStore, PlanStore, WorkoutLibraryStore, Cycl
         return records.count
     }
 
-    /// See `ActivityStore/deduplicateActivities()`. Keeps, per `sourceKey`, whichever duplicate
-    /// has the smallest `id` — an arbitrary but deterministic tie-break, since duplicates of the
-    /// same source are expected to carry equivalent data.
+    /// See `ActivityStore/deduplicateActivities()`. See `ActivityDeduplication.ordered(_:)` for
+    /// which duplicate is kept — deciding that means decoding every candidate's `payload` (the
+    /// heart-rate samples it compares on aren't stored as their own queryable column), but a
+    /// duplicate group is expected to be tiny (a handful of rows at most), so this is cheap.
     @discardableResult
     public func deduplicateActivities() async throws -> [Activity] {
         let manualKey = ActivitySource.manual.persistenceKey
@@ -137,10 +138,11 @@ public actor SwiftDataStore: ActivityStore, PlanStore, WorkoutLibraryStore, Cycl
 
         var removed: [Activity] = []
         for group in bySourceKey.values where group.count > 1 {
-            let sorted = group.sorted { $0.id.uuidString < $1.id.uuidString }
-            for duplicate in sorted.dropFirst() {
-                removed.append(try duplicate.toActivity())
-                modelContext.delete(duplicate)
+            let decoded = try group.map { (record: $0, activity: try $0.toActivity()) }
+            let keptID = ActivityDeduplication.ordered(decoded.map(\.activity)).first?.id
+            for pair in decoded where pair.activity.id != keptID {
+                removed.append(pair.activity)
+                modelContext.delete(pair.record)
             }
         }
         if !removed.isEmpty {

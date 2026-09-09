@@ -141,6 +141,35 @@ struct SwiftDataStoreTests {
         #expect(remaining.contains { $0.source == source })
     }
 
+    @Test("ActivityStore deduplicateActivities keeps the duplicate with more heart-rate samples, not an arbitrary one")
+    func activityStoreDeduplicateActivitiesPrefersMoreCompleteData() async throws {
+        let store = try makeStore()
+        let source = ActivitySource.healthKit(UUID())
+
+        // Simulates the exact scenario this tie-break exists for: the same workout imported both
+        // before and after a fix to how HR series samples are unpacked on import. Keeping an
+        // arbitrary one of the two (e.g. by smallest id) would have roughly 50% odds of silently
+        // reverting that fix for this activity.
+        let sparse = Activity(
+            source: source, sport: .running, start: day(0), duration: 1800, heartRate: []
+        )
+        let rich = Activity(
+            source: source, sport: .running, start: day(0), duration: 1800,
+            heartRate: [HeartRateSample(time: day(0), bpm: 140), HeartRateSample(time: day(0) + 60, bpm: 150)]
+        )
+        let context = ModelContext(store.modelContainer)
+        context.insert(try ActivityRecord(activity: sparse))
+        context.insert(try ActivityRecord(activity: rich))
+        try context.save()
+
+        let removed = try await store.deduplicateActivities()
+
+        #expect(removed.map(\.id) == [sparse.id])
+        let remaining = try await store.activity(source: source)
+        #expect(remaining?.id == rich.id)
+        #expect(remaining?.heartRate.count == 2)
+    }
+
     @Test("ActivityStore deduplicateActivities is a no-op when there are no duplicates")
     func activityStoreDeduplicateActivitiesNoOp() async throws {
         let store = try makeStore()

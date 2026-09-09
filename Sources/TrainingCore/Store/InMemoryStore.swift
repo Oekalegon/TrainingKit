@@ -64,9 +64,8 @@ public actor InMemoryStore: ActivityStore, PlanStore, WorkoutLibraryStore, Cycle
         activitiesByID.removeValue(forKey: id)
     }
 
-    /// See ``ActivityStore/deduplicateActivities()``. Keeps, per source, whichever duplicate has
-    /// the smallest `id` — an arbitrary but deterministic tie-break, since duplicates of the same
-    /// source are expected to carry equivalent data.
+    /// See ``ActivityStore/deduplicateActivities()``. See ``ActivityDeduplication/ordered(_:)``
+    /// for which duplicate is kept.
     @discardableResult
     public func deduplicateActivities() async throws -> [Activity] {
         var bySource: [ActivitySource: [Activity]] = [:]
@@ -76,7 +75,7 @@ public actor InMemoryStore: ActivityStore, PlanStore, WorkoutLibraryStore, Cycle
 
         var removed: [Activity] = []
         for group in bySource.values where group.count > 1 {
-            let sorted = group.sorted { $0.id.uuidString < $1.id.uuidString }
+            let sorted = ActivityDeduplication.ordered(group)
             for duplicate in sorted.dropFirst() {
                 activitiesByID.removeValue(forKey: duplicate.id)
                 removed.append(duplicate)

@@ -438,6 +438,37 @@ struct TrainingModelTests {
         #expect((dayMetrics?.load ?? 0) > 0)
         #expect(try await fakeActivityStore.activity(id: duplicate.id) == nil)
     }
+
+    @Test("deduplicateActivities(asOf:) racing an in-flight importActivities(from:) is queued behind it")
+    func deduplicateRacingImportIsQueued() async throws {
+        let athlete = AthleteProfile.fixture()
+        let gatedStore = GatedActivityStore()
+        let otherStores = InMemoryStore()
+        let stores = StoreSet(
+            activityStore: gatedStore, planStore: otherStores, workoutStore: otherStores,
+            cycleStore: otherStores, athleteStore: otherStores
+        )
+        let model = TrainingModel(stores: stores, athlete: athlete)
+
+        async let dedupe: Void = try model.deduplicateActivities(asOf: day(0))
+        await gatedStore.waitUntilCalled()
+
+        let importer = FakeImporter(result: ImportResult(upserted: [], deletedSources: [], anchor: nil))
+        async let secondImport: Void = model.importActivities(from: importer, asOf: day(0))
+
+        // The import's Task has already started running, but it must be queued behind the
+        // dedupe -- it shouldn't have reached its own importer call yet. Not a timing guess: with
+        // the queue broken (e.g. deduplicateActivities accidentally using a queue of its own
+        // instead of sharing pendingImport), the import would race ahead regardless of how long
+        // this sleeps.
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(await importer.callCount == 0)
+
+        await gatedStore.release()
+        _ = try await (dedupe, secondImport)
+
+        #expect(await importer.callCount == 1)
+    }
 }
 
 /// Reports a fixed set of "removed" activities from `deduplicateActivities()` and removes them
@@ -552,6 +583,41 @@ private actor GatedImporter: ActivityImporting {
 
     func waitUntilCalled() async {
         if callCount > 0 { return }
+        await withCheckedContinuation { calledContinuation = $0 }
+    }
+
+    func release() {
+        continuation?.resume()
+        continuation = nil
+    }
+}
+
+/// An `ActivityStore` whose `deduplicateActivities()` blocks until released — used to prove
+/// `TrainingModel.deduplicateActivities(asOf:)` shares `pendingImport`'s queue with
+/// `importActivities(from:)`/`resyncActivities(from:)`, the same way `GatedImporter` proves it for
+/// two imports racing each other. Every other method is a minimal passthrough; this fake exists
+/// only to gate the one call this test needs to observe.
+private actor GatedActivityStore: ActivityStore {
+    private(set) var deduplicateCallCount = 0
+    private var continuation: CheckedContinuation<Void, Never>?
+    private var calledContinuation: CheckedContinuation<Void, Never>?
+
+    func activities(in range: ClosedRange<Date>) async throws -> [Activity] { [] }
+    func upsert(_ activities: [Activity]) async throws {}
+    func activity(source: ActivitySource) async throws -> Activity? { nil }
+    func activity(id: UUID) async throws -> Activity? { nil }
+    func deleteActivity(source: ActivitySource) async throws {}
+
+    func deduplicateActivities() async throws -> [Activity] {
+        deduplicateCallCount += 1
+        calledContinuation?.resume()
+        calledContinuation = nil
+        await withCheckedContinuation { continuation = $0 }
+        return []
+    }
+
+    func waitUntilCalled() async {
+        if deduplicateCallCount > 0 { return }
         await withCheckedContinuation { calledContinuation = $0 }
     }
 

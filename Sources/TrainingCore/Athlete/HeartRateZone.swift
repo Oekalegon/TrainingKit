@@ -8,6 +8,10 @@
 /// zone and has no name. This type exists purely to give the five real zones a name — display
 /// strings and colors are UI concerns and belong in each app, not here (see e.g.
 /// `Sport`/`BiologicalSex`'s own `+Display` extensions).
+///
+/// `rawValue` is the same 1-based zone number used throughout `HeartRateZoneModel`,
+/// ``TimeInZone``, and ``TimeInZoneBuilder`` — e.g. `HeartRateZone(rawValue: zone)` bridges from
+/// one of those APIs' bare `Int`, returning `nil` for zone 0.
 public enum HeartRateZone: Int, Sendable, Codable, Hashable, CaseIterable {
     /// Very light effort, easily sustained — active recovery between hard sessions.
     case recovery = 1

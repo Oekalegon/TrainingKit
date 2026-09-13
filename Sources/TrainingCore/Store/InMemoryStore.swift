@@ -64,6 +64,11 @@ public actor InMemoryStore: ActivityStore, PlanStore, WorkoutLibraryStore, Cycle
         activitiesByID.removeValue(forKey: id)
     }
 
+    /// See ``ActivityStore/deleteActivity(id:)``.
+    public func deleteActivity(id: UUID) async throws {
+        activitiesByID.removeValue(forKey: id)
+    }
+
     /// See ``ActivityStore/deduplicateActivities()``. See ``ActivityDeduplication/ordered(_:)``
     /// for which duplicate is kept.
     @discardableResult

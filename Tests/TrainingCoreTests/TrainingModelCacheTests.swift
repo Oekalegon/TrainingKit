@@ -487,6 +487,9 @@ private actor FailingFetchActivityStore: ActivityStore {
     func deleteActivity(source: ActivitySource) async throws {
         try await wrapped.deleteActivity(source: source)
     }
+    func deleteActivity(id: UUID) async throws {
+        try await wrapped.deleteActivity(id: id)
+    }
     func deduplicateActivities() async throws -> [Activity] {
         try await wrapped.deduplicateActivities()
     }

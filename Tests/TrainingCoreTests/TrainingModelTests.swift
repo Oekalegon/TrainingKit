@@ -439,6 +439,69 @@ struct TrainingModelTests {
         #expect(try await fakeActivityStore.activity(id: duplicate.id) == nil)
     }
 
+    @Test("deleteActivity(id:asOf:) removes the activity, reloads, and recomputes (MVP1-63)")
+    func deleteActivityReloadsAndRecomputes() async throws {
+        let (store, stores) = makeStores()
+        let athlete = AthleteProfile.fixture()
+        let kept = Activity(
+            source: .healthKit(UUID()), sport: .running, start: day(0), duration: 1800,
+            perceivedExertion: 5
+        )
+        let toDelete = Activity(
+            source: .manual, sport: .cycling, start: day(0), duration: 3600, perceivedExertion: 5
+        )
+        try await store.upsert([kept, toDelete])
+
+        let model = TrainingModel(stores: stores, athlete: athlete)
+        try await model.load(in: day(0)...day(0), asOf: day(0))
+        #expect(model.activities.map(\.id).sorted() == [kept.id, toDelete.id].sorted())
+
+        try await model.deleteActivity(id: toDelete.id, asOf: day(0))
+
+        #expect(model.activities.map(\.id) == [kept.id])
+        #expect(try await store.activity(id: toDelete.id) == nil)
+        let dayMetrics = model.metrics.first { Calendar(identifier: .gregorian).isDate($0.day, inSameDayAs: day(0)) }
+        #expect((dayMetrics?.load ?? 0) > 0)
+    }
+
+    @Test("deleteActivity(id:asOf:) is a no-op for an id that doesn't exist in the store")
+    func deleteActivityNoOpWhenNotInStore() async throws {
+        let (store, stores) = makeStores()
+        let athlete = AthleteProfile.fixture()
+        let kept = Activity(source: .manual, sport: .running, start: day(0), duration: 1800)
+        try await store.upsert([kept])
+
+        let model = TrainingModel(stores: stores, athlete: athlete)
+        try await model.load(in: day(0)...day(0), asOf: day(0))
+
+        try await model.deleteActivity(id: UUID(), asOf: day(0))
+
+        #expect(model.activities.map(\.id) == [kept.id])
+    }
+
+    @Test(
+        "deleteActivity(id:asOf:) still removes an activity that exists in the store but isn't currently loaded"
+    )
+    func deleteActivityRemovesActivityOutsideLoadedRange() async throws {
+        let (store, stores) = makeStores()
+        let athlete = AthleteProfile.fixture()
+        let inRange = Activity(source: .manual, sport: .running, start: day(0), duration: 1800)
+        // Real, persisted, but well outside the range `load(in:)` below covers -- not in
+        // `model.activities` even though it's a perfectly valid activity to delete.
+        let outOfRange = Activity(source: .manual, sport: .cycling, start: day(50), duration: 1800)
+        try await store.upsert([inRange, outOfRange])
+
+        let model = TrainingModel(stores: stores, athlete: athlete)
+        try await model.load(in: day(0)...day(0), asOf: day(0))
+        #expect(model.activities.map(\.id) == [inRange.id])
+
+        try await model.deleteActivity(id: outOfRange.id, asOf: day(0))
+
+        #expect(try await store.activity(id: outOfRange.id) == nil)
+        // The still-loaded activity is untouched.
+        #expect(model.activities.map(\.id) == [inRange.id])
+    }
+
     @Test("deduplicateActivities(asOf:) racing an in-flight importActivities(from:) is queued behind it")
     func deduplicateRacingImportIsQueued() async throws {
         let athlete = AthleteProfile.fixture()
@@ -500,6 +563,9 @@ private actor DeduplicatingActivityStore: ActivityStore {
             activitiesByID.removeValue(forKey: id)
         }
     }
+    func deleteActivity(id: UUID) async throws {
+        activitiesByID.removeValue(forKey: id)
+    }
     func deduplicateActivities() async throws -> [Activity] {
         for activity in toRemove { activitiesByID.removeValue(forKey: activity.id) }
         return toRemove
@@ -523,6 +589,7 @@ private struct ThrowingActivityStore: ActivityStore {
     func activity(source: ActivitySource) async throws -> Activity? { nil }
     func activity(id: UUID) async throws -> Activity? { nil }
     func deleteActivity(source: ActivitySource) async throws {}
+    func deleteActivity(id: UUID) async throws {}
     func deduplicateActivities() async throws -> [Activity] { [] }
 }
 
@@ -607,6 +674,7 @@ private actor GatedActivityStore: ActivityStore {
     func activity(source: ActivitySource) async throws -> Activity? { nil }
     func activity(id: UUID) async throws -> Activity? { nil }
     func deleteActivity(source: ActivitySource) async throws {}
+    func deleteActivity(id: UUID) async throws {}
 
     func deduplicateActivities() async throws -> [Activity] {
         deduplicateCallCount += 1

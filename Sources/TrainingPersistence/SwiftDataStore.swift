@@ -107,6 +107,13 @@ public actor SwiftDataStore: ActivityStore, PlanStore, WorkoutLibraryStore, Cycl
         try modelContext.save()
     }
 
+    /// See `ActivityStore/deleteActivity(id:)`.
+    public func deleteActivity(id: UUID) async throws {
+        guard let record = try fetchActivityRecord(id: id) else { return }
+        modelContext.delete(record)
+        try modelContext.save()
+    }
+
     /// Deletes every activity in this store, returning how many were removed.
     ///
     /// Not part of `ActivityStore` — no Core protocol needs a bulk-clear operation, and no shipped

@@ -237,6 +237,40 @@ struct TrainingModelTests {
         #expect(try await store.importAnchor() == ImportAnchor(data: Data([1])))
     }
 
+    @Test("importActivities(from:) filters only the tombstoned source out of a mixed batch, keeping the rest (MVP1-64)")
+    func importActivitiesFiltersOnlyTombstonedSourceFromMixedBatch() async throws {
+        let (store, stores) = makeStores()
+        let athlete = AthleteProfile.fixture()
+        let deletedSource = ActivitySource.healthKit(UUID())
+        let original = Activity(source: deletedSource, sport: .running, start: day(0), duration: 1800)
+        try await store.upsert([original])
+
+        let model = TrainingModel(stores: stores, athlete: athlete)
+        try await model.load(in: day(0)...day(1), asOf: day(1))
+        try await model.deleteActivity(id: original.id, asOf: day(1))
+
+        // One activity resurrecting the tombstoned source, alongside one genuinely new activity on
+        // an unrelated source, in the same import batch -- exercises the `.filter` in
+        // `performImport` actually dropping only the tombstoned entry, not the whole batch and not
+        // the wrong one.
+        let resurrected = Activity(source: deletedSource, sport: .running, start: day(0), duration: 1800)
+        let legitimate = Activity(
+            source: .healthKit(UUID()), sport: .cycling, start: day(1), duration: 3600,
+            perceivedExertion: 5
+        )
+        let importer = FakeImporter(result: ImportResult(
+            upserted: [resurrected, legitimate], deletedSources: [], anchor: ImportAnchor(data: Data([2]))
+        ))
+
+        try await model.importActivities(from: importer, asOf: day(1))
+
+        #expect(try await store.activity(source: deletedSource) == nil)
+        #expect(try await store.activity(id: legitimate.id) == legitimate)
+        #expect(model.activities.map(\.id) == [legitimate.id])
+        let legitimateDayMetrics = model.metrics.first { Calendar(identifier: .gregorian).isDate($0.day, inSameDayAs: day(1)) }
+        #expect((legitimateDayMetrics?.load ?? 0) > 0)
+    }
+
     @Test("importActivities(from:) doesn't clear hasEverImportedActivities when an importer returns a nil anchor")
     func importActivitiesWithNilAnchorDoesNotClearHasEverImported() async throws {
         let (store, stores) = makeStores()

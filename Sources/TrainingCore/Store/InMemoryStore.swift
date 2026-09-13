@@ -9,6 +9,7 @@ import Foundation
 public actor InMemoryStore: ActivityStore, PlanStore, WorkoutLibraryStore, CycleStore, AthleteStore,
     FitnessMetricsCacheStore {
     private var activitiesByID: [UUID: Activity] = [:]
+    private var deletedSources: Set<ActivitySource> = []
     private var plansByID: [UUID: PlannedActivity] = [:]
     private var workoutsByID: [UUID: StructuredWorkout] = [:]
     private var cyclesByID: [UUID: TrainingCycle] = [:]
@@ -44,6 +45,7 @@ public actor InMemoryStore: ActivityStore, PlanStore, WorkoutLibraryStore, Cycle
             activitiesByID[activity.id] = activity
             if activity.source.hasNaturalKey {
                 idBySource[activity.source] = activity.id
+                deletedSources.remove(activity.source)
             }
         }
     }
@@ -66,7 +68,15 @@ public actor InMemoryStore: ActivityStore, PlanStore, WorkoutLibraryStore, Cycle
 
     /// See ``ActivityStore/deleteActivity(id:)``.
     public func deleteActivity(id: UUID) async throws {
+        if let activity = activitiesByID[id], activity.source.hasNaturalKey {
+            deletedSources.insert(activity.source)
+        }
         activitiesByID.removeValue(forKey: id)
+    }
+
+    /// See ``ActivityStore/tombstonedSources(among:)``.
+    public func tombstonedSources(among sources: [ActivitySource]) async throws -> Set<ActivitySource> {
+        Set(sources).intersection(deletedSources)
     }
 
     /// See ``ActivityStore/deduplicateActivities()``. See ``ActivityDeduplication/ordered(_:)``

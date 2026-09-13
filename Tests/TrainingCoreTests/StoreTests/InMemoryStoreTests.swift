@@ -112,6 +112,49 @@ struct InMemoryStoreTests {
         #expect(try await store.activity(id: activity.id) == nil)
     }
 
+    @Test("ActivityStore deleteActivity(id:) tombstones the source so a re-import can't resurrect it (MVP1-64)")
+    func activityStoreDeleteActivityByIDTombstonesSource() async throws {
+        let store = InMemoryStore()
+        let source = ActivitySource.healthKit(UUID())
+        let activity = Activity(source: source, sport: .cycling, start: day(0), duration: 3600)
+        try await store.upsert([activity])
+
+        try await store.deleteActivity(id: activity.id)
+
+        #expect(try await store.tombstonedSources(among: [source]) == [source])
+        // A re-import building a fresh `Activity` for the same source (since `activity(source:)`
+        // now returns nil) would otherwise upsert it right back in -- the resurrection this
+        // tombstone exists to prevent, checked by the caller (`TrainingModel`'s import path)
+        // before ever calling `upsert(_:)`.
+        #expect(try await store.activity(source: source) == nil)
+    }
+
+    @Test("ActivityStore deleteActivity(id:) never tombstones a source without a natural key")
+    func activityStoreDeleteActivityByIDDoesNotTombstoneManualSource() async throws {
+        let store = InMemoryStore()
+        let activity = Activity(source: .manual, sport: .cycling, start: day(0), duration: 3600)
+        try await store.upsert([activity])
+
+        try await store.deleteActivity(id: activity.id)
+
+        #expect(try await store.tombstonedSources(among: [.manual]) == [])
+    }
+
+    @Test("ActivityStore upsert clears a source's tombstone once it's genuinely re-added")
+    func activityStoreUpsertClearsTombstone() async throws {
+        let store = InMemoryStore()
+        let source = ActivitySource.healthKit(UUID())
+        let activity = Activity(source: source, sport: .cycling, start: day(0), duration: 3600)
+        try await store.upsert([activity])
+        try await store.deleteActivity(id: activity.id)
+        #expect(try await store.tombstonedSources(among: [source]) == [source])
+
+        try await store.upsert([activity])
+
+        #expect(try await store.tombstonedSources(among: [source]) == [])
+        #expect(try await store.activity(source: source) == activity)
+    }
+
     @Test("ActivityStore deduplicateActivities is a no-op when there are no duplicates")
     func activityStoreDeduplicateActivitiesNoOp() async throws {
         // InMemoryStore's own upsert already prevents two activities from ever sharing a source

@@ -64,6 +64,39 @@ struct ActivityOverlapCheckerTests {
         #expect(advice.recommendation == .merge)
     }
 
+    @Test("A hike and a walk with matching data are advised as a duplicate, not a conflict")
+    func hikeAndWalkAreSameFamily() throws {
+        let first = Activity(source: .manual, sport: .hiking, start: day(0), duration: 1800, distanceMeters: 3000)
+        let second = Activity(source: .healthKit(UUID()), sport: .walking, start: day(0), duration: 1800, distanceMeters: 3000)
+
+        let advice = try #require(ActivityOverlapChecker.findOverlaps(in: [first, second]).first)
+        guard case .duplicate = advice.recommendation else {
+            Issue.record("expected .duplicate, got \(String(describing: advice.recommendation))")
+            return
+        }
+    }
+
+    @Test("A plain run and an indoor run with matching data are advised as a duplicate")
+    func plainRunAndIndoorRunAreSameFamily() throws {
+        let first = Activity(source: .manual, sport: .running, start: day(0), duration: 1800)
+        let second = Activity(source: .healthKit(UUID()), sport: .indoorRunning, start: day(0), duration: 1800)
+
+        let advice = try #require(ActivityOverlapChecker.findOverlaps(in: [first, second]).first)
+        guard case .duplicate = advice.recommendation else {
+            Issue.record("expected .duplicate, got \(String(describing: advice.recommendation))")
+            return
+        }
+    }
+
+    @Test("An explicit outdoor run and an explicit indoor run are advised as a conflict, not merged")
+    func explicitOutdoorAndIndoorRunConflict() throws {
+        let first = Activity(source: .manual, sport: .outdoorRunning, start: day(0), duration: 1800)
+        let second = Activity(source: .manual, sport: .indoorRunning, start: day(0), duration: 1800)
+
+        let advice = try #require(ActivityOverlapChecker.findOverlaps(in: [first, second]).first)
+        #expect(advice.recommendation == .conflict)
+    }
+
     @Test("Overlapping activities with a different sport are advised as a conflict")
     func conflictDifferentSport() throws {
         let first = Activity(source: .manual, sport: .running, start: day(0), duration: 1800)

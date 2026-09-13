@@ -4,9 +4,10 @@ import Foundation
 /// together, rather than just flagging that they do.
 ///
 /// Four outcomes, checked in this order for each pair — see ``OverlapRecommendation``:
-/// 1. Same time span (within tolerance) and sport, identical data → ``OverlapRecommendation/duplicate(keep:remove:)``.
-/// 2. Same time span and sport, differing data → ``OverlapRecommendation/merge``.
-/// 3. Overlapping with a different time span or sport, and neither contains the other →
+/// 1. Same time span (within tolerance) and sport family (``Sport/isSameFamily(as:)``), identical
+///    data → ``OverlapRecommendation/duplicate(keep:remove:)``.
+/// 2. Same time span and sport family, differing data → ``OverlapRecommendation/merge``.
+/// 3. Overlapping with a different time span or sport family, and neither contains the other →
 ///    ``OverlapRecommendation/conflict``.
 /// 4. One contains the other, or they're merely close together (not overlapping) →
 ///    ``OverlapRecommendation/possibleMultisport``.
@@ -52,7 +53,7 @@ public enum ActivityOverlapChecker {
             return gap <= thresholds.multisportGapTolerance ? .possibleMultisport : nil
         }
 
-        let sameSession = a.sport == b.sport
+        let sameSession = a.sport.isSameFamily(as: b.sport)
             && abs(a.dateRange.lowerBound.timeIntervalSince(b.dateRange.lowerBound)) <= thresholds.sameSessionTolerance
             && abs(a.dateRange.upperBound.timeIntervalSince(b.dateRange.upperBound)) <= thresholds.sameSessionTolerance
         if sameSession {

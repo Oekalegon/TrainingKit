@@ -16,6 +16,13 @@ public final class TrainingModel {
     public private(set) var workouts: [StructuredWorkout] = []
     public private(set) var cycles: [TrainingCycle] = []
     public private(set) var metrics: [FitnessMetrics] = []
+    /// Activities in ``activities`` whose ``Activity/dateRange``s overlap without one fully
+    /// containing the other — see ``ActivityOverlapChecker/findOverlaps(in:)``. Recomputed on
+    /// every access rather than cached, since it's a cheap pairwise check over whatever range of
+    /// activities is currently loaded.
+    public var overlappingActivities: [ActivityOverlap] {
+        ActivityOverlapChecker.findOverlaps(in: activities)
+    }
     /// Whether an ``ActivityImporting`` run (e.g. HealthKit) has ever completed successfully for
     /// this athlete, independent of `activities.isEmpty` — set from ``AthleteStore/importAnchor()``
     /// by ``load(in:asOf:)``, and never cleared once true by ``importActivities(from:asOf:)``.

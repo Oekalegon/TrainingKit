@@ -36,6 +36,11 @@ public struct Activity: Identifiable, Sendable, Codable, Hashable {
     /// Set by ``PlanReconciler`` once this activity is matched to a ``PlannedActivity``.
     public var linkedPlanID: UUID?
 
+    /// The time span this activity covers, from ``start`` to `start + duration`.
+    public var dateRange: ClosedRange<Date> {
+        start...start.addingTimeInterval(duration)
+    }
+
     /// Creates a completed activity.
     ///
     /// - Parameters:

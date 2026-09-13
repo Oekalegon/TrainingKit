@@ -57,7 +57,9 @@ public enum ActivityOverlapChecker {
             && abs(a.dateRange.lowerBound.timeIntervalSince(b.dateRange.lowerBound)) <= thresholds.sameSessionTolerance
             && abs(a.dateRange.upperBound.timeIntervalSince(b.dateRange.upperBound)) <= thresholds.sameSessionTolerance
         if sameSession {
-            return contentMatches(a, b) ? .duplicate(keep: keepID(a, b), remove: removeID(a, b)) : .merge
+            guard contentMatches(a, b) else { return .merge }
+            let (keep, remove) = keepAndRemove(a, b)
+            return .duplicate(keep: keep, remove: remove)
         }
 
         // Exact-range equality doesn't count as containment: two entries spanning the identical
@@ -98,11 +100,14 @@ public enum ActivityOverlapChecker {
         return score
     }
 
-    private static func keepID(_ a: Activity, _ b: Activity) -> UUID {
-        richness(a) >= richness(b) ? a.id : b.id
-    }
-
-    private static func removeID(_ a: Activity, _ b: Activity) -> UUID {
-        richness(a) >= richness(b) ? b.id : a.id
+    /// Which of two duplicate activities to keep: whichever already carries a
+    /// ``Activity/linkedPlanID`` wins outright, since discarding it would silently drop that
+    /// ``PlanReconciler`` match — the one field ``contentMatches(_:_:)`` deliberately doesn't
+    /// require to be equal. Only when both or neither are linked does richness decide.
+    private static func keepAndRemove(_ a: Activity, _ b: Activity) -> (keep: UUID, remove: UUID) {
+        if (a.linkedPlanID != nil) != (b.linkedPlanID != nil) {
+            return a.linkedPlanID != nil ? (a.id, b.id) : (b.id, a.id)
+        }
+        return richness(a) >= richness(b) ? (a.id, b.id) : (b.id, a.id)
     }
 }

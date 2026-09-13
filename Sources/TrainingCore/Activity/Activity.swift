@@ -37,8 +37,12 @@ public struct Activity: Identifiable, Sendable, Codable, Hashable {
     public var linkedPlanID: UUID?
 
     /// The time span this activity covers, from ``start`` to `start + duration`.
+    ///
+    /// Clamps a negative `duration` to zero rather than building an invalid `ClosedRange` (which
+    /// would trap, since `ClosedRange` requires `lowerBound <= upperBound`) — malformed import
+    /// data shouldn't be able to crash every caller that reads this.
     public var dateRange: ClosedRange<Date> {
-        start...start.addingTimeInterval(duration)
+        start...start.addingTimeInterval(max(duration, 0))
     }
 
     /// Creates a completed activity.

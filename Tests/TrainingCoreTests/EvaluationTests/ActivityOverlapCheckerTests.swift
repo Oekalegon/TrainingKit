@@ -64,6 +64,22 @@ struct ActivityOverlapCheckerTests {
         #expect(advice.recommendation == .merge)
     }
 
+    @Test("A duplicate pair prefers keeping whichever copy already has a linkedPlanID")
+    func duplicateKeepsLinkedPlanCopy() throws {
+        let linked = Activity(
+            source: .manual, sport: .running, start: day(0), duration: 1800, linkedPlanID: UUID()
+        )
+        let unlinked = Activity(source: .healthKit(UUID()), sport: .running, start: day(0), duration: 1800)
+
+        let advice = try #require(ActivityOverlapChecker.findOverlaps(in: [linked, unlinked]).first)
+        guard case .duplicate(let keep, let remove) = advice.recommendation else {
+            Issue.record("expected .duplicate, got \(String(describing: advice.recommendation))")
+            return
+        }
+        #expect(keep == linked.id)
+        #expect(remove == unlinked.id)
+    }
+
     @Test("A hike and a walk with matching data are advised as a duplicate, not a conflict")
     func hikeAndWalkAreSameFamily() throws {
         let first = Activity(source: .manual, sport: .hiking, start: day(0), duration: 1800, distanceMeters: 3000)

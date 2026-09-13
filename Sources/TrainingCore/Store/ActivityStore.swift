@@ -29,6 +29,11 @@ public protocol ActivityStore: Sendable {
     /// run that reports a source as removed at the origin.
     func deleteActivity(source: ActivitySource) async throws
 
+    /// Removes the activity with this id, if any — the resolution action for a specific
+    /// ``ActivityOverlapChecker`` pair (MVP1-63), as distinct from ``deleteActivity(source:)``
+    /// (which removes whatever's currently on a given source, regardless of id).
+    func deleteActivity(id: UUID) async throws
+
     /// Removes duplicate records that share the same `source` with a natural key (see
     /// ``ActivitySource/hasNaturalKey``), keeping exactly one per source.
     ///

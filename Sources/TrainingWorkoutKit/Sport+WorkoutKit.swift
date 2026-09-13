@@ -18,8 +18,10 @@ extension Sport {
             self = .cycling
         case .swimming:
             self = .swimming
-        case .traditionalStrengthTraining, .functionalStrengthTraining, .coreTraining:
+        case .traditionalStrengthTraining, .functionalStrengthTraining:
             self = .strength
+        case .coreTraining:
+            self = .coreStrengthTraining
         case .walking:
             self = .walking
         case .rowing:
@@ -49,6 +51,8 @@ extension Sport {
             return .swimming
         case .strength:
             return .traditionalStrengthTraining
+        case .coreStrengthTraining:
+            return .coreTraining
         case .walking:
             return .walking
         case .rowing:

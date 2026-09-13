@@ -39,7 +39,9 @@ extension Sport {
     /// hand — falls back to `.other` since there's nothing else to recover it from.
     public var workoutKitActivityType: HKWorkoutActivityType {
         switch self {
-        case .running:
+        case .running, .indoorRunning, .outdoorRunning:
+            // HealthKit has no separate indoor/outdoor running activity type — venue is metadata,
+            // not the type itself — so both map onto the same `.running` as the plain case.
             return .running
         case .cycling:
             return .cycling

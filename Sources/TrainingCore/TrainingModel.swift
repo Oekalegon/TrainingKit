@@ -16,6 +16,15 @@ public final class TrainingModel {
     public private(set) var workouts: [StructuredWorkout] = []
     public private(set) var cycles: [TrainingCycle] = []
     public private(set) var metrics: [FitnessMetrics] = []
+    /// Advice on activities in ``activities`` whose ``Activity/dateRange``s overlap or sit close
+    /// together — see ``ActivityOverlapChecker/findOverlaps(in:thresholds:)``. Recomputed on every
+    /// access rather than cached; the checker sorts and prunes internally so this stays proportional
+    /// to how many activities are actually near each other rather than the full pair count, but a
+    /// caller re-reading this from a SwiftUI `body` every frame over a very large loaded range
+    /// should still consider caching it themselves.
+    public var overlapAdvice: [ActivityOverlapAdvice] {
+        ActivityOverlapChecker.findOverlaps(in: activities)
+    }
     /// Whether an ``ActivityImporting`` run (e.g. HealthKit) has ever completed successfully for
     /// this athlete, independent of `activities.isEmpty` — set from ``AthleteStore/importAnchor()``
     /// by ``load(in:asOf:)``, and never cleared once true by ``importActivities(from:asOf:)``.

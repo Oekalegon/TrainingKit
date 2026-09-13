@@ -18,7 +18,7 @@ extension Sport {
             self = .cycling
         case .swimming:
             self = .swimming
-        case .traditionalStrengthTraining, .functionalStrengthTraining:
+        case .traditionalStrengthTraining, .functionalStrengthTraining, .coreTraining:
             self = .strength
         case .walking:
             self = .walking

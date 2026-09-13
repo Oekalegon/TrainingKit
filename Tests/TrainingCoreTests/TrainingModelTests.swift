@@ -464,8 +464,8 @@ struct TrainingModelTests {
         #expect((dayMetrics?.load ?? 0) > 0)
     }
 
-    @Test("deleteActivity(id:asOf:) is a no-op when the id isn't currently loaded")
-    func deleteActivityNoOpWhenNotLoaded() async throws {
+    @Test("deleteActivity(id:asOf:) is a no-op for an id that doesn't exist in the store")
+    func deleteActivityNoOpWhenNotInStore() async throws {
         let (store, stores) = makeStores()
         let athlete = AthleteProfile.fixture()
         let kept = Activity(source: .manual, sport: .running, start: day(0), duration: 1800)
@@ -477,6 +477,29 @@ struct TrainingModelTests {
         try await model.deleteActivity(id: UUID(), asOf: day(0))
 
         #expect(model.activities.map(\.id) == [kept.id])
+    }
+
+    @Test(
+        "deleteActivity(id:asOf:) still removes an activity that exists in the store but isn't currently loaded"
+    )
+    func deleteActivityRemovesActivityOutsideLoadedRange() async throws {
+        let (store, stores) = makeStores()
+        let athlete = AthleteProfile.fixture()
+        let inRange = Activity(source: .manual, sport: .running, start: day(0), duration: 1800)
+        // Real, persisted, but well outside the range `load(in:)` below covers -- not in
+        // `model.activities` even though it's a perfectly valid activity to delete.
+        let outOfRange = Activity(source: .manual, sport: .cycling, start: day(50), duration: 1800)
+        try await store.upsert([inRange, outOfRange])
+
+        let model = TrainingModel(stores: stores, athlete: athlete)
+        try await model.load(in: day(0)...day(0), asOf: day(0))
+        #expect(model.activities.map(\.id) == [inRange.id])
+
+        try await model.deleteActivity(id: outOfRange.id, asOf: day(0))
+
+        #expect(try await store.activity(id: outOfRange.id) == nil)
+        // The still-loaded activity is untouched.
+        #expect(model.activities.map(\.id) == [inRange.id])
     }
 
     @Test("deduplicateActivities(asOf:) racing an in-flight importActivities(from:) is queued behind it")

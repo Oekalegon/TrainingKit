@@ -11,19 +11,27 @@ extension TrainingModel {
     /// ``OverlapRecommendation/merge``/``OverlapRecommendation/conflict`` pair they didn't keep).
     ///
     /// Invalidates the fitness-metrics cache from `id`'s own day forward, reloads `activities`,
-    /// and recomputes — same shape as ``deduplicateActivities(asOf:)``. A no-op if `id` isn't
-    /// currently loaded in `activities` (already removed, or outside ``loadedRange``).
+    /// and recomputes — same shape as ``deduplicateActivities(asOf:)``. A no-op if `id` doesn't
+    /// exist in the store at all (already removed, or never existed); unlike `activities` itself,
+    /// this isn't limited to whatever ``loadedRange`` currently covers — an activity that exists
+    /// in the store but isn't currently loaded is still removed.
     ///
     /// Serialized against any in-flight import/deduplication via the same ``pendingImport`` queue
     /// those use, for the same reason those serialize against each other.
     ///
-    /// - Parameter today: Passed through to ``recompute(asOf:)``.
+    /// - Parameters:
+    ///   - id: The activity to remove.
+    ///   - today: Passed through to ``recompute(asOf:)``.
     public func deleteActivity(id: UUID, asOf today: Date = .now) async throws {
         try await runQueued { try await self.performDeleteActivity(id: id, asOf: today) }
     }
 
     private func performDeleteActivity(id: UUID, asOf today: Date) async throws {
-        guard let removedDay = activities.first(where: { $0.id == id })?.start else { return }
+        // Looked up from the store, not `self.activities`: the same reasoning as
+        // `TrainingModel+Import.swift`'s `performImport` capturing a deleted source's date before
+        // deleting it — once it's gone, only the store (not the in-memory, `loadedRange`-scoped
+        // `activities`) can reliably answer whether/when it existed.
+        guard let removedDay = try await stores.activityStore.activity(id: id)?.start else { return }
         try await stores.activityStore.deleteActivity(id: id)
 
         if let cache = stores.fitnessMetricsCacheStore {

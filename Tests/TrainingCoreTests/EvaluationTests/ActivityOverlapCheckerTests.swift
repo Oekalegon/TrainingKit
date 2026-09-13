@@ -191,4 +191,37 @@ struct ActivityOverlapCheckerTests {
         let only = Activity(source: .manual, sport: .running, start: day(0), duration: 1800)
         #expect(ActivityOverlapChecker.findOverlaps(in: [only]).isEmpty)
     }
+
+    @Test("Input order doesn't affect which pairs are found, regardless of internal sorting")
+    func inputOrderDoesNotMatter() {
+        let first = Activity(source: .manual, sport: .running, start: day(0), duration: 1800)
+        let second = Activity(source: .manual, sport: .cycling, start: day(0), duration: 1800)
+        let third = Activity(
+            source: .manual, sport: .swimming, start: day(0).addingTimeInterval(20 * 3600), duration: 1200
+        )
+
+        let inOrder = ActivityOverlapChecker.findOverlaps(in: [first, second, third])
+        let reversed = ActivityOverlapChecker.findOverlaps(in: [third, second, first])
+
+        // `first`/`second` are an unordered pair (which activity sorts first when start times tie
+        // isn't guaranteed), so compare the pairing itself rather than the raw advice values.
+        func unorderedPairs(_ advice: [ActivityOverlapAdvice]) -> Set<Set<UUID>> {
+            Set(advice.map { Set([$0.first, $0.second]) })
+        }
+        #expect(unorderedPairs(inOrder) == unorderedPairs(reversed))
+        #expect(inOrder.count == 1)
+    }
+
+    @Test("A long-duration activity still finds a pair far later that a short one would have skipped past")
+    func longDurationActivityStillFindsDistantPair() throws {
+        // The internal scan breaks early per-activity once it's scanned past
+        // `multisportGapTolerance` beyond that activity's own end — this confirms a single very
+        // long activity (spanning several short ones) still reaches a pair many hours after its
+        // start, rather than the early-break accidentally cutting off a genuine containment match.
+        let longActivity = Activity(source: .manual, sport: .other("triathlon"), start: day(0), duration: 6 * 3600)
+        let shortActivity = Activity(source: .manual, sport: .swimming, start: day(0).addingTimeInterval(5 * 3600), duration: 1200)
+
+        let advice = try #require(ActivityOverlapChecker.findOverlaps(in: [longActivity, shortActivity]).first)
+        #expect(advice.recommendation == .possibleMultisport)
+    }
 }

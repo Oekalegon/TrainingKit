@@ -15,6 +15,14 @@ public enum ActivityOverlapChecker {
     /// Finds every pair of `activities` worth advising on: overlapping pairs, plus pairs close
     /// enough together to plausibly be multisport legs.
     ///
+    /// Sorts `activities` by start once, then for each activity only scans forward while a later
+    /// activity's start still falls within `thresholds.multisportGapTolerance` of its own end —
+    /// beyond that, no later activity (also sorted by start) can overlap or be close enough to
+    /// matter, so the scan stops early instead of comparing every pair. This keeps the common case
+    /// (activities spread across weeks/months, each only near a handful of others) far cheaper than
+    /// the full O(n²) pair count would suggest; only an activity spanning an unusually long
+    /// duration forces a longer inner scan, and only for that one activity.
+    ///
     /// - Parameters:
     ///   - activities: The activities to check, in any order.
     ///   - thresholds: The tolerances used to tell a same-session pair from a conflicting one, and
@@ -27,10 +35,13 @@ public enum ActivityOverlapChecker {
         var advice: [ActivityOverlapAdvice] = []
         guard activities.count > 1 else { return advice }
 
-        for i in activities.indices {
-            for j in activities.indices where j > i {
-                let a = activities[i]
-                let b = activities[j]
+        let sorted = activities.sorted { $0.dateRange.lowerBound < $1.dateRange.lowerBound }
+        for i in sorted.indices {
+            let a = sorted[i]
+            let reach = a.dateRange.upperBound.addingTimeInterval(thresholds.multisportGapTolerance)
+            for j in (i + 1)..<sorted.count {
+                let b = sorted[j]
+                guard b.dateRange.lowerBound <= reach else { break }
                 guard let recommendation = classify(a, b, thresholds: thresholds) else { continue }
                 advice.append(ActivityOverlapAdvice(first: a.id, second: b.id, recommendation: recommendation))
             }

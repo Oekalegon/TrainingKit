@@ -19,6 +19,12 @@ struct WorkoutKitMappingTests {
         }
     }
 
+    @Test("functionalStrengthTraining and coreTraining also map to .strength, though .strength maps back to traditionalStrengthTraining")
+    func strengthVariantsMapToStrength() {
+        #expect(Sport(workoutKitActivityType: .functionalStrengthTraining) == .strength)
+        #expect(Sport(workoutKitActivityType: .coreTraining) == .strength)
+    }
+
     @Test("an unmapped activity type falls back to .other, labeled with its raw value, and recovers the original type")
     func sportFallsBackToOtherAndRoundTrips() {
         let sport = Sport(workoutKitActivityType: .yoga)

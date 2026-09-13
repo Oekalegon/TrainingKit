@@ -17,6 +17,7 @@ struct SportTests {
         #expect(Sport.cycling.otherRawValue == nil)
         #expect(Sport.swimming.otherRawValue == nil)
         #expect(Sport.strength.otherRawValue == nil)
+        #expect(Sport.coreStrengthTraining.otherRawValue == nil)
         #expect(Sport.walking.otherRawValue == nil)
         #expect(Sport.rowing.otherRawValue == nil)
     }

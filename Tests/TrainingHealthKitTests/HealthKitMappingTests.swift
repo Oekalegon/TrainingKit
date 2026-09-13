@@ -16,10 +16,10 @@ struct HealthKitMappingTests {
         #expect(Sport(healthKitActivityType: .swimming) == .swimming)
         #expect(Sport(healthKitActivityType: .traditionalStrengthTraining) == .strength)
         #expect(Sport(healthKitActivityType: .functionalStrengthTraining) == .strength)
-        #expect(Sport(healthKitActivityType: .coreTraining) == .strength)
         #expect(Sport(healthKitActivityType: .walking) == .walking)
         #expect(Sport(healthKitActivityType: .rowing) == .rowing)
         #expect(Sport(healthKitActivityType: .hiking) == .hiking)
+        #expect(Sport(healthKitActivityType: .coreTraining) == .coreStrengthTraining)
     }
 
     @Test("an unmapped activity type falls back to .other, labeled with its raw value")

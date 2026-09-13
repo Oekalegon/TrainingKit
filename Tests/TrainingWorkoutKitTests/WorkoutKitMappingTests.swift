@@ -12,17 +12,18 @@ struct WorkoutKitMappingTests {
 
     @Test("common Sport cases map to their direct HKWorkoutActivityType, and back")
     func sportDirectMappingsRoundTrip() {
-        let sports: [Sport] = [.running, .cycling, .swimming, .strength, .walking, .rowing, .hiking]
+        let sports: [Sport] = [
+            .running, .cycling, .swimming, .strength, .coreStrengthTraining, .walking, .rowing, .hiking,
+        ]
         for sport in sports {
             let activityType = sport.workoutKitActivityType
             #expect(Sport(workoutKitActivityType: activityType) == sport)
         }
     }
 
-    @Test("functionalStrengthTraining and coreTraining also map to .strength, though .strength maps back to traditionalStrengthTraining")
-    func strengthVariantsMapToStrength() {
+    @Test("functionalStrengthTraining also maps to .strength, though .strength maps back to traditionalStrengthTraining")
+    func functionalStrengthTrainingMapsToStrength() {
         #expect(Sport(workoutKitActivityType: .functionalStrengthTraining) == .strength)
-        #expect(Sport(workoutKitActivityType: .coreTraining) == .strength)
     }
 
     @Test("an unmapped activity type falls back to .other, labeled with its raw value, and recovers the original type")

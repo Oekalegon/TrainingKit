@@ -11,6 +11,9 @@ public enum Sport: Sendable, Codable, Hashable {
     case cycling
     case swimming
     case strength
+    /// Core-focused strength work (e.g. HealthKit's `coreTraining`), tracked separately from
+    /// general ``strength`` training since it targets a distinct muscle group and training goal.
+    case coreStrengthTraining
     case walking
     case rowing
     case hiking

@@ -34,6 +34,17 @@ public protocol ActivityStore: Sendable {
     /// (which removes whatever's currently on a given source, regardless of id).
     func deleteActivity(id: UUID) async throws
 
+    /// The subset of `sources` that were deleted via ``deleteActivity(id:)`` and haven't been
+    /// re-added since — a fresh ``upsert(_:)`` for a given source clears its tombstone. This is
+    /// the resurrection check ``TrainingModel``'s import path (MVP1-64) runs before persisting
+    /// whatever an ``ActivityImporting`` conformer reports, so a resolved duplicate/conflict
+    /// doesn't come back under a new id just because the external source still reports it.
+    ///
+    /// Only sources with a natural key (see ``ActivitySource/hasNaturalKey``) are ever
+    /// tombstoned — `.manual`/`.testing` activities are never deduped against each other on
+    /// re-import in the first place, so there's nothing here to guard.
+    func tombstonedSources(among sources: [ActivitySource]) async throws -> Set<ActivitySource>
+
     /// Removes duplicate records that share the same `source` with a natural key (see
     /// ``ActivitySource/hasNaturalKey``), keeping exactly one per source.
     ///

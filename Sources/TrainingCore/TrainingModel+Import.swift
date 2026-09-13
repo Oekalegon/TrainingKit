@@ -94,15 +94,22 @@ extension TrainingModel {
             }
         }
 
-        if !result.upserted.isEmpty {
-            try await stores.activityStore.upsert(result.upserted)
+        // A source the athlete already resolved via `deleteActivity(id:)` (MVP1-63/MVP1-64) stays
+        // deleted even if `importer` still reports it — without this, every incremental sync (or a
+        // full resync) would silently re-insert every duplicate/conflict the athlete had already
+        // cleaned up, since the external source has no notion of TrainingKit's own deletes.
+        let tombstoned = try await stores.activityStore.tombstonedSources(among: result.upserted.map(\.source))
+        let toUpsert = tombstoned.isEmpty ? result.upserted : result.upserted.filter { !tombstoned.contains($0.source) }
+
+        if !toUpsert.isEmpty {
+            try await stores.activityStore.upsert(toUpsert)
         }
         for source in result.deletedSources {
             try await stores.activityStore.deleteActivity(source: source)
         }
         try await stores.athleteStore.saveImportAnchor(result.anchor)
 
-        let affectedDates = result.upserted.map(\.start) + deletedStarts
+        let affectedDates = toUpsert.map(\.start) + deletedStarts
         if let cache = stores.fitnessMetricsCacheStore, let earliest = affectedDates.min() {
             try? await cache.markDirty(from: earliest)
         }
@@ -111,7 +118,7 @@ extension TrainingModel {
         // back as "never imported" just because this particular run didn't produce one.
         hasEverImportedActivities = hasEverImportedActivities || result.anchor != nil
 
-        let range = loadedRange ?? Self.union(of: result.upserted.map { $0.start...$0.start }, fallback: today)
+        let range = loadedRange ?? Self.union(of: toUpsert.map { $0.start...$0.start }, fallback: today)
         activities = try await stores.activityStore.activities(in: range)
         loadedRange = range
         await recompute(asOf: today)

@@ -206,6 +206,71 @@ struct TrainingModelTests {
         #expect((importedDayMetrics?.load ?? 0) > 0)
     }
 
+    @Test("importActivities(from:) doesn't resurrect a source resolved via deleteActivity(id:) (MVP1-64)")
+    func importActivitiesDoesNotResurrectDeletedSource() async throws {
+        let (store, stores) = makeStores()
+        let athlete = AthleteProfile.fixture()
+        let source = ActivitySource.healthKit(UUID())
+        let original = Activity(source: source, sport: .running, start: day(0), duration: 1800)
+        try await store.upsert([original])
+
+        let model = TrainingModel(stores: stores, athlete: athlete)
+        try await model.load(in: day(0)...day(0), asOf: day(0))
+        try await model.deleteActivity(id: original.id, asOf: day(0))
+        #expect(try await store.activity(id: original.id) == nil)
+
+        // Same `source` (the athlete's already-resolved duplicate/conflict), but a fresh id --
+        // exactly what `HealthKitActivityImporter` builds once `activity(source:)` no longer finds
+        // the deleted record, since HealthKit itself has no notion of TrainingKit's own delete.
+        let resurrected = Activity(source: source, sport: .running, start: day(0), duration: 1800)
+        let importer = FakeImporter(result: ImportResult(
+            upserted: [resurrected], deletedSources: [], anchor: ImportAnchor(data: Data([1]))
+        ))
+
+        try await model.importActivities(from: importer, asOf: day(0))
+
+        #expect(try await store.activity(source: source) == nil)
+        #expect(try await store.activity(id: resurrected.id) == nil)
+        #expect(model.activities.isEmpty)
+        // The import itself still completed and persisted its anchor -- only the tombstoned
+        // activity was skipped, not the whole run.
+        #expect(try await store.importAnchor() == ImportAnchor(data: Data([1])))
+    }
+
+    @Test("importActivities(from:) filters only the tombstoned source out of a mixed batch, keeping the rest (MVP1-64)")
+    func importActivitiesFiltersOnlyTombstonedSourceFromMixedBatch() async throws {
+        let (store, stores) = makeStores()
+        let athlete = AthleteProfile.fixture()
+        let deletedSource = ActivitySource.healthKit(UUID())
+        let original = Activity(source: deletedSource, sport: .running, start: day(0), duration: 1800)
+        try await store.upsert([original])
+
+        let model = TrainingModel(stores: stores, athlete: athlete)
+        try await model.load(in: day(0)...day(1), asOf: day(1))
+        try await model.deleteActivity(id: original.id, asOf: day(1))
+
+        // One activity resurrecting the tombstoned source, alongside one genuinely new activity on
+        // an unrelated source, in the same import batch -- exercises the `.filter` in
+        // `performImport` actually dropping only the tombstoned entry, not the whole batch and not
+        // the wrong one.
+        let resurrected = Activity(source: deletedSource, sport: .running, start: day(0), duration: 1800)
+        let legitimate = Activity(
+            source: .healthKit(UUID()), sport: .cycling, start: day(1), duration: 3600,
+            perceivedExertion: 5
+        )
+        let importer = FakeImporter(result: ImportResult(
+            upserted: [resurrected, legitimate], deletedSources: [], anchor: ImportAnchor(data: Data([2]))
+        ))
+
+        try await model.importActivities(from: importer, asOf: day(1))
+
+        #expect(try await store.activity(source: deletedSource) == nil)
+        #expect(try await store.activity(id: legitimate.id) == legitimate)
+        #expect(model.activities.map(\.id) == [legitimate.id])
+        let legitimateDayMetrics = model.metrics.first { Calendar(identifier: .gregorian).isDate($0.day, inSameDayAs: day(1)) }
+        #expect((legitimateDayMetrics?.load ?? 0) > 0)
+    }
+
     @Test("importActivities(from:) doesn't clear hasEverImportedActivities when an importer returns a nil anchor")
     func importActivitiesWithNilAnchorDoesNotClearHasEverImported() async throws {
         let (store, stores) = makeStores()
@@ -566,6 +631,7 @@ private actor DeduplicatingActivityStore: ActivityStore {
     func deleteActivity(id: UUID) async throws {
         activitiesByID.removeValue(forKey: id)
     }
+    func tombstonedSources(among sources: [ActivitySource]) async throws -> Set<ActivitySource> { [] }
     func deduplicateActivities() async throws -> [Activity] {
         for activity in toRemove { activitiesByID.removeValue(forKey: activity.id) }
         return toRemove
@@ -590,6 +656,7 @@ private struct ThrowingActivityStore: ActivityStore {
     func activity(id: UUID) async throws -> Activity? { nil }
     func deleteActivity(source: ActivitySource) async throws {}
     func deleteActivity(id: UUID) async throws {}
+    func tombstonedSources(among sources: [ActivitySource]) async throws -> Set<ActivitySource> { [] }
     func deduplicateActivities() async throws -> [Activity] { [] }
 }
 
@@ -675,6 +742,7 @@ private actor GatedActivityStore: ActivityStore {
     func activity(id: UUID) async throws -> Activity? { nil }
     func deleteActivity(source: ActivitySource) async throws {}
     func deleteActivity(id: UUID) async throws {}
+    func tombstonedSources(among sources: [ActivitySource]) async throws -> Set<ActivitySource> { [] }
 
     func deduplicateActivities() async throws -> [Activity] {
         deduplicateCallCount += 1

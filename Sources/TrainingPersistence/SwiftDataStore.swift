@@ -67,11 +67,22 @@ public actor SwiftDataStore: ActivityStore, PlanStore, WorkoutLibraryStore, Cycl
             }
         }
 
+        // Indexed the same way as `recordsBySourceKey` above (one fetch of the whole,
+        // expected-tiny tombstone table, not one per incoming activity) so an activity being
+        // upserted here clears its own tombstone, if any — see ``tombstonedSources(among:)``.
+        var tombstonesBySourceKey: [String: DeletedActivitySourceRecord] = [:]
+        for tombstone in try modelContext.fetch(FetchDescriptor<DeletedActivitySourceRecord>()) {
+            tombstonesBySourceKey[tombstone.sourceKey] = tombstone
+        }
+
         for activity in activities {
             let sourceKey = activity.source.persistenceKey
             if !keysWithoutNaturalKey.contains(sourceKey), let stale = recordsBySourceKey[sourceKey], stale.id != activity.id {
                 modelContext.delete(stale)
                 recordsByID.removeValue(forKey: stale.id)
+            }
+            if let tombstone = tombstonesBySourceKey.removeValue(forKey: sourceKey) {
+                modelContext.delete(tombstone)
             }
 
             let record: ActivityRecord
@@ -110,8 +121,35 @@ public actor SwiftDataStore: ActivityStore, PlanStore, WorkoutLibraryStore, Cycl
     /// See `ActivityStore/deleteActivity(id:)`.
     public func deleteActivity(id: UUID) async throws {
         guard let record = try fetchActivityRecord(id: id) else { return }
+        if !ActivitySource.keysWithoutNaturalKey.contains(record.sourceKey) {
+            try tombstone(sourceKey: record.sourceKey)
+        }
         modelContext.delete(record)
         try modelContext.save()
+    }
+
+    /// See `ActivityStore/tombstonedSources(among:)`.
+    public func tombstonedSources(among sources: [ActivitySource]) async throws -> Set<ActivitySource> {
+        guard !sources.isEmpty else { return [] }
+        var sourceByKey: [String: ActivitySource] = [:]
+        for source in sources {
+            sourceByKey[source.persistenceKey] = source
+        }
+        let keys = Set(sourceByKey.keys)
+        let descriptor = FetchDescriptor<DeletedActivitySourceRecord>(
+            predicate: #Predicate { keys.contains($0.sourceKey) }
+        )
+        let tombstonedKeys = try modelContext.fetch(descriptor).map(\.sourceKey)
+        return Set(tombstonedKeys.compactMap { sourceByKey[$0] })
+    }
+
+    /// Records a tombstone for `sourceKey`, if one doesn't already exist.
+    private func tombstone(sourceKey: String) throws {
+        let descriptor = FetchDescriptor<DeletedActivitySourceRecord>(
+            predicate: #Predicate { $0.sourceKey == sourceKey }
+        )
+        guard try modelContext.fetch(descriptor).isEmpty else { return }
+        modelContext.insert(DeletedActivitySourceRecord(sourceKey: sourceKey, deletedAt: .now))
     }
 
     /// Deletes every activity in this store, returning how many were removed.

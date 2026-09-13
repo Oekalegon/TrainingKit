@@ -9,6 +9,7 @@ public enum TrainingPersistenceContainer {
     public static var modelTypes: [any PersistentModel.Type] {
         [
             ActivityRecord.self,
+            DeletedActivitySourceRecord.self,
             PlannedActivityRecord.self,
             StructuredWorkoutRecord.self,
             TrainingCycleRecord.self,

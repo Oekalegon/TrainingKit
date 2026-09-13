@@ -16,11 +16,11 @@ public final class TrainingModel {
     public private(set) var workouts: [StructuredWorkout] = []
     public private(set) var cycles: [TrainingCycle] = []
     public private(set) var metrics: [FitnessMetrics] = []
-    /// Activities in ``activities`` whose ``Activity/dateRange``s overlap without one fully
-    /// containing the other — see ``ActivityOverlapChecker/findOverlaps(in:)``. Recomputed on
-    /// every access rather than cached, since it's a cheap pairwise check over whatever range of
+    /// Advice on activities in ``activities`` whose ``Activity/dateRange``s overlap or sit close
+    /// together — see ``ActivityOverlapChecker/findOverlaps(in:thresholds:)``. Recomputed on every
+    /// access rather than cached, since it's a cheap pairwise check over whatever range of
     /// activities is currently loaded.
-    public var overlappingActivities: [ActivityOverlap] {
+    public var overlapAdvice: [ActivityOverlapAdvice] {
         ActivityOverlapChecker.findOverlaps(in: activities)
     }
     /// Whether an ``ActivityImporting`` run (e.g. HealthKit) has ever completed successfully for

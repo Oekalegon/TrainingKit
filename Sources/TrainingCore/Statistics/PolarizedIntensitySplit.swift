@@ -3,13 +3,15 @@ import Foundation
 /// The 80/20 (polarized-training) split of time between low and moderate-to-high intensity,
 /// derived from a ``TimeInZone`` breakdown.
 ///
-/// Maps ``HeartRateZone``'s five zones onto the two-zone model behind the "80/20" guideline:
-/// zone 0 ("below zone 1") and zones 1–2 (``HeartRateZone/recovery``, ``HeartRateZone/aerobic``)
-/// count as low intensity — comfortable, conversational effort below the first
-/// ventilatory/lactate threshold. Zones 3–5 (``HeartRateZone/tempo``, ``HeartRateZone/threshold``,
-/// ``HeartRateZone/anaerobic``) count as moderate-to-high intensity — at or above it. Polarized
-/// training guidance recommends roughly 80% low-intensity volume against 20% moderate-to-high for
-/// endurance athletes, rather than the more even split many recreational athletes default to.
+/// Maps ``HeartRateZone``'s five zones onto the two-zone model behind the "80/20" guideline
+/// (Fitzgerald, *80/20 Running*/*80/20 Triathlon*): zone 0 ("below zone 1") and zones 1–2
+/// (``HeartRateZone/recovery``, ``HeartRateZone/aerobic``) count as low intensity — comfortable,
+/// conversational effort below the first ventilatory/lactate threshold. Zones 3–5
+/// (``HeartRateZone/tempo``, ``HeartRateZone/threshold``, ``HeartRateZone/anaerobic``) count as
+/// moderate-to-high intensity — at or above it. This 1–2 vs. 3–5 grouping matches the zone split
+/// used in that source. Polarized training guidance recommends roughly 80% low-intensity volume
+/// against 20% moderate-to-high for endurance athletes, rather than the more even split many
+/// recreational athletes default to.
 public struct PolarizedIntensitySplit: Sendable, Codable, Hashable {
     /// Seconds in zone 0 (below zone 1) plus zones 1–2.
     public let lowSeconds: TimeInterval

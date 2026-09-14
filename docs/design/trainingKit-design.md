@@ -515,6 +515,24 @@ Time in zone is integrated from `Activity.heartRate` using the same trapezoid se
 
 > **Note (pending, not yet built):** `ActivitySummary`/`TimeInZone` should gain a pace/speed equivalent alongside the HR one — `Activity.speed` (added when the model gained device-recorded streams; see §2.2) is the raw stream to integrate the same way, once a pace/speed zone model exists to bucket it against. On the "computed on demand, cache is a later optimisation" line above: recomputing time-in-zone for e.g. 30 activities in a calendar view is not expected to be a real cost (trapezoidal integration over a few hundred–low-thousand samples per activity is sub-millisecond total), so if caching is ever needed it belongs at the app/view-model layer (keyed on activity ID, invalidated on data change), not inside `StatisticsCalculator` itself.
 
+#### Polarized (80/20) intensity split
+
+```swift
+struct PolarizedIntensitySplit: Sendable {
+    let lowSeconds: TimeInterval           // zone 0 + zones 1-2
+    let moderateToHighSeconds: TimeInterval // zones 3-5
+    var total: TimeInterval
+    var lowFraction: Double
+    var moderateToHighFraction: Double
+}
+
+extension TimeInZone {
+    var polarizedSplit: PolarizedIntensitySplit
+}
+```
+
+Collapses `TimeInZone`'s five HR zones into the two-zone model behind the "80/20" polarized-training guideline (Fitzgerald, *80/20 Running*/*80/20 Triathlon*): zone 0 and zones 1–2 (recovery/aerobic) count as low intensity, zones 3–5 (tempo/threshold/anaerobic) as moderate-to-high — this 1-2 vs. 3-5 split matches the zone grouping used in that source, confirmed rather than an arbitrary boundary. A `+` operator mirrors `TimeInZone`'s own, so a per-activity split rolls up into a weekly/period one the same way its source `TimeInZone` does (sum-then-split == split-then-sum). Exposed as a computed property on `TimeInZone` rather than a separate builder, since it needs no additional input.
+
 ### 9.2 Per-week
 
 ```swift

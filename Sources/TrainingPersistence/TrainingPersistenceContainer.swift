@@ -30,6 +30,15 @@ public enum TrainingPersistenceContainer {
     ///     a missing entitlement shows up later as silent/logged sync failures, not as a thrown
     ///     error here. Add the capability before shipping if `.automatic` is what you want; don't
     ///     rely on this throwing to tell you it's missing.
+    ///
+    ///     Background sync while the app isn't foregrounded also needs the app target's
+    ///     `UIBackgroundModes` to include `remote-notification`. No additional app code is
+    ///     required beyond that: `.automatic` sync is backed by `NSPersistentCloudKitContainer`,
+    ///     which registers for and consumes CloudKit's silent push notifications internally — the
+    ///     app doesn't need a `UIApplicationDelegate`/`registerForRemoteNotifications()` of its
+    ///     own for this. If a future app target ever adds its own remote-notification handling
+    ///     for an unrelated reason, make sure it doesn't swallow the push before the system
+    ///     forwards it to Core Data's internal handler.
     ///   - isStoredInMemoryOnly: `true` for a throwaway container (tests, previews) that never
     ///     touches disk; defaults to `false`.
     /// - Returns: A `ModelContainer` ready to build a ``SwiftDataStore`` from.

@@ -82,6 +82,24 @@ public struct HeartRateZoneModel: Sendable {
         return (range.lowerBound + range.upperBound) / 2
     }
 
+    /// The heart-rate range, in bpm, for the given zone number (1...5) — the same boundaries
+    /// ``zoneRatioRange(_:)`` reports, converted back from the Karvonen heart-rate-reserve ratio
+    /// to bpm via this model's own resting/max heart rate (the inverse of ``deltaHRRatio(for:)``).
+    /// This holds regardless of `method`: every method's boundaries are expressed as an HRR ratio
+    /// internally (see this type's own doc comment), so converting back to bpm always uses the
+    /// same resting/max pair. `nil` under the same conditions ``zoneRatioRange(_:)`` returns `nil`
+    /// for (an out-of-range zone, or `.lactateThreshold` with no LTHR set).
+    public func zoneBPMRange(_ zone: Int) -> ClosedRange<Double>? {
+        guard let ratioRange = zoneRatioRange(zone) else { return nil }
+        return bpm(forRatio: ratioRange.lowerBound)...bpm(forRatio: ratioRange.upperBound)
+    }
+
+    /// The heart rate, in bpm, for a given Karvonen heart-rate-reserve ratio — the inverse of
+    /// ``deltaHRRatio(for:)``.
+    private func bpm(forRatio ratio: Double) -> Double {
+        ratio * (maxHeartRateBPM - restingHeartRateBPM) + restingHeartRateBPM
+    }
+
     private func ratioRange(fromPercentRange percentRange: ClosedRange<Double>, ofReferenceBPM referenceBPM: Double) -> ClosedRange<Double> {
         let lowBPM = percentRange.lowerBound * referenceBPM
         let highBPM = percentRange.upperBound * referenceBPM

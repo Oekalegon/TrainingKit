@@ -57,6 +57,37 @@ struct HeartRateZoneModelTests {
         #expect(model.zoneMidpointRatio(1) == nil)
     }
 
+    @Test("karvonen zone bpm ranges convert the ratio table back to bpm via resting/max")
+    func karvonenZoneBPMRange() {
+        let model = HeartRateZoneModel(restingHeartRateBPM: resting, maxHeartRateBPM: max, method: .karvonen)
+
+        // Zone 1 is 50%-60% HRR: resting + ratio * (max - resting), i.e. 120...134 bpm here.
+        let range = model.zoneBPMRange(1)!
+        #expect(abs(range.lowerBound - 120) < 1e-9)
+        #expect(abs(range.upperBound - 134) < 1e-9)
+    }
+
+    @Test("zone bpm ranges round-trip through zoneRatioRange for every method")
+    func zoneBPMRangeRoundTripsThroughRatio() {
+        for method in [HeartRateZoneMethod.karvonen, .percentageOfMaxHeartRate] {
+            let model = HeartRateZoneModel(restingHeartRateBPM: resting, maxHeartRateBPM: max, method: method)
+            let ratioRange = model.zoneRatioRange(3)!
+            let bpmRange = model.zoneBPMRange(3)!
+            #expect(abs(model.deltaHRRatio(for: bpmRange.lowerBound) - ratioRange.lowerBound) < 1e-9)
+            #expect(abs(model.deltaHRRatio(for: bpmRange.upperBound) - ratioRange.upperBound) < 1e-9)
+        }
+    }
+
+    @Test("zone bpm range is nil under the same conditions zoneRatioRange is nil for")
+    func zoneBPMRangeNilMatchesRatioRange() {
+        let outOfRange = HeartRateZoneModel(restingHeartRateBPM: resting, maxHeartRateBPM: max, method: .karvonen)
+        #expect(outOfRange.zoneBPMRange(0) == nil)
+        #expect(outOfRange.zoneBPMRange(6) == nil)
+
+        let noLTHR = HeartRateZoneModel(restingHeartRateBPM: resting, maxHeartRateBPM: max, method: .lactateThreshold)
+        #expect(noLTHR.zoneBPMRange(1) == nil)
+    }
+
     @Test("a model built from the athlete's current settings uses their zone method")
     func modelFromCurrentSettingsUsesMethod() {
         let athlete = AthleteProfile.fixture(lactateThresholdHeartRateBPM: 160, zoneMethod: .lactateThreshold)

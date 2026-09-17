@@ -9,7 +9,8 @@ public struct WorkoutTemplate: Identifiable, Sendable, Codable, Hashable {
     public var name: String
     /// The kind of activity this template is for.
     public var sport: Sport
-    /// The parameters this template's blocks may reference.
+    /// The parameters this template's blocks may reference. Keys must be unique within a
+    /// template — a duplicate key silently resolves to whichever entry appears first.
     public var parameters: [WorkoutTemplateParameter]
     /// The ordered blocks making up this template.
     public var blocks: [TemplateBlock]
@@ -42,21 +43,32 @@ extension WorkoutTemplate {
     ///
     /// - Parameters:
     ///   - name: The instantiated workout's display name; defaults to this template's name.
-    ///   - values: Parameter key to value; a key missing from `values` (or from this template's
-    ///     `parameters`) resolves to `0`.
+    ///   - values: Parameter key to value; a key declared in this template's `parameters` but
+    ///     missing from `values` resolves to that parameter's `defaultValue`.
     /// - Returns: A ``StructuredWorkout`` with every ``TemplateValue`` resolved to a fixed value.
-    public func instantiate(name: String? = nil, values: [String: Double] = [:]) -> StructuredWorkout {
-        func resolve(_ key: String) -> Double {
-            values[key] ?? parameters.first { $0.key == key }?.defaultValue ?? 0
+    /// - Throws: ``WorkoutTemplateError/undeclaredParameter(_:)`` if a step or block references a
+    ///   `.parameter(_:)` key that isn't declared in this template's `parameters` — a typo or a
+    ///   stale reference, never something `values` alone can fix.
+    public func instantiate(name: String? = nil, values: [String: Double] = [:]) throws(WorkoutTemplateError) -> StructuredWorkout {
+        func resolve(_ key: String) throws(WorkoutTemplateError) -> Double {
+            if let value = values[key] {
+                return value
+            }
+            guard let parameter = parameters.first(where: { $0.key == key }) else {
+                throw .undeclaredParameter(key)
+            }
+            return parameter.defaultValue
         }
 
-        let resolvedBlocks = blocks.map { block in
-            WorkoutBlock(
-                steps: block.steps.map { step in
-                    WorkoutStep(kind: step.kind, goal: step.goal.resolve(resolve), target: step.target)
-                },
-                repetitions: block.repetitions.resolve(resolve)
-            )
+        var resolvedBlocks: [WorkoutBlock] = []
+        resolvedBlocks.reserveCapacity(blocks.count)
+        for block in blocks {
+            var steps: [WorkoutStep] = []
+            steps.reserveCapacity(block.steps.count)
+            for step in block.steps {
+                steps.append(WorkoutStep(kind: step.kind, goal: try step.goal.resolve(resolve), target: step.target))
+            }
+            resolvedBlocks.append(WorkoutBlock(steps: steps, repetitions: try block.repetitions.resolve(resolve)))
         }
         return StructuredWorkout(name: name ?? self.name, sport: sport, blocks: resolvedBlocks)
     }
@@ -68,38 +80,43 @@ extension WorkoutTemplate {
     ///   - values: Parameter key to value, as passed to `instantiate(values:)`.
     ///   - estimator: Estimates load from a step's target intensity in place of measured heart rate.
     ///   - athlete: Supplies the zone settings/sex/pace model `estimator` estimates against.
+    /// - Returns: The estimated ``TrainingLoad`` for the instantiated workout.
+    /// - Throws: Whatever `instantiate(name:values:)` throws.
     public func expectedLoad(
         values: [String: Double] = [:],
         estimator: PlannedLoadEstimator,
         athlete: AthleteProfile
-    ) -> TrainingLoad {
-        estimator.estimatedLoad(for: instantiate(values: values), athlete: athlete)
+    ) throws(WorkoutTemplateError) -> TrainingLoad {
+        estimator.estimatedLoad(for: try instantiate(values: values), athlete: athlete)
     }
 }
 
 extension TemplateValue where Value == Double {
-    fileprivate func resolve(_ resolve: (String) -> Double) -> Double {
+    fileprivate func resolve(_ resolve: (String) throws(WorkoutTemplateError) -> Double) throws(WorkoutTemplateError) -> Double {
         switch self {
         case .fixed(let value): value
-        case .parameter(let key): resolve(key)
+        case .parameter(let key): try resolve(key)
         }
     }
 }
 
 extension TemplateValue where Value == Int {
-    fileprivate func resolve(_ resolve: (String) -> Double) -> Int {
+    /// - Note: A resolved parameter value is rounded to the nearest integer rather than truncated,
+    ///   so a fractional value from a non-integer-snapped input (e.g. a UI slider) doesn't silently
+    ///   drop a whole repetition (`7.9` rounds to `8`, not `7`).
+    fileprivate func resolve(_ resolve: (String) throws(WorkoutTemplateError) -> Double) throws(WorkoutTemplateError) -> Int {
         switch self {
         case .fixed(let value): value
-        case .parameter(let key): Int(resolve(key))
+        case .parameter(let key): Int(try resolve(key).rounded())
         }
     }
 }
 
 extension TemplateStepGoal {
-    fileprivate func resolve(_ resolve: (String) -> Double) -> StepGoal {
+    fileprivate func resolve(_ resolve: (String) throws(WorkoutTemplateError) -> Double) throws(WorkoutTemplateError) -> StepGoal {
         switch self {
-        case .time(let value): .time(value.resolve(resolve))
-        case .distance(let value): .distance(value.resolve(resolve))
+        case .time(let value): .time(try value.resolve(resolve))
+        case .distance(let value): .distance(try value.resolve(resolve))
         case .open: .open
         }
     }

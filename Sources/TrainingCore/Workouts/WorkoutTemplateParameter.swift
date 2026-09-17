@@ -11,6 +11,7 @@ public struct WorkoutTemplateParameter: Identifiable, Sendable, Codable, Hashabl
     /// Bounds for a creator UI's slider/stepper, if any.
     public var range: ClosedRange<Double>?
 
+    /// The parameter's own key, used as its stable identity.
     public var id: String { key }
 
     /// Creates a template parameter.

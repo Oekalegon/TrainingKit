@@ -70,6 +70,13 @@ public enum BuiltInWorkoutTemplates {
 
     /// A Zone 3 tempo effort ramped into and out of via fixed Zone 1/Zone 2 segments, with the
     /// main Zone 3 duration as the only variable.
+    ///
+    /// Only the leading Zone 1 block is `.warmup` and only the trailing Zone 1 block is
+    /// `.cooldown` — ``WorkoutKitBridge`` extracts at most one single-step edge block per side into
+    /// `CustomWorkout`'s dedicated warmup/cooldown slot, so a second `.warmup`/`.cooldown`-kind
+    /// block would fall through to an ordinary work/recovery interval anyway. The Zone 2 ramp-in is
+    /// marked `.work` (what it becomes on sync) rather than `.warmup`, so the model's `kind` matches
+    /// what actually reaches the Watch.
     public static let tempoRun = WorkoutTemplate(
         id: UUID(uuidString: "8F5D6E4E-6E0E-4B8B-9C1A-9E6F9F1C1A04")!,
         name: "Tempo run",
@@ -84,7 +91,7 @@ public enum BuiltInWorkoutTemplates {
                 TemplateStep(kind: .warmup, goal: .time(.fixed(5 * 60)), target: .heartRateZone(1)),
             ]),
             TemplateBlock(steps: [
-                TemplateStep(kind: .warmup, goal: .time(.fixed(5 * 60)), target: .heartRateZone(2)),
+                TemplateStep(kind: .work, goal: .time(.fixed(5 * 60)), target: .heartRateZone(2)),
             ]),
             TemplateBlock(steps: [
                 TemplateStep(kind: .work, goal: .time(.parameter("duration")), target: .heartRateZone(3)),

@@ -12,6 +12,7 @@ import HealthKit
 public struct HealthKitAthleteReader: Sendable {
     private let healthStore: HKHealthStore
     private let hrMaxEstimator: TanakaHRMaxEstimator
+    private let restingHeartRateSmoother: RestingHeartRateSmoother
 
     /// Creates a HealthKit athlete reader.
     ///
@@ -19,9 +20,16 @@ public struct HealthKitAthleteReader: Sendable {
     ///   - healthStore: The health store to read from; the caller is responsible for requesting
     ///     authorization first (see ``HealthKitAuthorization``).
     ///   - hrMaxEstimator: Estimates HRmax from date of birth; defaults to `TanakaHRMaxEstimator`.
-    public init(healthStore: HKHealthStore, hrMaxEstimator: TanakaHRMaxEstimator = TanakaHRMaxEstimator()) {
+    ///   - restingHeartRateSmoother: Smooths the trailing window of resting HR samples into one
+    ///     value; defaults to `RestingHeartRateSmoother`.
+    public init(
+        healthStore: HKHealthStore,
+        hrMaxEstimator: TanakaHRMaxEstimator = TanakaHRMaxEstimator(),
+        restingHeartRateSmoother: RestingHeartRateSmoother = RestingHeartRateSmoother()
+    ) {
         self.healthStore = healthStore
         self.hrMaxEstimator = hrMaxEstimator
+        self.restingHeartRateSmoother = restingHeartRateSmoother
     }
 
     /// Reads everything available, treating each field independently — a denied or never-recorded
@@ -30,11 +38,12 @@ public struct HealthKitAthleteReader: Sendable {
     /// date-of-birth (characteristic reads throw when unauthorized, unlike sample queries) must
     /// still get back the resting heart rate that *did* succeed, not an all-or-nothing failure.
     ///
-    /// - Parameter today: The date to estimate HRmax as of; injected rather than `Date()` for
-    ///   determinism, matching the rest of `TrainingCore`.
+    /// - Parameter today: The date to estimate HRmax as of, and the end of the resting-HR
+    ///   smoothing window; injected rather than `Date()` for determinism, matching the rest of
+    ///   `TrainingCore`.
     /// - Returns: Whatever could be read.
     public func snapshot(asOf today: Date) async -> HealthKitAthleteSnapshot {
-        async let restingHeartRate = latestRestingHeartRateBPM()
+        async let restingHeartRate = smoothedRestingHeartRateBPM(asOf: today)
         async let biologicalSex = readBiologicalSex()
         async let maxHeartRate = estimatedMaxHeartRateBPM(asOf: today)
         return await HealthKitAthleteSnapshot(
@@ -44,16 +53,23 @@ public struct HealthKitAthleteReader: Sendable {
         )
     }
 
+    /// The median resting heart rate over the trailing ``RestingHeartRateSmoother/windowInDays``,
+    /// rather than the single latest sample — a resting HR reading swings day to day (sleep,
+    /// illness, travel), and feeding that noise straight into zone settings would jitter zone
+    /// boundaries on every re-read.
+    ///
     /// - Note: Swallows any HealthKit error (e.g. denied authorization) into `nil` rather than
     ///   throwing, so one field's failure can never take down the others in ``snapshot(asOf:)``.
-    private func latestRestingHeartRateBPM() async -> Double? {
+    private func smoothedRestingHeartRateBPM(asOf today: Date) async -> Double? {
+        let windowStart = today.addingTimeInterval(-Double(RestingHeartRateSmoother.windowInDays) * 86400)
+        let predicate = HKQuery.predicateForSamples(withStart: windowStart, end: today)
         let descriptor = HKSampleQueryDescriptor(
-            predicates: [.quantitySample(type: HKQuantityType(.restingHeartRate))],
-            sortDescriptors: [SortDescriptor(\.startDate, order: .reverse)],
-            limit: 1
+            predicates: [.quantitySample(type: HKQuantityType(.restingHeartRate), predicate: predicate)],
+            sortDescriptors: [SortDescriptor(\.startDate)]
         )
-        let samples = try? await descriptor.result(for: healthStore)
-        return samples?.first?.quantity.doubleValue(for: HeartRateSample.heartRateUnit)
+        guard let samples = try? await descriptor.result(for: healthStore) else { return nil }
+        let readingsBPM = samples.map { $0.quantity.doubleValue(for: HeartRateSample.heartRateUnit) }
+        return restingHeartRateSmoother.smoothedRestingHeartRateBPM(from: readingsBPM)
     }
 
     /// - Note: Swallows any HealthKit error (e.g. denied authorization) into `nil` rather than

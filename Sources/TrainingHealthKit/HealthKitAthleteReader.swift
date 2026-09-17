@@ -43,7 +43,7 @@ public struct HealthKitAthleteReader: Sendable {
     ///   `TrainingCore`.
     /// - Returns: Whatever could be read.
     public func snapshot(asOf today: Date) async -> HealthKitAthleteSnapshot {
-        async let restingHeartRate = smoothedRestingHeartRateBPM(asOf: today)
+        async let restingHeartRate = readSmoothedRestingHeartRateBPM(asOf: today)
         async let biologicalSex = readBiologicalSex()
         async let maxHeartRate = estimatedMaxHeartRateBPM(asOf: today)
         return await HealthKitAthleteSnapshot(
@@ -53,23 +53,25 @@ public struct HealthKitAthleteReader: Sendable {
         )
     }
 
-    /// The median resting heart rate over the trailing ``RestingHeartRateSmoother/windowInDays``,
-    /// rather than the single latest sample — a resting HR reading swings day to day (sleep,
-    /// illness, travel), and feeding that noise straight into zone settings would jitter zone
-    /// boundaries on every re-read.
+    /// Queries the trailing ``RestingHeartRateSmoother/windowInDays`` of resting HR samples and
+    /// reduces them to one value via ``restingHeartRateSmoother``, rather than the single latest
+    /// sample — a resting HR reading swings day to day (sleep, illness, travel), and feeding that
+    /// noise straight into zone settings would jitter zone boundaries on every re-read.
     ///
     /// - Note: Swallows any HealthKit error (e.g. denied authorization) into `nil` rather than
     ///   throwing, so one field's failure can never take down the others in ``snapshot(asOf:)``.
-    private func smoothedRestingHeartRateBPM(asOf today: Date) async -> Double? {
-        let windowStart = today.addingTimeInterval(-Double(RestingHeartRateSmoother.windowInDays) * 86400)
+    private func readSmoothedRestingHeartRateBPM(asOf today: Date) async -> Double? {
+        let windowStart = restingHeartRateSmoother.windowStart(endingAt: today)
         let predicate = HKQuery.predicateForSamples(withStart: windowStart, end: today)
         let descriptor = HKSampleQueryDescriptor(
             predicates: [.quantitySample(type: HKQuantityType(.restingHeartRate), predicate: predicate)],
             sortDescriptors: [SortDescriptor(\.startDate)]
         )
         guard let samples = try? await descriptor.result(for: healthStore) else { return nil }
-        let readingsBPM = samples.map { $0.quantity.doubleValue(for: HeartRateSample.heartRateUnit) }
-        return restingHeartRateSmoother.smoothedRestingHeartRateBPM(from: readingsBPM)
+        let readings = samples.map {
+            (date: $0.startDate, bpm: $0.quantity.doubleValue(for: HeartRateSample.heartRateUnit))
+        }
+        return restingHeartRateSmoother.smoothedRestingHeartRateBPM(from: readings)
     }
 
     /// - Note: Swallows any HealthKit error (e.g. denied authorization) into `nil` rather than

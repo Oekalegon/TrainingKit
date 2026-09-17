@@ -11,3 +11,16 @@ SwiftData models and CloudKit sync that conform to TrainingCore's store protocol
 ### Overview
 
 - ``TrainingPersistence``
+
+### Store
+
+- ``SwiftDataStore``
+- ``TrainingPersistenceContainer``
+
+### Models
+
+- ``ActivityRecord``
+- ``PlannedActivityRecord``
+- ``StructuredWorkoutRecord``
+- ``TrainingCycleRecord``
+- ``AthleteProfileRecord``

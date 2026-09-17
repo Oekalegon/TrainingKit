@@ -13,3 +13,112 @@ See `docs/design/trainingKit-design.md` in the package repository for the full m
 ### Overview
 
 - ``TrainingCore``
+
+### Athlete
+
+- ``AthleteProfile``
+- ``BiologicalSex``
+- ``Weekday``
+- ``PaceModel``
+- ``HeartRateZoneModel``
+- ``HeartRateZoneMethod``
+- ``HeartRateZoneSettings``
+- ``TanakaHRMaxEstimator``
+
+### Activity
+
+- ``Activity``
+- ``HeartRateSample``
+- ``SpeedSample``
+- ``ElevationStats``
+- ``CadenceStats``
+- ``GeographicBounds``
+- ``Sport``
+- ``ActivitySource``
+
+### Training Load
+
+- ``TrainingLoad``
+- ``LoadMethod``
+- ``LoadError``
+- ``TRIMPCoefficients``
+- ``LoadCalculator``
+- ``ExponentialTRIMPCalculator``
+- ``DurationRPECalculator``
+
+### Structured Workouts
+
+- ``StructuredWorkout``
+- ``WorkoutBlock``
+- ``WorkoutStep``
+- ``StepKind``
+- ``StepGoal``
+- ``IntensityTarget``
+
+### Planning
+
+- ``PlannedActivity``
+- ``PlannedLoadEstimator``
+- ``TRIMPPlanEstimator``
+- ``PlanReconciler``
+- ``WorkoutDurationEstimator``
+
+### Fitness Series
+
+- ``DayLoad``
+- ``DailyLoadSeries``
+- ``LoadModelParameters``
+- ``FitnessMetrics``
+- ``FitnessMetricsCalculator``
+
+### Statistics
+
+- ``ActivitySummary``
+- ``TimeInZone``
+- ``WeeklyStats``
+- ``WeeklyDelta``
+- ``SportWeekStats``
+- ``PeriodStats``
+- ``PeriodDelta``
+- ``SportPeriodStats``
+- ``StatisticsCalculator``
+
+### Periodisation
+
+- ``TrainingCycle``
+- ``CycleLevel``
+- ``CyclePhase``
+- ``Microcycle``
+- ``MesocycleTemplate``
+- ``MacroTemplate``
+- ``CycleLayoutBuilder``
+- ``Race``
+- ``RacePriority``
+
+### Plan Evaluation
+
+- ``PlanEvaluator``
+- ``PlanEvaluation``
+- ``PlanFinding``
+- ``PlanRule``
+- ``PlanGuardrails``
+- ``Severity``
+
+### Stores
+
+- ``ActivityStore``
+- ``PlanStore``
+- ``WorkoutLibraryStore``
+- ``CycleStore``
+- ``CycleStoreError``
+- ``CycleNestingValidator``
+- ``AthleteStore``
+- ``InMemoryStore``
+- ``StoreSet``
+- ``ImportAnchor``
+- ``ImportResult``
+- ``ActivityImporting``
+
+### Facade
+
+- ``TrainingModel``

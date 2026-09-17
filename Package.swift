@@ -29,5 +29,9 @@ let package = Package(
         .target(name: "TrainingToolsAnthropic", dependencies: ["TrainingTools"]),
         .target(name: "TrainingToolsFoundationModels", dependencies: ["TrainingTools"]),
         .testTarget(name: "TrainingCoreTests", dependencies: ["TrainingCore"]),
+        .testTarget(name: "TrainingHealthKitTests", dependencies: ["TrainingHealthKit"]),
+        .testTarget(name: "TrainingWorkoutKitTests", dependencies: ["TrainingWorkoutKit"]),
+        .testTarget(name: "TrainingPersistenceTests", dependencies: ["TrainingPersistence"]),
+        .testTarget(name: "TrainingToolsTests", dependencies: ["TrainingTools"]),
     ]
 )

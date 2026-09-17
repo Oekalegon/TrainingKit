@@ -1,0 +1,48 @@
+name: PersistenceHarness
+options:
+  bundleIdPrefix: org.oekalegon.trainingkit
+  deploymentTarget:
+    macOS: "26.0"
+packages:
+  TrainingKit:
+    path: ../../
+targets:
+  PersistenceHarness:
+    type: application
+    platform: macOS
+    sources:
+      - Sources
+    info:
+      path: Generated/Info.plist
+      properties:
+        UILaunchScreen: {}
+    entitlements:
+      path: Generated/PersistenceHarness.entitlements
+      properties:
+        com.apple.security.app-sandbox: true
+        com.apple.security.network.client: true
+        com.apple.developer.icloud-container-identifiers:
+          - iCloud.org.oekalegon.trainingkit.testharness
+        com.apple.developer.icloud-services:
+          - CloudKit
+        com.apple.developer.aps-environment: development
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: org.oekalegon.trainingkit.PersistenceHarness
+        CODE_SIGN_STYLE: Automatic
+        CODE_SIGN_IDENTITY: "Apple Development"
+        DEVELOPMENT_TEAM: WTT2LZ6DDG
+        SWIFT_VERSION: "6.0"
+        ENABLE_HARDENED_RUNTIME: true
+    dependencies:
+      - package: TrainingKit
+        product: TrainingPersistence
+      - package: TrainingKit
+        product: TrainingCore
+    scheme:
+      # Toggle this on (in Xcode: Scheme > Edit Scheme > Run > Arguments, or flip to `true` here
+      # and regenerate) when CloudKit sync misbehaves -- it unlocks Core Data's verbose CloudKit
+      # mirroring logs, which is what actually surfaced "Error connecting to CloudKit daemon"
+      # underneath a generic CKErrorDomain#6 during initial harness testing.
+      commandLineArguments:
+        "-com.apple.CoreData.CloudKitDebug 3": false

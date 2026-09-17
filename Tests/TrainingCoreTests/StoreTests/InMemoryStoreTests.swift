@@ -228,6 +228,19 @@ struct InMemoryStoreTests {
         #expect(try await store.workout(id: workout.id) == nil)
     }
 
+    @Test("WorkoutTemplateStore upsert/fetch/delete")
+    func workoutTemplateStoreCRUD() async throws {
+        let store = InMemoryStore()
+        let template = WorkoutTemplate(name: "Recovery run", sport: .running, parameters: [], blocks: [])
+
+        try await store.upsert([template])
+        #expect(try await store.template(id: template.id) == template)
+        #expect(try await store.templates().map(\.id) == [template.id])
+
+        try await store.deleteTemplate(id: template.id)
+        #expect(try await store.template(id: template.id) == nil)
+    }
+
     @Test("AthleteStore save/fetch")
     func athleteStoreSaveFetch() async throws {
         let store = InMemoryStore()

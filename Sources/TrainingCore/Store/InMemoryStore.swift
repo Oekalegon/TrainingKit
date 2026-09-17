@@ -1,17 +1,18 @@
 import Foundation
 
-/// An in-memory implementation of all five Core store protocols, for tests and previews.
+/// An in-memory implementation of all six Core store protocols, for tests and previews.
 ///
-/// A single actor conforming to all five protocols at once is why the per-store mutation methods
+/// A single actor conforming to all six protocols at once is why the per-store mutation methods
 /// above are named distinctly (`deletePlan`/`deleteWorkout`/`deleteCycle` rather than a shared
 /// `delete(id:)`) — Swift can't satisfy identically-shaped requirements from different protocols
 /// with different implementations on one conforming type.
-public actor InMemoryStore: ActivityStore, PlanStore, WorkoutLibraryStore, CycleStore, AthleteStore,
-    FitnessMetricsCacheStore {
+public actor InMemoryStore: ActivityStore, PlanStore, WorkoutLibraryStore, WorkoutTemplateStore, CycleStore,
+    AthleteStore, FitnessMetricsCacheStore {
     private var activitiesByID: [UUID: Activity] = [:]
     private var deletedSources: Set<ActivitySource> = []
     private var plansByID: [UUID: PlannedActivity] = [:]
     private var workoutsByID: [UUID: StructuredWorkout] = [:]
+    private var templatesByID: [UUID: WorkoutTemplate] = [:]
     private var cyclesByID: [UUID: TrainingCycle] = [:]
     private var profile: AthleteProfile?
     private var anchor: ImportAnchor?
@@ -145,6 +146,30 @@ public actor InMemoryStore: ActivityStore, PlanStore, WorkoutLibraryStore, Cycle
     /// See ``WorkoutLibraryStore/deleteWorkout(id:)``.
     public func deleteWorkout(id: UUID) async throws {
         workoutsByID.removeValue(forKey: id)
+    }
+
+    // MARK: WorkoutTemplateStore
+
+    /// See ``WorkoutTemplateStore/templates()``.
+    public func templates() async throws -> [WorkoutTemplate] {
+        Array(templatesByID.values)
+    }
+
+    /// See ``WorkoutTemplateStore/template(id:)``.
+    public func template(id: UUID) async throws -> WorkoutTemplate? {
+        templatesByID[id]
+    }
+
+    /// See ``WorkoutTemplateStore/upsert(_:)``.
+    public func upsert(_ templates: [WorkoutTemplate]) async throws {
+        for template in templates {
+            templatesByID[template.id] = template
+        }
+    }
+
+    /// See ``WorkoutTemplateStore/deleteTemplate(id:)``.
+    public func deleteTemplate(id: UUID) async throws {
+        templatesByID.removeValue(forKey: id)
     }
 
     // MARK: CycleStore

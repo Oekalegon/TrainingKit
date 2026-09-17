@@ -83,7 +83,10 @@ public final class TrainingModel {
         }
     }
 
-    let stores: StoreSet
+    /// Public so a caller that needs the underlying stores directly (e.g. `PlanSandbox`, to
+    /// snapshot a what-if simulation) can get them without this model growing a bespoke pass-through
+    /// for every store-level operation it doesn't otherwise need itself.
+    public let stores: StoreSet
     private let estimator: any PlannedLoadEstimator
     private let calculators: [any LoadCalculator]
     var loadedRange: ClosedRange<Date>?
@@ -170,6 +173,16 @@ public final class TrainingModel {
         workouts = try await stores.workoutStore.workouts()
         loadedRange = range
         await recompute(asOf: today)
+    }
+
+    /// Upserts `workout` into ``WorkoutLibraryStore`` and reloads the workout library, e.g. after
+    /// instantiating a ``WorkoutTemplate`` for a planned workout. Doesn't recompute ``metrics``: a
+    /// library workout unreferenced by any ``PlannedActivity`` can't affect them, and a caller that
+    /// immediately follows this with `add(_ plan:)` (the common case, since a workout is normally
+    /// added together with the plan that schedules it) gets a recompute from that call anyway.
+    public func add(_ workout: StructuredWorkout) async throws {
+        try await stores.workoutStore.upsert([workout])
+        workouts = try await stores.workoutStore.workouts()
     }
 
     /// Upserts `newCycles` into ``CycleStore``, reloads cycles from the store, and recomputes.

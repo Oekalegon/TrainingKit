@@ -319,7 +319,7 @@ protocol ActivityImporting: Sendable {
 - `HKAnchoredObjectQuery` on `HKWorkoutType` → new/updated/deleted workouts since the last anchor. Anchor persisted via `AthleteStore`.
 - For each workout, a scoped `HKSampleQuery` on `heartRate` bounded to the workout's `startDate...endDate`, sorted, mapped to `[HeartRateSample]`.
 - `Activity.source = .healthKit(workout.uuid)`; the UUID is the dedupe key.
-- `HealthKitAthleteReader` supplies resting HR (latest `restingHeartRate` sample) and `biologicalSex()` to pre-fill `AthleteProfile`. HRmax is never read from HealthKit; default to Tanaka (`208 − 0.7 × age`) from `dateOfBirth` and let the user override.
+- `HealthKitAthleteReader` supplies resting HR (median `restingHeartRate` sample over the trailing 1–2 weeks, via `RestingHeartRateSmoother`, to absorb day-to-day noise before it feeds zone settings) and `biologicalSex()` to pre-fill `AthleteProfile`. HRmax is never read from HealthKit; default to Tanaka (`208 − 0.7 × age`) from `dateOfBirth` and let the user override.
 
 Requested authorisations: read `workoutType`, `heartRate`, `restingHeartRate`, `dateOfBirth`, `biologicalSex`. No write scopes in MVP 1.
 

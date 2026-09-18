@@ -14,6 +14,11 @@ public enum PlanRule: Sendable, Codable, Hashable {
     case strain
     /// TSB on a ``Race/date`` against ``PlanGuardrails/minTSBOnRaceDay``/``PlanGuardrails/maxTSBOnRaceDay``.
     case raceDayTSB
+    /// Any day's TSB against ``PlanGuardrails/minAcceptableTSB``/``PlanGuardrails/maxAcceptableTSB``
+    /// — unlike ``raceDayTSB``, checked every day, not just race days: the direct freshness/fatigue
+    /// signal (TSB = CTL − ATL), independent of whether the plan has any known phase (build,
+    /// recovery, taper) to judge the ATL/CTL ratio against.
+    case tsbBand
     /// A recovery-phase micro's load relative to the micro before it, against
     /// ``PlanGuardrails/recoveryLoadFraction``.
     case recoveryMicro

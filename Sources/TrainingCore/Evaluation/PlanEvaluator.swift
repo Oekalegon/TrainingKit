@@ -44,6 +44,7 @@ public struct PlanEvaluator: Sendable {
         var findings: [PlanFinding] = []
         findings += ctlRampFindings(metrics: metrics, guardrails: guardrails)
         findings += atlToCTLRatioFindings(metrics: metrics, guardrails: guardrails)
+        findings += tsbBandFindings(metrics: metrics, guardrails: guardrails)
         findings += monotonyFindings(metrics: metrics, guardrails: guardrails)
         findings += strainFindings(metrics: metrics, guardrails: guardrails)
         findings += raceDayTSBFindings(metricsByDay: metricsByDay, races: races, guardrails: guardrails)
@@ -86,6 +87,24 @@ public struct PlanEvaluator: Sendable {
                 findings.append(PlanFinding(day: entry.day, rule: .atlToCTLRatio, severity: .risk, value: ratio, threshold: guardrails.maxATLtoCTLRatio))
             } else if ratio < guardrails.minATLtoCTLRatio {
                 findings.append(PlanFinding(day: entry.day, rule: .atlToCTLRatio, severity: .warning, value: ratio, threshold: guardrails.minATLtoCTLRatio))
+            }
+        }
+        return findings
+    }
+
+    /// TSB per day, flagged when it drops below `minAcceptableTSB` (injury-risk territory) or
+    /// climbs above `maxAcceptableTSB` (sustained freshness reading as detraining) — the direct
+    /// freshness/fatigue signal, unlike ``atlToCTLRatioFindings(metrics:guardrails:)``'s ratio
+    /// proxy, and checked every day rather than only on a ``Race/date`` like
+    /// ``raceDayTSBFindings(metricsByDay:races:guardrails:)``. Warming-up days are skipped for the
+    /// same cold-start reason as the ratio check.
+    private func tsbBandFindings(metrics: [FitnessMetrics], guardrails: PlanGuardrails) -> [PlanFinding] {
+        var findings: [PlanFinding] = []
+        for entry in metrics where !entry.isWarmingUp {
+            if entry.tsb < guardrails.minAcceptableTSB {
+                findings.append(PlanFinding(day: entry.day, rule: .tsbBand, severity: .risk, value: entry.tsb, threshold: guardrails.minAcceptableTSB))
+            } else if entry.tsb > guardrails.maxAcceptableTSB {
+                findings.append(PlanFinding(day: entry.day, rule: .tsbBand, severity: .warning, value: entry.tsb, threshold: guardrails.maxAcceptableTSB))
             }
         }
         return findings

@@ -112,6 +112,46 @@ struct PlanEvaluatorCycleFreeRulesTests {
         #expect(!evaluation.findings.contains { $0.rule == .atlToCTLRatio })
     }
 
+    // MARK: - TSB band
+
+    @Test("TSB below the min fires risk; above the max fires warning, not risk")
+    func tsbBandBounds() {
+        let metrics = [
+            metric(0, tsb: -31), // below the default -30 min -> risk
+            metric(1, tsb: 26), // above the default 25 max -> warning
+            metric(2, tsb: 0), // within band
+        ]
+
+        let evaluation = evaluator.evaluate(metrics, races: [])
+
+        let findings = evaluation.findings.filter { $0.rule == .tsbBand }
+        #expect(findings.count == 2)
+        #expect(findings.first { $0.day == day(0) }?.severity == .risk)
+        #expect(findings.first { $0.day == day(1) }?.severity == .warning)
+        #expect(!findings.contains { $0.day == day(2) })
+    }
+
+    @Test("TSB exactly at the min or max threshold doesn't fire — comparisons are strict")
+    func tsbBandExactlyAtThresholdDoesNotFire() {
+        let metrics = [
+            metric(0, tsb: -30), // exactly the default min
+            metric(1, tsb: 25), // exactly the default max
+        ]
+
+        let evaluation = evaluator.evaluate(metrics, races: [])
+
+        #expect(!evaluation.findings.contains { $0.rule == .tsbBand })
+    }
+
+    @Test("a TSB band breach during warmup doesn't fire, even though the raw TSB exceeds the bounds")
+    func tsbBandSkipsWarmingUpDays() {
+        let metrics = [metric(0, tsb: -50, isWarmingUp: true)] // would be risk if not warming up
+
+        let evaluation = evaluator.evaluate(metrics, races: [])
+
+        #expect(!evaluation.findings.contains { $0.rule == .tsbBand })
+    }
+
     // MARK: - Duplicate days
 
     @Test("two metrics entries sharing a day don't crash evaluate")

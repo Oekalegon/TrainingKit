@@ -11,6 +11,15 @@ public struct PlanGuardrails: Sendable, Codable, Hashable {
     /// The ATL/CTL ratio below which the plan is losing fitness rather than at risk — flagged as
     /// ``Severity/warning``, not ``Severity/risk``.
     public var minATLtoCTLRatio: Double
+    /// The CTL below which ``PlanEvaluator`` skips the ATL/CTL ratio check entirely, on top of the
+    /// existing zero-CTL divide-by-zero guard. The ratio normalizes fatigue against fitness, which
+    /// is hypersensitive at a low absolute CTL — e.g. CTL=9, ATL=14 (TSB=-6, an unremarkable,
+    /// mild fatigue level) already reads as ratio=1.56, over the default 1.4 risk threshold, from
+    /// a low baseline alone rather than anything the ratio is actually meant to catch. Below this
+    /// CTL, ``minAcceptableTSB``/``maxAcceptableTSB`` is the more reliable freshness signal for an
+    /// athlete who hasn't built up a meaningful fitness base yet (e.g. returning from injury or
+    /// surgery), since it's an absolute measure rather than a ratio against a small denominator.
+    public var minCTLForRatioCheck: Double
     /// Trailing-window mean/stdev above which a week has no easy/hard contrast, even at moderate
     /// volume.
     public var maxMonotony: Double
@@ -56,6 +65,8 @@ public struct PlanGuardrails: Sendable, Codable, Hashable {
     ///     fast; defaults to 6.
     ///   - maxATLtoCTLRatio: The ATL/CTL ratio above which is the injury-risk band; defaults to 1.4.
     ///   - minATLtoCTLRatio: The ATL/CTL ratio below which the plan is losing fitness; defaults to 0.7.
+    ///   - minCTLForRatioCheck: The CTL below which the ratio check is skipped entirely; defaults
+    ///     to 20.
     ///   - maxMonotony: Trailing-window mean/stdev above which a week lacks easy/hard contrast;
     ///     defaults to 2.0.
     ///   - maxStrainPercentile: The trailing-distribution percentile above which a day's strain is
@@ -79,6 +90,7 @@ public struct PlanGuardrails: Sendable, Codable, Hashable {
         maxCTLRampPerWeek: Double = 6,
         maxATLtoCTLRatio: Double = 1.4,
         minATLtoCTLRatio: Double = 0.7,
+        minCTLForRatioCheck: Double = 20,
         maxMonotony: Double = 2.0,
         maxStrainPercentile: Double = 0.95,
         strainTrailingWindowDays: Int = 84,
@@ -95,6 +107,7 @@ public struct PlanGuardrails: Sendable, Codable, Hashable {
         self.maxCTLRampPerWeek = maxCTLRampPerWeek
         self.maxATLtoCTLRatio = maxATLtoCTLRatio
         self.minATLtoCTLRatio = minATLtoCTLRatio
+        self.minCTLForRatioCheck = minCTLForRatioCheck
         self.maxMonotony = maxMonotony
         self.maxStrainPercentile = maxStrainPercentile
         self.strainTrailingWindowDays = strainTrailingWindowDays

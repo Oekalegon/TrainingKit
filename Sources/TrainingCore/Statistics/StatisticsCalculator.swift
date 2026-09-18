@@ -185,42 +185,16 @@ public struct StatisticsCalculator: Sendable {
         }
 
         var itemsBySport: [Sport: [StatItem]] = [:]
-        for activity in activitiesInRange {
-            let summary = summary(for: activity, athlete: athlete)
-            let item = StatItem(
-                distanceMeters: summary.distanceMeters,
-                time: summary.movingTime,
-                load: summary.load.value,
-                timeInZone: summary.timeInZone
-            )
-            itemsBySport[activity.sport, default: []].append(item)
+        for (sport, item) in activityItems(activitiesInRange, athlete: athlete) {
+            itemsBySport[sport, default: []].append(item)
         }
-        for plan in plansInRange {
-            guard let workout = workoutsByID[plan.workoutID] else { continue }
-            let projection = project(workout: workout, athlete: athlete)
-            let load = plan.expectedLoadOverride ?? estimator.estimatedLoad(for: workout, athlete: athlete).value
-            let item = StatItem(
-                distanceMeters: projection.distanceMeters,
-                time: projection.duration,
-                load: load,
-                timeInZone: projection.timeInZone
-            )
-            itemsBySport[workout.sport, default: []].append(item)
+        for (sport, item) in plannedItems(plansInRange, workoutsByID: workoutsByID, athlete: athlete) {
+            itemsBySport[sport, default: []].append(item)
         }
 
         let isProjected = rangeEnd > todayStart || (rangeEnd == todayStart && !plansInRange.isEmpty)
 
-        var bySport: [Sport: SportPeriodStats] = [:]
-        for (sport, items) in itemsBySport {
-            bySport[sport] = SportPeriodStats(
-                sport: sport,
-                distanceMeters: items.reduce(0) { $0 + ($1.distanceMeters ?? 0) },
-                time: items.reduce(0) { $0 + $1.time },
-                load: items.reduce(0) { $0 + $1.load },
-                timeInZone: items.reduce(TimeInZone()) { $0 + $1.timeInZone },
-                activityCount: items.count
-            )
-        }
+        let bySport = bySport(itemsBySport)
 
         let allItems = itemsBySport.values.flatMap { $0 }
         let longest = allItems.max { $0.time < $1.time }
@@ -255,6 +229,67 @@ public struct StatisticsCalculator: Sendable {
         )
     }
 
+    /// Computes `range`'s performed and planned totals independently, per sport, rather than
+    /// ``periodStats(activities:plans:workouts:athlete:range:asOf:previous:)``'s single merged
+    /// figure.
+    ///
+    /// `periodStats` follows the same either/or rule ``DailyLoadSeries`` uses for CTL/ATL: a plan
+    /// only contributes on a day that has no completed activity of its own. That's right for a
+    /// single running total, but leaves no way to show "here's what was planned, and here's what
+    /// actually happened" side by side for a day where both exist, or a still-open plan for today
+    /// that hasn't been performed yet — the whole point of this method. `actual` sums every
+    /// completed activity in `range` unconditionally; `planned` sums every ``PlannedActivity`` in
+    /// `range` dated `today` or later, also unconditionally — neither excludes a day just because
+    /// the other side also has something for it. Both are still at the day level, not per-workout:
+    /// nothing here attempts to match a specific plan to the specific activity that fulfilled it.
+    ///
+    /// - Parameters:
+    ///   - activities: Completed activities to summarize with `calculators`.
+    ///   - plans: Planned activities to project with `estimator`/`durationEstimator`, restricted to
+    ///     `today` or later.
+    ///   - workouts: The library workouts `plans` reference, looked up by id.
+    ///   - athlete: Supplies the timezone and zone settings used throughout.
+    ///   - range: The calendar-day range to summarize, in the athlete's timezone. Both bounds are
+    ///     inclusive whole days.
+    ///   - today: The boundary before which a plan is excluded (it's already past and unperformed,
+    ///     so it reads as missed rather than as a bar this keeps showing indefinitely) — activities
+    ///     dated after `today` are likewise excluded, matching `periodStats`'s own replay semantics.
+    public func periodStatsSplit(
+        activities: [Activity],
+        plans: [PlannedActivity],
+        workouts: [StructuredWorkout],
+        athlete: AthleteProfile,
+        range: ClosedRange<Date>,
+        asOf today: Date
+    ) -> PeriodStatsSplit {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = athlete.timeZone
+        let todayStart = calendar.startOfDay(for: today)
+        let rangeStart = calendar.startOfDay(for: range.lowerBound)
+        let rangeEnd = calendar.startOfDay(for: range.upperBound)
+        let workoutsByID = Dictionary(uniqueKeysWithValues: workouts.map { ($0.id, $0) })
+
+        let activitiesInRange = activities.filter { activity in
+            let day = calendar.startOfDay(for: activity.start)
+            return day >= rangeStart && day <= rangeEnd && day <= todayStart
+        }
+        let plansInRange = plans.filter { plan in
+            let day = calendar.startOfDay(for: plan.date)
+            return day >= rangeStart && day <= rangeEnd && day >= todayStart
+        }
+
+        var actualBySport: [Sport: [StatItem]] = [:]
+        for (sport, item) in activityItems(activitiesInRange, athlete: athlete) {
+            actualBySport[sport, default: []].append(item)
+        }
+        var plannedBySport: [Sport: [StatItem]] = [:]
+        for (sport, item) in plannedItems(plansInRange, workoutsByID: workoutsByID, athlete: athlete) {
+            plannedBySport[sport, default: []].append(item)
+        }
+
+        return PeriodStatsSplit(actual: bySport(actualBySport), planned: bySport(plannedBySport))
+    }
+
     // MARK: - Support
 
     /// One contributing activity or planned activity's totals, before grouping by sport.
@@ -263,6 +298,59 @@ public struct StatisticsCalculator: Sendable {
         let time: TimeInterval
         let load: Double
         let timeInZone: TimeInZone
+    }
+
+    /// `activities`, each turned into its own per-sport `StatItem` via `summary(for:athlete:)` —
+    /// shared by `periodStats` and `periodStatsSplit`.
+    private func activityItems(_ activities: [Activity], athlete: AthleteProfile) -> [(Sport, StatItem)] {
+        activities.map { activity in
+            let summary = summary(for: activity, athlete: athlete)
+            let item = StatItem(
+                distanceMeters: summary.distanceMeters,
+                time: summary.movingTime,
+                load: summary.load.value,
+                timeInZone: summary.timeInZone
+            )
+            return (activity.sport, item)
+        }
+    }
+
+    /// `plans`, each turned into its own per-sport `StatItem` via `project(workout:athlete:)` /
+    /// `estimator` — shared by `periodStats` and `periodStatsSplit`. A plan whose workout is no
+    /// longer in `workoutsByID` (deleted from the library) is silently skipped, same as
+    /// `periodStats` always has.
+    private func plannedItems(
+        _ plans: [PlannedActivity], workoutsByID: [UUID: StructuredWorkout], athlete: AthleteProfile
+    ) -> [(Sport, StatItem)] {
+        plans.compactMap { plan in
+            guard let workout = workoutsByID[plan.workoutID] else { return nil }
+            let projection = project(workout: workout, athlete: athlete)
+            let load = plan.expectedLoadOverride ?? estimator.estimatedLoad(for: workout, athlete: athlete).value
+            let item = StatItem(
+                distanceMeters: projection.distanceMeters,
+                time: projection.duration,
+                load: load,
+                timeInZone: projection.timeInZone
+            )
+            return (workout.sport, item)
+        }
+    }
+
+    /// Sums each sport's own `StatItem`s into its `SportPeriodStats` — shared by `periodStats` and
+    /// `periodStatsSplit`.
+    private func bySport(_ itemsBySport: [Sport: [StatItem]]) -> [Sport: SportPeriodStats] {
+        var result: [Sport: SportPeriodStats] = [:]
+        for (sport, items) in itemsBySport {
+            result[sport] = SportPeriodStats(
+                sport: sport,
+                distanceMeters: items.reduce(0) { $0 + ($1.distanceMeters ?? 0) },
+                time: items.reduce(0) { $0 + $1.time },
+                load: items.reduce(0) { $0 + $1.load },
+                timeInZone: items.reduce(TimeInZone()) { $0 + $1.timeInZone },
+                activityCount: items.count
+            )
+        }
+        return result
     }
 
     /// An unweighted mean of every sample's bpm. This skews toward whichever effort level happens

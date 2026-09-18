@@ -175,14 +175,20 @@ public final class TrainingModel {
         await recompute(asOf: today)
     }
 
-    /// Upserts `workout` into ``WorkoutLibraryStore`` and reloads the workout library, e.g. after
-    /// instantiating a ``WorkoutTemplate`` for a planned workout. Doesn't recompute ``metrics``: a
-    /// library workout unreferenced by any ``PlannedActivity`` can't affect them, and a caller that
-    /// immediately follows this with `add(_ plan:)` (the common case, since a workout is normally
-    /// added together with the plan that schedules it) gets a recompute from that call anyway.
-    public func add(_ workout: StructuredWorkout) async throws {
+    /// Upserts `workout` into ``WorkoutLibraryStore``, reloads the workout library, and recomputes
+    /// — e.g. after instantiating a ``WorkoutTemplate`` for a planned workout, or correcting an
+    /// existing library workout already referenced by one or more ``PlannedActivity`` entries.
+    ///
+    /// Always recomputes, even though a brand-new, not-yet-scheduled workout can't itself affect
+    /// `metrics`: `upsert` replaces an existing workout matched by id just as readily as it inserts
+    /// a new one, and a correction to a workout's blocks changes the TRIMP estimate
+    /// `DailyLoadSeries` derives for every day already scheduling it — skipping the recompute for
+    /// that case would leave `metrics` silently stale until some unrelated call happened to trigger
+    /// one.
+    public func add(_ workout: StructuredWorkout, asOf today: Date = .now) async throws {
         try await stores.workoutStore.upsert([workout])
         workouts = try await stores.workoutStore.workouts()
+        await recompute(asOf: today)
     }
 
     /// Upserts `newCycles` into ``CycleStore``, reloads cycles from the store, and recomputes.

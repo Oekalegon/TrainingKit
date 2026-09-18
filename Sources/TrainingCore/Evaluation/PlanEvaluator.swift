@@ -78,18 +78,14 @@ public struct PlanEvaluator: Sendable {
     /// ATL[d] / CTL[d] per day; exceeding the max is `.risk`, undershooting the min is `.warning`
     /// ("below this = detraining, not risk" per the guardrail's own documentation). Warming-up days
     /// are skipped — ATL (τ=7) ramps faster than CTL (τ=42) from a cold start, inflating the ratio
-    /// independent of the actual training load.
+    /// independent of the actual training load. Zero-CTL days are skipped by `bandFindings`
+    /// returning `nil` for them rather than dividing by zero.
     private func atlToCTLRatioFindings(metrics: [FitnessMetrics], guardrails: PlanGuardrails) -> [PlanFinding] {
-        var findings: [PlanFinding] = []
-        for entry in metrics where entry.ctl > 0 && !entry.isWarmingUp {
-            let ratio = entry.atl / entry.ctl
-            if ratio > guardrails.maxATLtoCTLRatio {
-                findings.append(PlanFinding(day: entry.day, rule: .atlToCTLRatio, severity: .risk, value: ratio, threshold: guardrails.maxATLtoCTLRatio))
-            } else if ratio < guardrails.minATLtoCTLRatio {
-                findings.append(PlanFinding(day: entry.day, rule: .atlToCTLRatio, severity: .warning, value: ratio, threshold: guardrails.minATLtoCTLRatio))
-            }
-        }
-        return findings
+        bandFindings(
+            metrics: metrics, rule: .atlToCTLRatio, value: { $0.ctl > 0 ? $0.atl / $0.ctl : nil },
+            lowerBound: guardrails.minATLtoCTLRatio, lowerSeverity: .warning,
+            upperBound: guardrails.maxATLtoCTLRatio, upperSeverity: .risk
+        )
     }
 
     /// TSB per day, flagged when it drops below `minAcceptableTSB` (injury-risk territory) or
@@ -99,12 +95,42 @@ public struct PlanEvaluator: Sendable {
     /// ``raceDayTSBFindings(metricsByDay:races:guardrails:)``. Warming-up days are skipped for the
     /// same cold-start reason as the ratio check.
     private func tsbBandFindings(metrics: [FitnessMetrics], guardrails: PlanGuardrails) -> [PlanFinding] {
+        bandFindings(
+            metrics: metrics, rule: .tsbBand, value: { $0.tsb },
+            lowerBound: guardrails.minAcceptableTSB, lowerSeverity: .risk,
+            upperBound: guardrails.maxAcceptableTSB, upperSeverity: .warning
+        )
+    }
+
+    /// Shared shape behind ``atlToCTLRatioFindings(metrics:guardrails:)`` and
+    /// ``tsbBandFindings(metrics:guardrails:)``: a per-day scalar checked against a two-sided band,
+    /// skipping warming-up days. The two callers otherwise differed only in which scalar they read,
+    /// which side of the band is `.risk` vs `.warning`, and (for the ratio) an extra zero-CTL guard
+    /// before dividing — folded here into `value` returning `nil` to skip a day outright.
+    ///
+    /// - Parameters:
+    ///   - value: The day's value to check, or `nil` to skip that day entirely (e.g. a zero-CTL day
+    ///     for the ATL/CTL ratio).
+    ///   - lowerBound: Below this fires `lowerSeverity`.
+    ///   - upperBound: Above this fires `upperSeverity`. Checked first, so `lowerBound > upperBound`
+    ///     would silently only ever fire the upper side — every caller's bounds are a real band
+    ///     (`lowerBound < upperBound`), so this never arises in practice.
+    private func bandFindings(
+        metrics: [FitnessMetrics],
+        rule: PlanRule,
+        value: (FitnessMetrics) -> Double?,
+        lowerBound: Double,
+        lowerSeverity: Severity,
+        upperBound: Double,
+        upperSeverity: Severity
+    ) -> [PlanFinding] {
         var findings: [PlanFinding] = []
         for entry in metrics where !entry.isWarmingUp {
-            if entry.tsb < guardrails.minAcceptableTSB {
-                findings.append(PlanFinding(day: entry.day, rule: .tsbBand, severity: .risk, value: entry.tsb, threshold: guardrails.minAcceptableTSB))
-            } else if entry.tsb > guardrails.maxAcceptableTSB {
-                findings.append(PlanFinding(day: entry.day, rule: .tsbBand, severity: .warning, value: entry.tsb, threshold: guardrails.maxAcceptableTSB))
+            guard let value = value(entry) else { continue }
+            if value > upperBound {
+                findings.append(PlanFinding(day: entry.day, rule: rule, severity: upperSeverity, value: value, threshold: upperBound))
+            } else if value < lowerBound {
+                findings.append(PlanFinding(day: entry.day, rule: rule, severity: lowerSeverity, value: value, threshold: lowerBound))
             }
         }
         return findings

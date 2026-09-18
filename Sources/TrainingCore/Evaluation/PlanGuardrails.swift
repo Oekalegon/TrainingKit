@@ -25,6 +25,15 @@ public struct PlanGuardrails: Sendable, Codable, Hashable {
     public var minTSBOnRaceDay: Double
     /// The highest acceptable TSB on race day — above this, fitness was lost in the taper.
     public var maxTSBOnRaceDay: Double
+    /// The lowest acceptable TSB on *any* day — below this is the injury-risk band, independent of
+    /// whether the plan has any known phase to judge ``maxATLtoCTLRatio``/``minATLtoCTLRatio``
+    /// against. Deliberately looser than ``minTSBOnRaceDay``: a normal build phase routinely dips
+    /// well below race-day freshness without that being a problem.
+    public var minAcceptableTSB: Double
+    /// The highest acceptable TSB on *any* day — above this for a sustained period reads as
+    /// detraining (fitness being lost to insufficient load), the same freshness-band check as
+    /// ``maxTSBOnRaceDay`` but not gated on it being a race day.
+    public var maxAcceptableTSB: Double
     /// The minimum CTL gain expected across a base/build mesocycle — guards against a "safe" plan
     /// that's actually flat.
     public var minCTLGainPerMeso: Double
@@ -55,6 +64,8 @@ public struct PlanGuardrails: Sendable, Codable, Hashable {
     ///     defaults to 84.
     ///   - minTSBOnRaceDay: The lowest acceptable TSB on race day; defaults to 5.
     ///   - maxTSBOnRaceDay: The highest acceptable TSB on race day; defaults to 25.
+    ///   - minAcceptableTSB: The lowest acceptable TSB on any day; defaults to -30.
+    ///   - maxAcceptableTSB: The highest acceptable TSB on any day; defaults to 25.
     ///   - minCTLGainPerMeso: The minimum CTL gain expected across a base/build meso; defaults to 2.
     ///   - maxMicrosWithoutRecovery: How many consecutive non-recovery micros are acceptable;
     ///     defaults to 3.
@@ -73,6 +84,8 @@ public struct PlanGuardrails: Sendable, Codable, Hashable {
         strainTrailingWindowDays: Int = 84,
         minTSBOnRaceDay: Double = 5,
         maxTSBOnRaceDay: Double = 25,
+        minAcceptableTSB: Double = -30,
+        maxAcceptableTSB: Double = 25,
         minCTLGainPerMeso: Double = 2,
         maxMicrosWithoutRecovery: Int = 3,
         recoveryLoadFraction: Double = 0.65,
@@ -87,6 +100,8 @@ public struct PlanGuardrails: Sendable, Codable, Hashable {
         self.strainTrailingWindowDays = strainTrailingWindowDays
         self.minTSBOnRaceDay = minTSBOnRaceDay
         self.maxTSBOnRaceDay = maxTSBOnRaceDay
+        self.minAcceptableTSB = minAcceptableTSB
+        self.maxAcceptableTSB = maxAcceptableTSB
         self.minCTLGainPerMeso = minCTLGainPerMeso
         self.maxMicrosWithoutRecovery = maxMicrosWithoutRecovery
         self.recoveryLoadFraction = recoveryLoadFraction

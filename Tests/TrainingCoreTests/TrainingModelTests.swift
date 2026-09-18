@@ -85,6 +85,45 @@ struct TrainingModelTests {
         #expect((planDayMetrics?.load ?? 0) > 0)
     }
 
+    @Test("add(_ workout:) persists a new workout to the library")
+    func addWorkoutPersistsNewWorkout() async throws {
+        let (store, stores) = makeStores()
+        let athlete = AthleteProfile.fixture()
+        let model = TrainingModel(stores: stores, athlete: athlete)
+        try await model.load(in: day(0)...day(10), asOf: day(0))
+        #expect(model.workouts.isEmpty)
+
+        let workout = steadyWorkout()
+        try await model.add(workout, asOf: day(0))
+
+        #expect(model.workouts.map(\.id) == [workout.id])
+        #expect(try await store.workout(id: workout.id) == workout)
+    }
+
+    @Test("add(_ workout:) recomputes metrics for days already scheduling it, not just future additions")
+    func addWorkoutRecomputesForAlreadyScheduledDays() async throws {
+        let (store, stores) = makeStores()
+        let athlete = AthleteProfile.fixture()
+        var workout = steadyWorkout()
+        try await store.upsert([workout])
+        let plan = PlannedActivity(workoutID: workout.id, date: day(5))
+        try await store.upsert([plan])
+
+        let model = TrainingModel(stores: stores, athlete: athlete)
+        try await model.load(in: day(0)...day(10), asOf: day(0))
+        let originalLoad = model.metrics.first { Calendar(identifier: .gregorian).isDate($0.day, inSameDayAs: day(5)) }?.load ?? 0
+        #expect(originalLoad > 0)
+
+        // Correct the already-scheduled workout's own duration -- upsert replaces by id, the same
+        // path a brand-new workout takes, so this must recompute rather than leave day(5)'s load
+        // reflecting the pre-edit workout.
+        workout.blocks = [WorkoutBlock(steps: [WorkoutStep(kind: .work, goal: .time(3600), target: .heartRateZone(2))])]
+        try await model.add(workout, asOf: day(0))
+
+        let updatedLoad = model.metrics.first { Calendar(identifier: .gregorian).isDate($0.day, inSameDayAs: day(5)) }?.load ?? 0
+        #expect(updatedLoad > originalLoad)
+    }
+
     @Test("add(_ cycles:) persists to the store and updates local state")
     func addCyclesPersistsAndUpdates() async throws {
         let (store, stores) = makeStores()

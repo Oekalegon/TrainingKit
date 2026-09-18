@@ -83,7 +83,10 @@ public final class TrainingModel {
         }
     }
 
-    let stores: StoreSet
+    /// Public so a caller that needs the underlying stores directly (e.g. `PlanSandbox`, to
+    /// snapshot a what-if simulation) can get them without this model growing a bespoke pass-through
+    /// for every store-level operation it doesn't otherwise need itself.
+    public let stores: StoreSet
     private let estimator: any PlannedLoadEstimator
     private let calculators: [any LoadCalculator]
     var loadedRange: ClosedRange<Date>?
@@ -169,6 +172,22 @@ public final class TrainingModel {
         // `plan.workoutID`, and the workout `plan` references might not be in the cached array yet.
         workouts = try await stores.workoutStore.workouts()
         loadedRange = range
+        await recompute(asOf: today)
+    }
+
+    /// Upserts `workout` into ``WorkoutLibraryStore``, reloads the workout library, and recomputes
+    /// — e.g. after instantiating a ``WorkoutTemplate`` for a planned workout, or correcting an
+    /// existing library workout already referenced by one or more ``PlannedActivity`` entries.
+    ///
+    /// Always recomputes, even though a brand-new, not-yet-scheduled workout can't itself affect
+    /// `metrics`: `upsert` replaces an existing workout matched by id just as readily as it inserts
+    /// a new one, and a correction to a workout's blocks changes the TRIMP estimate
+    /// `DailyLoadSeries` derives for every day already scheduling it — skipping the recompute for
+    /// that case would leave `metrics` silently stale until some unrelated call happened to trigger
+    /// one.
+    public func add(_ workout: StructuredWorkout, asOf today: Date = .now) async throws {
+        try await stores.workoutStore.upsert([workout])
+        workouts = try await stores.workoutStore.workouts()
         await recompute(asOf: today)
     }
 

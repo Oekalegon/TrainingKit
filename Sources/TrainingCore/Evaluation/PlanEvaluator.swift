@@ -78,11 +78,14 @@ public struct PlanEvaluator: Sendable {
     /// ATL[d] / CTL[d] per day; exceeding the max is `.risk`, undershooting the min is `.warning`
     /// ("below this = detraining, not risk" per the guardrail's own documentation). Warming-up days
     /// are skipped — ATL (τ=7) ramps faster than CTL (τ=42) from a cold start, inflating the ratio
-    /// independent of the actual training load. Zero-CTL days are skipped by `bandFindings`
-    /// returning `nil` for them rather than dividing by zero.
+    /// independent of the actual training load. Days below `minCTLForRatioCheck` are skipped by
+    /// `bandFindings` returning `nil` for them (which also covers a zero-CTL day, avoiding the
+    /// divide-by-zero, without needing a separate check): the ratio is hypersensitive at a low
+    /// absolute CTL — see `minCTLForRatioCheck`'s own doc comment.
     private func atlToCTLRatioFindings(metrics: [FitnessMetrics], guardrails: PlanGuardrails) -> [PlanFinding] {
         bandFindings(
-            metrics: metrics, rule: .atlToCTLRatio, value: { $0.ctl > 0 ? $0.atl / $0.ctl : nil },
+            metrics: metrics, rule: .atlToCTLRatio,
+            value: { $0.ctl >= guardrails.minCTLForRatioCheck ? $0.atl / $0.ctl : nil },
             lowerBound: guardrails.minATLtoCTLRatio, lowerSeverity: .warning,
             upperBound: guardrails.maxATLtoCTLRatio, upperSeverity: .risk
         )

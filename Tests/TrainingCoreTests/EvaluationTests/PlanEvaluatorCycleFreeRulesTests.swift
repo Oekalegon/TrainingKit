@@ -112,6 +112,24 @@ struct PlanEvaluatorCycleFreeRulesTests {
         #expect(!evaluation.findings.contains { $0.rule == .atlToCTLRatio })
     }
 
+    @Test("a below-minCTLForRatioCheck day is skipped even with a genuinely mild TSB, but fires once CTL clears the threshold")
+    func atlToCTLRatioSkipsBelowMinCTL() {
+        // Real-world numbers from an athlete returning from surgery: CTL=9, ATL=14 gives ratio
+        // 1.56 (over the 1.4 risk default) from a low baseline alone -- TSB=-5 is unremarkable.
+        let metrics = [
+            metric(0, ctl: 9, atl: 14, tsb: -5),
+            metric(1, ctl: 19.99, atl: 40, tsb: -5), // just under the default 20 minCTLForRatioCheck
+            metric(2, ctl: 20, atl: 40, tsb: -5), // ratio 2.0 -- at the threshold, check now applies
+        ]
+
+        let evaluation = evaluator.evaluate(metrics, races: [])
+
+        let findings = evaluation.findings.filter { $0.rule == .atlToCTLRatio }
+        #expect(!findings.contains { $0.day == day(0) })
+        #expect(!findings.contains { $0.day == day(1) })
+        #expect(findings.first { $0.day == day(2) }?.severity == .risk)
+    }
+
     // MARK: - TSB band
 
     @Test("TSB below the min fires risk; above the max fires warning, not risk")

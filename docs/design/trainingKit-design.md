@@ -331,12 +331,14 @@ struct WorkoutKitBridge {
     func structuredWorkout(from plan: WorkoutPlan) throws -> StructuredWorkout
     func sync(_ workout: StructuredWorkout) async throws -> UUID       // returns WorkoutKit plan id
     func schedule(_ plan: PlannedActivity, workout: StructuredWorkout) async throws
+    func unschedule(_ plan: PlannedActivity, workout: StructuredWorkout) async   // removes the plan's entry for its date
 }
 ```
 
 - Mapping is mechanical: `WorkoutBlock` ↔ `IntervalBlock`, `WorkoutStep` ↔ `IntervalStep`, `StepGoal` ↔ `WorkoutGoal`, `IntensityTarget` ↔ `WorkoutAlert`.
 - Sync is one-directional in MVP 1: library → WorkoutKit. `StructuredWorkout.workoutKitID` records the link so re-syncs update rather than duplicate.
 - Scheduling a `PlannedActivity` uses `WorkoutPlan`'s schedule API; WorkoutKit only shows ±7 days on the Watch, so scheduling is done lazily for plans within that window rather than for the whole season.
+- Moving or deleting a plan removes its old-date entry with `unschedule`, which finds the entry among `WorkoutScheduler`'s own scheduled workouts (by `workoutKitID` and day) rather than rebuilding a `WorkoutPlan` — so a workout edited since scheduling still matches. A workout with no `workoutKitID` was never synced, so it's a no-op.
 - Completed scheduled workouts can be queried back from WorkoutKit (date + completed flag, no health data). That's a cheap first signal for reconciliation before the HealthKit import lands.
 
 ### 5.3 Reconciliation (`TrainingCore`)

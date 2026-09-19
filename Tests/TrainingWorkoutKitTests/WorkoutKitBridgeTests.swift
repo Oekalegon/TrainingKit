@@ -10,6 +10,28 @@ import TrainingCore
 struct WorkoutKitBridgeTests {
     private let bridge = WorkoutKitBridge()
 
+    // MARK: - Unscheduling
+
+    @Test("unschedule is a no-op for a workout that was never synced (no workoutKitID), without touching WorkoutKit")
+    func unscheduleNoOpsWithoutWorkoutKitID() async {
+        let workout = StructuredWorkout(
+            name: "Easy run", sport: .running,
+            blocks: [WorkoutBlock(steps: [WorkoutStep(kind: .work, goal: .time(1800))])]
+        )
+        #expect(workout.workoutKitID == nil)
+
+        // Returns before ever reaching `WorkoutScheduler`, which crashes outside an app bundle.
+        await bridge.unschedule(PlannedActivity(workoutID: workout.id, date: Date()), workout: workout)
+    }
+
+    @Test("isSameDay compares year/month/day only, ignoring time-of-day fields")
+    func isSameDayIgnoresTimeOfDay() {
+        let scheduled = DateComponents(year: 2026, month: 9, day: 20, hour: 7, minute: 30)
+        #expect(WorkoutKitBridge.isSameDay(scheduled, DateComponents(year: 2026, month: 9, day: 20)))
+        #expect(!WorkoutKitBridge.isSameDay(scheduled, DateComponents(year: 2026, month: 9, day: 21)))
+        #expect(!WorkoutKitBridge.isSameDay(scheduled, DateComponents(year: 2025, month: 9, day: 20)))
+    }
+
     // MARK: - Support validation
 
     @Test("customWorkout(from:) throws unsupportedActivity when the sport's activity type isn't supported at all")

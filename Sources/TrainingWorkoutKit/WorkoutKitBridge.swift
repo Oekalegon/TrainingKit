@@ -170,6 +170,41 @@ public struct WorkoutKitBridge: Sendable {
         await WorkoutScheduler.shared.schedule(workoutPlan, at: dateComponents)
     }
 
+    /// Removes `workout`'s scheduled entry for `plan.date` from `WorkoutScheduler` — the inverse of
+    /// ``schedule(_:workout:calendar:)``, for when a plan is moved to another day or deleted, so
+    /// its old date doesn't keep showing on the Watch.
+    ///
+    /// Finds the entry to remove among `WorkoutScheduler`'s own scheduled workouts (matching plan
+    /// id and calendar day) and removes *that* plan, rather than rebuilding a `WorkoutPlan` from
+    /// `workout`'s current blocks: `remove(_:at:)` takes a plan, and a workout edited since it was
+    /// scheduled would rebuild to a different one than WorkoutKit holds, and could fail to map at
+    /// all. Doesn't throw for the same reason — nothing here maps the workout.
+    ///
+    /// A no-op when `workout.workoutKitID` is `nil`: ``schedule(_:workout:calendar:)`` mints a
+    /// throwaway id in that case (one nothing else can recover), so there's nothing this could
+    /// match — such a workout was never synced, and was never meaningfully schedulable to begin with.
+    ///
+    /// - Parameters:
+    ///   - plan: Supplies the day to remove the entry from — the day it was scheduled for, not the
+    ///     new one, when moving it.
+    ///   - workout: The library workout `plan` scheduled; only its ``StructuredWorkout/workoutKitID``
+    ///     is used.
+    ///   - calendar: Must match the one passed to ``schedule(_:workout:calendar:)``.
+    public func unschedule(_ plan: PlannedActivity, workout: StructuredWorkout, calendar: Calendar = .current) async {
+        guard let planID = workout.workoutKitID else { return }
+        let day = calendar.dateComponents([.year, .month, .day], from: plan.date)
+        for entry in await WorkoutScheduler.shared.scheduledWorkouts
+        where entry.plan.id == planID && Self.isSameDay(entry.date, day) {
+            await WorkoutScheduler.shared.remove(entry.plan, at: entry.date)
+        }
+    }
+
+    /// Whether two `DateComponents` name the same calendar day — compares year/month/day only, since
+    /// a scheduled entry's components may also carry time-of-day fields the `schedule` call never set.
+    static func isSameDay(_ lhs: DateComponents, _ rhs: DateComponents) -> Bool {
+        lhs.year == rhs.year && lhs.month == rhs.month && lhs.day == rhs.day
+    }
+
     /// Maps `step`'s goal and alert onto a WorkoutKit step, checking both are supported for
     /// `activity` before handing back a step WorkoutKit is guaranteed to accept.
     private func workoutKitStep(for step: WorkoutStep, activity: HKWorkoutActivityType) throws(WorkoutKitMappingError) -> WorkoutKit.WorkoutStep {

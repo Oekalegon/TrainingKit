@@ -170,6 +170,28 @@ public struct WorkoutKitBridge: Sendable {
         await WorkoutScheduler.shared.schedule(workoutPlan, at: dateComponents)
     }
 
+    /// Removes `workout`'s scheduled entry for `plan.date` from `WorkoutScheduler` — the inverse of
+    /// ``schedule(_:workout:calendar:)``, for when a plan is moved to another day or deleted, so
+    /// its old date doesn't keep showing on the Watch.
+    ///
+    /// A no-op when `workout.workoutKitID` is `nil`: ``schedule(_:workout:calendar:)`` mints a
+    /// throwaway id in that case (one nothing else can recover), so there's nothing this could
+    /// match — such a workout was never synced, and was never meaningfully schedulable to begin with.
+    ///
+    /// - Parameters:
+    ///   - plan: Supplies the date to remove the entry from — the date it was scheduled for, not
+    ///     the new one, when moving it.
+    ///   - workout: The library workout `plan` scheduled.
+    ///   - calendar: Must match the one passed to ``schedule(_:workout:calendar:)``.
+    /// - Throws: Whatever ``customWorkout(from:)`` throws for `workout`.
+    public func unschedule(_ plan: PlannedActivity, workout: StructuredWorkout, calendar: Calendar = .current) async throws(WorkoutKitMappingError) {
+        guard let planID = workout.workoutKitID else { return }
+        let customWorkout = try customWorkout(from: workout)
+        let workoutPlan = WorkoutPlan(.custom(customWorkout), id: planID)
+        let dateComponents = calendar.dateComponents([.year, .month, .day], from: plan.date)
+        await WorkoutScheduler.shared.remove(workoutPlan, at: dateComponents)
+    }
+
     /// Maps `step`'s goal and alert onto a WorkoutKit step, checking both are supported for
     /// `activity` before handing back a step WorkoutKit is guaranteed to accept.
     private func workoutKitStep(for step: WorkoutStep, activity: HKWorkoutActivityType) throws(WorkoutKitMappingError) -> WorkoutKit.WorkoutStep {

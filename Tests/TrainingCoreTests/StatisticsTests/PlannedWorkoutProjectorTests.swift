@@ -27,6 +27,19 @@ struct PlannedWorkoutProjectorTests {
         #expect(projection.timeInZone == TimeInZone())
     }
 
+    @Test("StatisticsCalculator.projection(for:athlete:) exposes the projector's distance and duration publicly")
+    func calculatorExposesProjection() {
+        let athlete = AthleteProfile.fixture()
+        let repeatedWorkout = workout([
+            WorkoutBlock(steps: [WorkoutStep(kind: .work, goal: .time(600), target: .heartRateZone(2))], repetitions: 3)
+        ])
+
+        let projection = StatisticsCalculator().projection(for: repeatedWorkout, athlete: athlete)
+
+        #expect(projection.duration == 1800)
+        #expect(abs((projection.distanceMeters ?? 0) - 6250) < 0.01)
+    }
+
     @Test("a block's repetitions multiply its steps' duration and distance")
     func repetitionsMultiplyDurationAndDistance() {
         let athlete = AthleteProfile.fixture()

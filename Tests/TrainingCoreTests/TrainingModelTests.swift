@@ -85,6 +85,60 @@ struct TrainingModelTests {
         #expect((planDayMetrics?.load ?? 0) > 0)
     }
 
+    @Test("deleteWorkoutIfUnreferenced removes a workout no plan uses, and keeps one a plan still references")
+    func deleteWorkoutIfUnreferenced() async throws {
+        let (store, stores) = makeStores()
+        let used = steadyWorkout()
+        let unused = steadyWorkout()
+        try await store.upsert([used, unused])
+        let model = TrainingModel(stores: stores, athlete: AthleteProfile.fixture())
+        // Loaded window deliberately excludes the plan's day, to prove the check isn't limited to it.
+        try await model.load(in: day(0)...day(2), asOf: day(0))
+        try await store.upsert([PlannedActivity(workoutID: used.id, date: day(50))])
+
+        #expect(try await model.deleteWorkoutIfUnreferenced(id: unused.id, asOf: day(0)))
+        #expect(!(try await model.deleteWorkoutIfUnreferenced(id: used.id, asOf: day(0))))
+
+        #expect(model.workouts.map(\.id) == [used.id])
+        #expect(try await store.workout(id: unused.id) == nil)
+    }
+
+    @Test("deletePlan(id:) removes the plan from the store and state, keeps its workout, and drops its projected load")
+    func deletePlanRemovesPlanKeepsWorkout() async throws {
+        let (store, stores) = makeStores()
+        let workout = steadyWorkout()
+        try await store.upsert([workout])
+        let model = TrainingModel(stores: stores, athlete: AthleteProfile.fixture())
+        try await model.load(in: day(0)...day(10), asOf: day(0))
+        let plan = PlannedActivity(workoutID: workout.id, date: day(5))
+        let other = PlannedActivity(workoutID: workout.id, date: day(6))
+        try await model.add(plan, asOf: day(0))
+        try await model.add(other, asOf: day(0))
+
+        try await model.deletePlan(id: plan.id, asOf: day(0))
+
+        #expect(model.plans.map(\.id) == [other.id])
+        #expect(try await store.plan(id: plan.id) == nil)
+        #expect(model.workouts.map(\.id) == [workout.id])
+        let deletedDayMetrics = model.metrics.first { Calendar(identifier: .gregorian).isDate($0.day, inSameDayAs: day(5)) }
+        #expect((deletedDayMetrics?.load ?? 0) == 0)
+    }
+
+    @Test("deletePlan(id:) for an unknown id changes nothing")
+    func deleteUnknownPlanIsNoOp() async throws {
+        let (store, stores) = makeStores()
+        let workout = steadyWorkout()
+        try await store.upsert([workout])
+        let model = TrainingModel(stores: stores, athlete: AthleteProfile.fixture())
+        try await model.load(in: day(0)...day(10), asOf: day(0))
+        let plan = PlannedActivity(workoutID: workout.id, date: day(5))
+        try await model.add(plan, asOf: day(0))
+
+        try await model.deletePlan(id: UUID(), asOf: day(0))
+
+        #expect(model.plans.map(\.id) == [plan.id])
+    }
+
     @Test("add(_ workout:) persists a new workout to the library")
     func addWorkoutPersistsNewWorkout() async throws {
         let (store, stores) = makeStores()

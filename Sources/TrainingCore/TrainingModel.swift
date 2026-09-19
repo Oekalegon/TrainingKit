@@ -175,6 +175,49 @@ public final class TrainingModel {
         await recompute(asOf: today)
     }
 
+    /// Removes the library workout with id `id` if no plan in the store references it, reloads
+    /// ``workouts`` and recomputes (MVP2-41) — the cleanup after a plan is repointed at a freshly
+    /// instantiated copy of its workout, so the old one doesn't linger unreferenced.
+    ///
+    /// Checks the *whole* plan store (`Date.distantPast...Date.distantFuture`), not ``plans``, which
+    /// only covers ``loadedRange``: a workout still scheduled by a plan outside the loaded window
+    /// must not be deleted out from under it.
+    ///
+    /// - Parameters:
+    ///   - id: The workout to remove.
+    ///   - today: Passed through to ``recompute(asOf:)``.
+    /// - Returns: `true` if the workout was removed, `false` if some plan still references it.
+    @discardableResult
+    public func deleteWorkoutIfUnreferenced(id: UUID, asOf today: Date = .now) async throws -> Bool {
+        let allPlans = try await stores.planStore.plans(in: Date.distantPast...Date.distantFuture)
+        guard !allPlans.contains(where: { $0.workoutID == id }) else { return false }
+        try await stores.workoutStore.deleteWorkout(id: id)
+        workouts = try await stores.workoutStore.workouts()
+        await recompute(asOf: today)
+        return true
+    }
+
+    /// Removes the planned activity with id `id`, reloads ``plans`` and recomputes (MVP2-38).
+    ///
+    /// Only the plan goes: the ``StructuredWorkout`` it scheduled stays in the library, since other
+    /// plans may reference it (and a plan-less workout is a consistent state). A no-op, other than the
+    /// reload and recompute, if `id` doesn't exist in the store.
+    ///
+    /// Nothing is removed from WorkoutKit from here — that's the caller's job
+    /// (`TrainingWorkoutKit`'s `WorkoutKitBridge.unschedule`), since Core has no WorkoutKit dependency.
+    /// Lives in this file rather than an extension because ``plans``' setter is `private`.
+    ///
+    /// - Parameters:
+    ///   - id: The plan to remove.
+    ///   - today: Passed through to ``recompute(asOf:)``.
+    public func deletePlan(id: UUID, asOf today: Date = .now) async throws {
+        try await stores.planStore.deletePlan(id: id)
+        if let loadedRange {
+            plans = try await stores.planStore.plans(in: loadedRange)
+        }
+        await recompute(asOf: today)
+    }
+
     /// Upserts `workout` into ``WorkoutLibraryStore``, reloads the workout library, and recomputes
     /// — e.g. after instantiating a ``WorkoutTemplate`` for a planned workout, or correcting an
     /// existing library workout already referenced by one or more ``PlannedActivity`` entries.

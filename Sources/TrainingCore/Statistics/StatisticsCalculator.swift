@@ -386,6 +386,24 @@ public struct StatisticsCalculator: Sendable {
         TimeInZoneBuilder(gapThresholdSeconds: gapThresholdSeconds).timeInZone(for: activity, athlete: athlete)
     }
 
+    /// The distance and duration a planned `workout` is expected to produce — the same projection
+    /// the weekly/period statistics use for a day that isn't done yet, so a per-workout figure shown
+    /// in an app always agrees with the totals it rolls into.
+    ///
+    /// `.time`/`.open` steps are converted to distance through `athlete`'s pace model at the step's
+    /// target zone (see ``PlannedWorkoutProjector``), so the distance of a duration-based workout is
+    /// an estimate, not something the workout itself defines.
+    ///
+    /// - Parameters:
+    ///   - workout: The planned workout.
+    ///   - athlete: Supplies the heart-rate zone settings and pace model the projection uses.
+    /// - Returns: The projected distance (`nil` when `athlete` has no current heart-rate zone
+    ///   settings to derive step intensities from) and duration.
+    public func projection(for workout: StructuredWorkout, athlete: AthleteProfile) -> WorkoutProjection {
+        let projected = project(workout: workout, athlete: athlete)
+        return WorkoutProjection(distanceMeters: projected.distanceMeters, duration: projected.duration)
+    }
+
     /// The projected distance/duration/time-in-zone for a planned workout, via
     /// ``PlannedWorkoutProjector``.
     private func project(workout: StructuredWorkout, athlete: AthleteProfile) -> PlannedWorkoutProjector.Projection {

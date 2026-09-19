@@ -157,4 +157,46 @@ struct WorkoutTemplateTests {
 
         #expect(decoded == template)
     }
+
+    @Test("instantiate stamps the template's id and every declared parameter's resolved value (supplied or default)")
+    func stampsTemplateProvenance() throws {
+        let template = WorkoutTemplate(
+            name: "Intervals",
+            sport: .running,
+            parameters: [
+                WorkoutTemplateParameter(key: "duration", name: "Duration", unit: .minutes, defaultValue: 8 * 60),
+                WorkoutTemplateParameter(key: "reps", name: "Reps", unit: .count, defaultValue: 4),
+            ],
+            blocks: [
+                TemplateBlock(steps: [TemplateStep(kind: .work, goal: .time(.parameter("duration")))]),
+            ]
+        )
+
+        let workout = try template.instantiate(values: ["duration": 10 * 60.0])
+
+        #expect(workout.templateID == template.id)
+        // `reps` wasn't supplied, so its default is recorded rather than left out.
+        #expect(workout.parameterValues == ["duration": 600, "reps": 4])
+    }
+
+    @Test("a StructuredWorkout encoded before templateID/parameterValues existed still decodes, with both nil")
+    func legacyWorkoutDecodesWithoutProvenance() throws {
+        let original = StructuredWorkout(
+            name: "Old run", sport: .running,
+            blocks: [WorkoutBlock(steps: [WorkoutStep(kind: .work, goal: .time(600))])],
+            templateID: UUID(), parameterValues: ["duration": 600]
+        )
+        // Strip the two new keys from a real encoding to reproduce a payload written before they existed.
+        var json = try #require(JSONSerialization.jsonObject(with: try JSONEncoder().encode(original)) as? [String: Any])
+        json.removeValue(forKey: "templateID")
+        json.removeValue(forKey: "parameterValues")
+        let legacy = try JSONSerialization.data(withJSONObject: json)
+
+        let workout = try JSONDecoder().decode(StructuredWorkout.self, from: legacy)
+
+        #expect(workout.name == "Old run")
+        #expect(workout.blocks == original.blocks)
+        #expect(workout.templateID == nil)
+        #expect(workout.parameterValues == nil)
+    }
 }

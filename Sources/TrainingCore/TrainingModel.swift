@@ -197,6 +197,27 @@ public final class TrainingModel {
         return true
     }
 
+    /// Removes the planned activity with id `id`, reloads ``plans`` and recomputes (MVP2-38).
+    ///
+    /// Only the plan goes: the ``StructuredWorkout`` it scheduled stays in the library, since other
+    /// plans may reference it (and a plan-less workout is a consistent state). A no-op, other than the
+    /// reload and recompute, if `id` doesn't exist in the store.
+    ///
+    /// Nothing is removed from WorkoutKit from here — that's the caller's job
+    /// (`TrainingWorkoutKit`'s `WorkoutKitBridge.unschedule`), since Core has no WorkoutKit dependency.
+    /// Lives in this file rather than an extension because ``plans``' setter is `private`.
+    ///
+    /// - Parameters:
+    ///   - id: The plan to remove.
+    ///   - today: Passed through to ``recompute(asOf:)``.
+    public func deletePlan(id: UUID, asOf today: Date = .now) async throws {
+        try await stores.planStore.deletePlan(id: id)
+        if let loadedRange {
+            plans = try await stores.planStore.plans(in: loadedRange)
+        }
+        await recompute(asOf: today)
+    }
+
     /// Upserts `workout` into ``WorkoutLibraryStore``, reloads the workout library, and recomputes
     /// — e.g. after instantiating a ``WorkoutTemplate`` for a planned workout, or correcting an
     /// existing library workout already referenced by one or more ``PlannedActivity`` entries.

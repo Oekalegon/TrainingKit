@@ -85,6 +85,24 @@ struct TrainingModelTests {
         #expect((planDayMetrics?.load ?? 0) > 0)
     }
 
+    @Test("deleteWorkoutIfUnreferenced removes a workout no plan uses, and keeps one a plan still references")
+    func deleteWorkoutIfUnreferenced() async throws {
+        let (store, stores) = makeStores()
+        let used = steadyWorkout()
+        let unused = steadyWorkout()
+        try await store.upsert([used, unused])
+        let model = TrainingModel(stores: stores, athlete: AthleteProfile.fixture())
+        // Loaded window deliberately excludes the plan's day, to prove the check isn't limited to it.
+        try await model.load(in: day(0)...day(2), asOf: day(0))
+        try await store.upsert([PlannedActivity(workoutID: used.id, date: day(50))])
+
+        #expect(try await model.deleteWorkoutIfUnreferenced(id: unused.id, asOf: day(0)))
+        #expect(!(try await model.deleteWorkoutIfUnreferenced(id: used.id, asOf: day(0))))
+
+        #expect(model.workouts.map(\.id) == [used.id])
+        #expect(try await store.workout(id: unused.id) == nil)
+    }
+
     @Test("deletePlan(id:) removes the plan from the store and state, keeps its workout, and drops its projected load")
     func deletePlanRemovesPlanKeepsWorkout() async throws {
         let (store, stores) = makeStores()

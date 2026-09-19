@@ -70,7 +70,13 @@ extension WorkoutTemplate {
             }
             resolvedBlocks.append(WorkoutBlock(steps: steps, repetitions: try block.repetitions.resolve(resolve)))
         }
-        return StructuredWorkout(name: name ?? self.name, sport: sport, blocks: resolvedBlocks)
+        // Every declared parameter's resolved value (an explicit one, else its default), so the
+        // workout can later be re-instantiated with a single parameter changed.
+        let resolvedValues = Dictionary(uniqueKeysWithValues: parameters.map { ($0.key, values[$0.key] ?? $0.defaultValue) })
+        return StructuredWorkout(
+            name: name ?? self.name, sport: sport, blocks: resolvedBlocks,
+            templateID: id, parameterValues: resolvedValues
+        )
     }
 
     /// The estimated training load `instantiate(values:)` would produce, without building the

@@ -3,13 +3,15 @@ import Foundation
 /// Classifies what to do about activities whose ``Activity/dateRange``s overlap or sit close
 /// together, rather than just flagging that they do.
 ///
-/// Four outcomes, checked in this order for each pair — see ``OverlapRecommendation``:
+/// Five outcomes, checked in this order for each pair — see ``OverlapRecommendation``:
 /// 1. Same time span (within tolerance) and sport family (``Sport/isSameFamily(as:)``), identical
 ///    data → ``OverlapRecommendation/duplicate(keep:remove:)``.
 /// 2. Same time span and sport family, differing data → ``OverlapRecommendation/merge``.
 /// 3. Overlapping with a different time span or sport family, and neither contains the other →
 ///    ``OverlapRecommendation/conflict``.
-/// 4. One contains the other, or they're merely close together (not overlapping) →
+/// 4. Not overlapping, same sport family, and separated by at most
+///    ``ActivityOverlapThresholds/joinGapTolerance`` → ``OverlapRecommendation/join``.
+/// 5. One contains the other, or they're merely close together (not overlapping) →
 ///    ``OverlapRecommendation/possibleMultisport``.
 public enum ActivityOverlapChecker {
     /// Finds every pair of `activities` worth advising on: overlapping pairs, plus pairs close
@@ -61,6 +63,7 @@ public enum ActivityOverlapChecker {
             let gap = a.dateRange.upperBound <= b.dateRange.lowerBound
                 ? b.dateRange.lowerBound.timeIntervalSince(a.dateRange.upperBound)
                 : a.dateRange.lowerBound.timeIntervalSince(b.dateRange.upperBound)
+            if a.sport.isSameFamily(as: b.sport), gap <= thresholds.joinGapTolerance { return .join }
             return gap <= thresholds.multisportGapTolerance ? .possibleMultisport : nil
         }
 

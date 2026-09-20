@@ -10,6 +10,10 @@ public struct ActivityOverlapThresholds: Sendable, Codable, Hashable {
     /// as a transition between legs of one multisport session (e.g. a triathlon's T1/T2) rather
     /// than two unrelated activities.
     public var multisportGapTolerance: TimeInterval
+    /// The largest gap between one activity's end and the next activity's start, for two
+    /// same-sport-family activities, that still reads as one session accidentally recorded in two
+    /// pieces (e.g. a watch workout stopped and immediately restarted) rather than two runs.
+    public var joinGapTolerance: TimeInterval
 
     /// Creates activity-overlap thresholds.
     ///
@@ -18,8 +22,15 @@ public struct ActivityOverlapThresholds: Sendable, Codable, Hashable {
     ///     session; defaults to 5 minutes.
     ///   - multisportGapTolerance: The largest gap between adjacent activities that still suggests
     ///     multisport legs; defaults to 30 minutes.
-    public init(sameSessionTolerance: TimeInterval = 5 * 60, multisportGapTolerance: TimeInterval = 30 * 60) {
+    ///   - joinGapTolerance: The largest gap between two same-sport activities that still suggests
+    ///     one session split in two; defaults to 2 minutes.
+    public init(
+        sameSessionTolerance: TimeInterval = 5 * 60,
+        multisportGapTolerance: TimeInterval = 30 * 60,
+        joinGapTolerance: TimeInterval = 2 * 60
+    ) {
         self.sameSessionTolerance = sameSessionTolerance
         self.multisportGapTolerance = multisportGapTolerance
+        self.joinGapTolerance = joinGapTolerance
     }
 }

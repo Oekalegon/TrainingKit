@@ -23,11 +23,11 @@ public struct ActivityOverlapThresholds: Sendable, Codable, Hashable {
     ///   - multisportGapTolerance: The largest gap between adjacent activities that still suggests
     ///     multisport legs; defaults to 30 minutes.
     ///   - joinGapTolerance: The largest gap between two same-sport activities that still suggests
-    ///     one session split in two; defaults to 2 minutes.
+    ///     one session split in two; defaults to 5 minutes.
     public init(
         sameSessionTolerance: TimeInterval = 5 * 60,
         multisportGapTolerance: TimeInterval = 30 * 60,
-        joinGapTolerance: TimeInterval = 2 * 60
+        joinGapTolerance: TimeInterval = 5 * 60
     ) {
         self.sameSessionTolerance = sameSessionTolerance
         self.multisportGapTolerance = multisportGapTolerance

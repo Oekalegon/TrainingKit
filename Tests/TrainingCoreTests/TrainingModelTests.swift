@@ -299,30 +299,6 @@ struct TrainingModelTests {
         #expect((importedDayMetrics?.load ?? 0) > 0)
     }
 
-    @Test("mergeActivities replaces both pieces with one activity and tombstones their sources (MVP1-80)")
-    func mergeActivitiesReplacesPieces() async throws {
-        let (store, stores) = makeStores()
-        let sourceA = ActivitySource.healthKit(UUID())
-        let sourceB = ActivitySource.healthKit(UUID())
-        let a = Activity(source: sourceA, sport: .running, start: day(0), duration: 343, distanceMeters: 668)
-        let b = Activity(
-            source: sourceB, sport: .running, start: day(0).addingTimeInterval(360), duration: 2643,
-            distanceMeters: 5200
-        )
-        try await store.upsert([a, b])
-
-        let model = TrainingModel(stores: stores, athlete: AthleteProfile.fixture())
-        try await model.load(in: day(0)...day(0), asOf: day(0))
-        try await model.mergeActivities(a.id, b.id, asOf: day(0))
-
-        #expect(try await store.activity(id: a.id) == nil)
-        #expect(try await store.activity(id: b.id) == nil)
-        #expect(model.activities.count == 1)
-        #expect(model.activities.first?.distanceMeters == 5868)
-        #expect(model.activities.first?.duration == 3003)
-        #expect(try await store.tombstonedSources(among: [sourceA, sourceB]) == [sourceA, sourceB])
-    }
-
     @Test("importActivities(from:) doesn't resurrect a source resolved via deleteActivity(id:) (MVP1-64)")
     func importActivitiesDoesNotResurrectDeletedSource() async throws {
         let (store, stores) = makeStores()
@@ -748,6 +724,9 @@ private actor DeduplicatingActivityStore: ActivityStore {
     func deleteActivity(id: UUID) async throws {
         activitiesByID.removeValue(forKey: id)
     }
+    func saveJoin(_ merged: Activity, components: [UUID], replacing replacedJoinIDs: [UUID]) async throws {}
+    func components(ofJoinedActivity id: UUID) async throws -> [Activity] { [] }
+    func unjoinActivity(id: UUID) async throws {}
     func tombstonedSources(among sources: [ActivitySource]) async throws -> Set<ActivitySource> { [] }
     func deduplicateActivities() async throws -> [Activity] {
         for activity in toRemove { activitiesByID.removeValue(forKey: activity.id) }
@@ -773,6 +752,9 @@ private struct ThrowingActivityStore: ActivityStore {
     func activity(id: UUID) async throws -> Activity? { nil }
     func deleteActivity(source: ActivitySource) async throws {}
     func deleteActivity(id: UUID) async throws {}
+    func saveJoin(_ merged: Activity, components: [UUID], replacing replacedJoinIDs: [UUID]) async throws {}
+    func components(ofJoinedActivity id: UUID) async throws -> [Activity] { [] }
+    func unjoinActivity(id: UUID) async throws {}
     func tombstonedSources(among sources: [ActivitySource]) async throws -> Set<ActivitySource> { [] }
     func deduplicateActivities() async throws -> [Activity] { [] }
 }
@@ -789,7 +771,7 @@ private struct ThrowingAthleteStore: AthleteStore {
 
 /// An actor, not a plain class with `@unchecked Sendable`, so `receivedAnchor` is genuinely
 /// data-race-safe even if a future test calls `importActivities(since:)` concurrently.
-private actor FakeImporter: ActivityImporting {
+actor FakeImporter: ActivityImporting {
     private let result: ImportResult
     private(set) var receivedAnchor: ImportAnchor?
     private(set) var callCount = 0
@@ -859,6 +841,9 @@ private actor GatedActivityStore: ActivityStore {
     func activity(id: UUID) async throws -> Activity? { nil }
     func deleteActivity(source: ActivitySource) async throws {}
     func deleteActivity(id: UUID) async throws {}
+    func saveJoin(_ merged: Activity, components: [UUID], replacing replacedJoinIDs: [UUID]) async throws {}
+    func components(ofJoinedActivity id: UUID) async throws -> [Activity] { [] }
+    func unjoinActivity(id: UUID) async throws {}
     func tombstonedSources(among sources: [ActivitySource]) async throws -> Set<ActivitySource> { [] }
 
     func deduplicateActivities() async throws -> [Activity] {

@@ -20,8 +20,9 @@ public enum OverlapRecommendation: Sendable, Hashable {
     /// The two activities are the same sport family and back-to-back, separated by no more than
     /// ``ActivityOverlapThresholds/joinGapTolerance`` — almost certainly one session that was
     /// accidentally stopped and restarted. Offer to combine them into a single activity
-    /// (``TrainingModel/mergeActivities(_:_:asOf:)``) rather than treating them as a multisport
-    /// pairing.
+    /// (``TrainingModel/joinActivities(_:_:asOf:)``) rather than treating them as a multisport
+    /// pairing. The join is reversible (``TrainingModel/unjoinActivity(id:asOf:)``): the originals
+    /// stay stored and are only hidden behind the joined activity.
     case join
     /// The two activities overlap with a different start/end (beyond tolerance) or a different
     /// sport — likely two separate logging attempts at one real activity rather than two real

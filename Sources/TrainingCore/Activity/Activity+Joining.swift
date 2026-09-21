@@ -4,9 +4,9 @@ extension Activity {
     /// Combines two back-to-back activities — one session accidentally recorded in two pieces —
     /// into a single activity spanning both (see ``OverlapRecommendation/join``).
     ///
-    /// The result has a new `id` and a `.manual` source: both originals' sources must stay
-    /// tombstoned (see ``ActivityStore/deleteActivity(id:)``) so a re-import doesn't resurrect
-    /// them, and reusing either source here would let that re-import overwrite the merged data.
+    /// The result has a new `id` and a `.manual` source. It's a derived activity, not either
+    /// original's record: the originals keep their own sources and stay in the store, linked to
+    /// this one via ``ActivityStore/saveJoin(_:components:replacing:)``.
     ///
     /// - The span runs from the earlier ``start`` to the later end, so the (short) gap between the
     ///   two pieces counts as part of the session.
@@ -21,6 +21,7 @@ extension Activity {
     /// - Parameters:
     ///   - a: One piece.
     ///   - b: The other piece, in either order.
+    /// - Returns: The combined activity.
     public static func joined(_ a: Activity, _ b: Activity) -> Activity {
         let (first, second) = a.start <= b.start ? (a, b) : (b, a)
         let end = max(first.dateRange.upperBound, second.dateRange.upperBound)

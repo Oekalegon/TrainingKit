@@ -1,42 +1,89 @@
 import Foundation
 
-/// `mergeActivities(_:_:asOf:)`, the resolution action for an ``OverlapRecommendation/join`` pair
-/// — split into its own file for the same reason `TrainingModel+OverlapResolution.swift` is.
+/// `joinActivities(_:_:asOf:)`, `unjoinActivity(id:asOf:)` and `components(ofJoinedActivity:)`, the
+/// resolution actions for an ``OverlapRecommendation/join`` pair — split into its own file for the
+/// same reason `TrainingModel+OverlapResolution.swift` is.
 extension TrainingModel {
-    /// Replaces the two activities `firstID` and `secondID` with one combined activity (see
-    /// ``Activity/joined(_:_:)``).
+    /// Joins the activities `firstID` and `secondID` — pieces of one session that was accidentally
+    /// recorded in two — into a single activity (see ``Activity/joined(_:_:)``).
     ///
-    /// The merged activity is stored first, then both originals are removed via
-    /// ``ActivityStore/deleteActivity(id:)`` so their sources are tombstoned and a later re-import
-    /// won't bring the pieces back. Invalidates the fitness-metrics cache from the earlier
-    /// piece's day, reloads `activities`, and recomputes. Serialized through the same
-    /// ``pendingImport`` queue as import/deduplication/deletion.
+    /// Nothing is deleted: the originals stay in the store, still tied to their own `source`, and
+    /// ``ActivityStore/activities(in:)`` shows the joined activity in their place. That keeps a
+    /// re-import from resurrecting them as separate activities, lets HealthKit corrections to a
+    /// piece keep landing on it, and makes the join reversible via ``unjoinActivity(id:asOf:)``.
     ///
-    /// - Parameters:
-    ///   - firstID: One piece.
-    ///   - secondID: The other piece.
-    ///   - today: Passed through to ``recompute(asOf:)``.
+    /// Either id may itself be a joined activity, in which case its components are flattened into
+    /// the new join and the old joined activity is replaced — joining a third piece onto an
+    /// already-joined pair yields one join of three, not a join of a join.
+    ///
+    /// Invalidates the fitness-metrics cache from the earliest piece's day, reloads `activities`,
+    /// and recomputes. Serialized through the same ``pendingImport`` queue as
+    /// import/deduplication/deletion.
     ///
     /// A no-op if either id isn't in the store or both ids are the same.
-    public func mergeActivities(_ firstID: UUID, _ secondID: UUID, asOf today: Date = .now) async throws {
+    ///
+    /// - Parameters:
+    ///   - firstID: One piece (or joined activity).
+    ///   - secondID: The other piece (or joined activity).
+    ///   - today: Passed through to ``recompute(asOf:)``.
+    public func joinActivities(_ firstID: UUID, _ secondID: UUID, asOf today: Date = .now) async throws {
         guard firstID != secondID else { return }
-        try await runQueued { try await self.performMerge(firstID, secondID, asOf: today) }
+        try await runQueued { try await self.performJoin(firstID, secondID, asOf: today) }
     }
 
-    private func performMerge(_ firstID: UUID, _ secondID: UUID, asOf today: Date) async throws {
+    /// Splits the joined activity `id` back into its original pieces.
+    ///
+    /// A no-op if `id` isn't a joined activity. Serialized and recomputed like
+    /// ``joinActivities(_:_:asOf:)``.
+    ///
+    /// - Parameters:
+    ///   - id: The joined activity to undo.
+    ///   - today: Passed through to ``recompute(asOf:)``.
+    public func unjoinActivity(id: UUID, asOf today: Date = .now) async throws {
+        try await runQueued { try await self.performUnjoin(id: id, asOf: today) }
+    }
+
+    /// The pieces the joined activity `id` was built from, earliest first — what a detail view
+    /// lists under "Joined from" — or an empty array if `id` isn't a joined activity.
+    public func components(ofJoinedActivity id: UUID) async throws -> [Activity] {
+        try await stores.activityStore.components(ofJoinedActivity: id)
+    }
+
+    private func performJoin(_ firstID: UUID, _ secondID: UUID, asOf today: Date) async throws {
         // From the store, not `self.activities`, for the same reason as `performDeleteActivity`.
-        guard let a = try await stores.activityStore.activity(id: firstID),
-              let b = try await stores.activityStore.activity(id: secondID) else { return }
+        guard let first = try await stores.activityStore.activity(id: firstID),
+              let second = try await stores.activityStore.activity(id: secondID) else { return }
 
-        let merged = Activity.joined(a, b)
-        try await stores.activityStore.upsert([merged])
-        try await stores.activityStore.deleteActivity(id: a.id)
-        try await stores.activityStore.deleteActivity(id: b.id)
-
-        if let cache = stores.fitnessMetricsCacheStore {
-            try? await cache.markDirty(from: merged.start)
+        var pieces: [Activity] = []
+        var replacedJoinIDs: [UUID] = []
+        for activity in [first, second] {
+            let components = try await stores.activityStore.components(ofJoinedActivity: activity.id)
+            if components.isEmpty {
+                pieces.append(activity)
+            } else {
+                pieces.append(contentsOf: components)
+                replacedJoinIDs.append(activity.id)
+            }
         }
+        pieces.sort { $0.start < $1.start }
+        guard let earliest = pieces.first, pieces.count >= 2 else { return }
 
+        let merged = pieces.dropFirst().reduce(earliest) { Activity.joined($0, $1) }
+        try await stores.activityStore.saveJoin(merged, components: pieces.map(\.id), replacing: replacedJoinIDs)
+
+        try await reloadAfterJoinChange(from: earliest.start, asOf: today)
+    }
+
+    private func performUnjoin(id: UUID, asOf today: Date) async throws {
+        guard let joined = try await stores.activityStore.activity(id: id) else { return }
+        try await stores.activityStore.unjoinActivity(id: id)
+        try await reloadAfterJoinChange(from: joined.start, asOf: today)
+    }
+
+    private func reloadAfterJoinChange(from day: Date, asOf today: Date) async throws {
+        if let cache = stores.fitnessMetricsCacheStore {
+            try? await cache.markDirty(from: day)
+        }
         let range = loadedRange ?? (today...today)
         activities = try await stores.activityStore.activities(in: range)
         await recompute(asOf: today)

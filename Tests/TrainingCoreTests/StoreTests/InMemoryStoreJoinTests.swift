@@ -127,4 +127,82 @@ struct InMemoryStoreJoinTests {
         #expect(try await store.activities(in: day(0)...day(1)).map(\.id) == [b.id])
         #expect(try await store.activity(id: joined.id) == nil)
     }
+
+    @Test("saveJoin rejects a component that already belongs to another join, and stores nothing")
+    func rejectsAlreadyJoinedComponent() async throws {
+        let store = try makeStore()
+        let a = piece(0, 300)
+        let b = piece(320, 600)
+        let c = piece(950, 900)
+        try await store.upsert([a, b, c])
+        let first = Activity.joined(a, b)
+        try await store.saveJoin(first, components: [a.id, b.id], replacing: [])
+        let second = Activity.joined(b, c)
+
+        await #expect(throws: ActivityJoinError.componentAlreadyJoined(b.id)) {
+            try await store.saveJoin(second, components: [b.id, c.id], replacing: [])
+        }
+
+        #expect(try await store.activity(id: second.id) == nil)
+        #expect(Set(try await store.activities(in: day(0)...day(1)).map(\.id)) == [first.id, c.id])
+    }
+
+    @Test("joinedActivity(containing:) finds the join of a piece, and nil for anything else")
+    func joinedActivityContaining() async throws {
+        let store = try makeStore()
+        let a = piece(0, 300)
+        let b = piece(320, 600)
+        let lone = piece(5000, 300)
+        try await store.upsert([a, b, lone])
+        let joined = Activity.joined(a, b)
+        try await store.saveJoin(joined, components: [a.id, b.id], replacing: [])
+
+        #expect(try await store.joinedActivity(containing: b.id)?.id == joined.id)
+        #expect(try await store.joinedActivity(containing: lone.id) == nil)
+    }
+
+    @Test("saveJoin under an existing join's own id rebuilds it in place")
+    func rebuildInPlace() async throws {
+        let store = try makeStore()
+        let a = piece(0, 300)
+        let b = piece(320, 600)
+        try await store.upsert([a, b])
+        let joined = Activity.joined(a, b)
+        try await store.saveJoin(joined, components: [a.id, b.id], replacing: [])
+        var corrected = a
+        corrected.distanceMeters = 1000
+        try await store.upsert([corrected])
+
+        let rebuilt = try #require(Activity.joined([corrected, b], id: joined.id))
+        try await store.saveJoin(rebuilt, components: [a.id, b.id], replacing: [])
+
+        let shown = try await store.activities(in: day(0)...day(1))
+        #expect(shown.map(\.id) == [joined.id])
+        #expect(shown.first?.distanceMeters == 1000)
+    }
+
+    @Test("Deleting one of two joins that share a piece (e.g. synced from two devices) keeps the shared piece")
+    func deleteKeepsSharedPiece() async throws {
+        let store = InMemoryStore()
+        let a = piece(0, 300)
+        let b = piece(320, 600)
+        try await store.upsert([a, b])
+        let one = Activity.joined(a, b)
+        let two = Activity.joined(a, b)
+        try await store.upsert([one, two])
+        // Two joins over the same pieces can't be built through `saveJoin` (it refuses); this is the
+        // state two devices joining independently end up in once CloudKit merges their rows.
+        await store.setJoinLinksForTesting([one.id: [a.id, b.id], two.id: [a.id, b.id]])
+
+        try await store.deleteActivity(id: one.id)
+
+        #expect(try await store.activity(id: a.id) == a)
+        #expect(try await store.activity(id: b.id) == b)
+        #expect(try await store.tombstonedSources(among: [a.source, b.source]).isEmpty)
+        #expect(try await store.activities(in: day(0)...day(1)).map(\.id) == [two.id])
+    }
+}
+
+extension InMemoryStore {
+    func setJoinLinksForTesting(_ links: [UUID: [UUID]]) { componentIDsByJoinID = links }
 }

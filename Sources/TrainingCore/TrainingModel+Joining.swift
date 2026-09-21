@@ -22,8 +22,16 @@ extension TrainingModel {
     ///
     /// A no-op if either id isn't in the store or both ids are the same.
     ///
-    /// - Throws: Whatever the ``ActivityStore`` throws saving the join or reloading afterwards; the
-    ///   join itself is saved atomically, so a failure there leaves the store unchanged.
+    /// The joined activity is a snapshot of its pieces, rebuilt by ``importActivities(from:asOf:)``
+    /// whenever a re-import changes one of them (keeping the join's own plan link and perceived
+    /// exertion if it has them), so HealthKit corrections to a piece still reach it.
+    ///
+    /// - Throws: ``ActivityJoinError/differentSportFamilies`` if the pieces aren't all one sport
+    ///   family, or ``ActivityJoinError/componentAlreadyJoined(_:)`` if one already belongs to a
+    ///   join that isn't being flattened into this one (both leave the store unchanged). Also
+    ///   whatever the ``ActivityStore`` throws saving the join or reloading afterwards: the join
+    ///   itself is saved atomically, but if only the reload fails the join is committed while
+    ///   ``activities`` stays stale until the next ``load(in:asOf:)``.
     ///
     /// - Parameters:
     ///   - firstID: One piece (or joined activity).
@@ -71,7 +79,10 @@ extension TrainingModel {
         pieces.sort { $0.start < $1.start }
         guard let earliest = pieces.first, pieces.count >= 2 else { return }
 
-        let merged = pieces.dropFirst().reduce(earliest) { Activity.joined($0, $1) }
+        guard pieces.allSatisfy({ $0.sport.isSameFamily(as: earliest.sport) }) else {
+            throw ActivityJoinError.differentSportFamilies
+        }
+        guard let merged = Activity.joined(pieces) else { return }
         try await stores.activityStore.saveJoin(merged, components: pieces.map(\.id), replacing: replacedJoinIDs)
 
         try await reloadAfterJoinChange(from: earliest.start, asOf: today)
@@ -90,5 +101,28 @@ extension TrainingModel {
         let range = loadedRange ?? (today...today)
         activities = try await stores.activityStore.activities(in: range)
         await recompute(asOf: today)
+    }
+
+    /// Rebuilds every joined activity that any of `pieceIDs` belongs to from its (possibly just
+    /// re-imported) pieces, in place under the same id, and returns the days that need their
+    /// fitness-metrics cache invalidated (the earlier of the old and rebuilt start).
+    ///
+    /// The join's own ``Activity/linkedPlanID`` and ``Activity/perceivedExertion`` survive the
+    /// rebuild when set — the reconciler or the athlete may have set them on the joined activity
+    /// itself — so a later change to a piece's own exertion doesn't override them.
+    func refreshJoins(containing pieceIDs: [UUID]) async throws -> [Date] {
+        var refreshed: Set<UUID> = []
+        var days: [Date] = []
+        for pieceID in pieceIDs {
+            guard let existing = try await stores.activityStore.joinedActivity(containing: pieceID),
+                  refreshed.insert(existing.id).inserted else { continue }
+            let components = try await stores.activityStore.components(ofJoinedActivity: existing.id)
+            guard var rebuilt = Activity.joined(components, id: existing.id) else { continue }
+            rebuilt.linkedPlanID = existing.linkedPlanID ?? rebuilt.linkedPlanID
+            rebuilt.perceivedExertion = existing.perceivedExertion ?? rebuilt.perceivedExertion
+            try await stores.activityStore.saveJoin(rebuilt, components: components.map(\.id), replacing: [])
+            days.append(min(existing.start, rebuilt.start))
+        }
+        return days
     }
 }

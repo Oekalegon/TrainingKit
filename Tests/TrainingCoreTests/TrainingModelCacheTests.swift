@@ -497,6 +497,9 @@ private actor FailingFetchActivityStore: ActivityStore {
         try await wrapped.components(ofJoinedActivity: id)
     }
     func unjoinActivity(id: UUID) async throws { try await wrapped.unjoinActivity(id: id) }
+    func joinedActivity(containing componentID: UUID) async throws -> Activity? {
+        try await wrapped.joinedActivity(containing: componentID)
+    }
     func tombstonedSources(among sources: [ActivitySource]) async throws -> Set<ActivitySource> {
         try await wrapped.tombstonedSources(among: sources)
     }

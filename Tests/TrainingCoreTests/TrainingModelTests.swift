@@ -727,6 +727,7 @@ private actor DeduplicatingActivityStore: ActivityStore {
     func saveJoin(_ merged: Activity, components: [UUID], replacing replacedJoinIDs: [UUID]) async throws {}
     func components(ofJoinedActivity id: UUID) async throws -> [Activity] { [] }
     func unjoinActivity(id: UUID) async throws {}
+    func joinedActivity(containing componentID: UUID) async throws -> Activity? { nil }
     func tombstonedSources(among sources: [ActivitySource]) async throws -> Set<ActivitySource> { [] }
     func deduplicateActivities() async throws -> [Activity] {
         for activity in toRemove { activitiesByID.removeValue(forKey: activity.id) }
@@ -755,6 +756,7 @@ private struct ThrowingActivityStore: ActivityStore {
     func saveJoin(_ merged: Activity, components: [UUID], replacing replacedJoinIDs: [UUID]) async throws {}
     func components(ofJoinedActivity id: UUID) async throws -> [Activity] { [] }
     func unjoinActivity(id: UUID) async throws {}
+    func joinedActivity(containing componentID: UUID) async throws -> Activity? { nil }
     func tombstonedSources(among sources: [ActivitySource]) async throws -> Set<ActivitySource> { [] }
     func deduplicateActivities() async throws -> [Activity] { [] }
 }
@@ -844,6 +846,7 @@ private actor GatedActivityStore: ActivityStore {
     func saveJoin(_ merged: Activity, components: [UUID], replacing replacedJoinIDs: [UUID]) async throws {}
     func components(ofJoinedActivity id: UUID) async throws -> [Activity] { [] }
     func unjoinActivity(id: UUID) async throws {}
+    func joinedActivity(containing componentID: UUID) async throws -> Activity? { nil }
     func tombstonedSources(among sources: [ActivitySource]) async throws -> Set<ActivitySource> { [] }
 
     func deduplicateActivities() async throws -> [Activity] {

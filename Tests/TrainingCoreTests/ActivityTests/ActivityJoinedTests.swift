@@ -111,4 +111,21 @@ struct ActivityJoinedTests {
             }
         }
     }
+
+    @Test("joined(_:id:) folds any number of pieces, earliest first, under the given id; fewer than two is nil")
+    func nAry() throws {
+        let a = Activity(source: .manual, sport: .running, start: t0, duration: 300, distanceMeters: 1)
+        let b = Activity(source: .manual, sport: .running, start: t0.addingTimeInterval(320), duration: 600, distanceMeters: 2)
+        let c = Activity(source: .manual, sport: .running, start: t0.addingTimeInterval(950), duration: 900, distanceMeters: 4)
+        let id = UUID()
+
+        let merged = try #require(Activity.joined([c, a, b], id: id))
+
+        #expect(merged.id == id)
+        #expect(merged.start == t0)
+        #expect(merged.duration == 1850)
+        #expect(merged.distanceMeters == 7)
+        #expect(Activity.joined([a]) == nil)
+        #expect(Activity.joined([]) == nil)
+    }
 }

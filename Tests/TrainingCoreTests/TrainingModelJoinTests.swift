@@ -157,4 +157,81 @@ struct TrainingModelJoinTests {
 
         #expect(model.activities == [a])
     }
+
+    @Test("Joining activities of different sport families throws and changes nothing (MVP1-80)")
+    func differentSportsThrow() async throws {
+        let (store, model) = makeModel()
+        let run = piece(0, 600)
+        let ride = Activity(source: .manual, sport: .cycling, start: day(0).addingTimeInterval(620), duration: 600)
+        try await store.upsert([run, ride])
+        try await model.load(in: day(0)...day(1), asOf: day(0))
+
+        await #expect(throws: ActivityJoinError.differentSportFamilies) {
+            try await model.joinActivities(run.id, ride.id, asOf: day(0))
+        }
+
+        #expect(Set(model.activities.map(\.id)) == [run.id, ride.id])
+    }
+
+    @Test("A re-import that corrects a piece rebuilds the join, keeping its own plan link and exertion (MVP1-80)")
+    func reimportRefreshesJoin() async throws {
+        let (store, model) = makeModel()
+        let a = piece(0, 343, distance: 668)
+        let b = piece(360, 2643, distance: 5200)
+        try await store.upsert([a, b])
+        try await model.load(in: day(0)...day(1), asOf: day(0))
+        try await model.joinActivities(a.id, b.id, asOf: day(0))
+        var joined = try #require(model.activities.first)
+        // The reconciler / athlete set these on the joined activity itself.
+        joined.linkedPlanID = UUID()
+        joined.perceivedExertion = 8
+        try await store.saveJoin(joined, components: [a.id, b.id], replacing: [])
+
+        var corrected = b
+        corrected.distanceMeters = 5300
+        let importer = FakeImporter(result: ImportResult(upserted: [corrected], deletedSources: [], anchor: nil))
+        try await model.importActivities(from: importer, asOf: day(0))
+
+        let shown = try #require(model.activities.first)
+        #expect(model.activities.count == 1)
+        #expect(shown.id == joined.id)
+        #expect(shown.distanceMeters == 5968)  // 668 + corrected 5300
+        #expect(shown.linkedPlanID == joined.linkedPlanID)
+        #expect(shown.perceivedExertion == 8)
+    }
+
+    @Test("A piece deleted at its origin rebuilds the cached load of the day the join was attributed to (MVP1-80)")
+    func originDeleteRebuildsJoinDay() async throws {
+        let store = InMemoryStore()
+        let cache = InMemoryStore()
+        let stores = StoreSet(
+            activityStore: store, planStore: store, workoutStore: store,
+            cycleStore: store, athleteStore: store, fitnessMetricsCacheStore: cache
+        )
+        var utc = Calendar(identifier: .gregorian)
+        utc.timeZone = TimeZone(identifier: "UTC")!
+        let midnight = utc.startOfDay(for: day(2))
+        // Split across midnight: the joined session is attributed to the first day.
+        let a = Activity(
+            source: .healthKit(UUID()), sport: .running, start: midnight.addingTimeInterval(-300),
+            duration: 240, perceivedExertion: 5
+        )
+        let b = Activity(
+            source: .healthKit(UUID()), sport: .running, start: midnight.addingTimeInterval(30),
+            duration: 600, perceivedExertion: 5
+        )
+        try await store.upsert([a, b])
+        let model = TrainingModel(stores: stores, athlete: AthleteProfile.fixture())
+        let asOf = midnight.addingTimeInterval(4 * 86400)
+        try await model.load(in: midnight.addingTimeInterval(-86400)...midnight.addingTimeInterval(86400), asOf: asOf)
+        try await model.joinActivities(a.id, b.id, asOf: asOf)
+        let before = try #require(try await cache.cachedMetrics(in: midnight.addingTimeInterval(-86400)...midnight.addingTimeInterval(-1)).first).load
+        #expect(before > 30)  // the whole ~14 min session sits on the earlier day
+
+        let importer = FakeImporter(result: ImportResult(upserted: [], deletedSources: [b.source], anchor: nil))
+        try await model.importActivities(from: importer, asOf: asOf)
+
+        let after = try #require(try await cache.cachedMetrics(in: midnight.addingTimeInterval(-86400)...midnight.addingTimeInterval(-1)).first).load
+        #expect(abs(after - 20) < 0.5)  // just `a`: 4 min × RPE 5
+    }
 }

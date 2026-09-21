@@ -42,7 +42,8 @@ public protocol ActivityStore: Sendable {
     /// (which removes whatever's currently on a given source, regardless of id).
     ///
     /// Deleting a joined activity removes its components too (each tombstoned like any other
-    /// deleted activity) — "delete this activity" means the whole session. Use
+    /// deleted activity) — "delete this activity" means the whole session — except any component
+    /// that another join still uses, which stays. Use
     /// ``unjoinActivity(id:)`` to split it back into its pieces instead.
     func deleteActivity(id: UUID) async throws
 
@@ -77,6 +78,12 @@ public protocol ActivityStore: Sendable {
     /// re-import keeps updating them in place and never resurrects them as separate activities),
     /// but ``activities(in:)`` hides them from now on. ``unjoinActivity(id:)`` reverses this.
     ///
+    /// Storing a join under an existing joined activity's own id (with `replacing` empty) rebuilds it
+    /// in place.
+    ///
+    /// - Throws: ``ActivityJoinError/componentAlreadyJoined(_:)`` if any of `components` already
+    ///   belongs to a different join that isn't in `replacedJoinIDs`; nothing is stored then.
+    ///
     /// - Parameters:
     ///   - merged: The combined activity to store.
     ///   - components: The ids of the underlying, non-joined activities it was built from.
@@ -84,6 +91,10 @@ public protocol ActivityStore: Sendable {
     ///     one of them was itself joined further); each one's activity and link is removed. Their
     ///     components must be included in `components`.
     func saveJoin(_ merged: Activity, components: [UUID], replacing replacedJoinIDs: [UUID]) async throws
+
+    /// The joined activity that `componentID` is a piece of, if any — how an import finds the join a
+    /// changed or removed piece belongs to.
+    func joinedActivity(containing componentID: UUID) async throws -> Activity?
 
     /// The component activities `id`'s joined activity was built from, earliest first, or an empty
     /// array if `id` isn't a joined activity.

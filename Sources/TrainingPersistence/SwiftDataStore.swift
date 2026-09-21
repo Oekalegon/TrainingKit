@@ -58,52 +58,6 @@ public actor SwiftDataStore: ActivityStore, PlanStore, WorkoutLibraryStore, Cycl
         return try records.map { try $0.toActivity() }
     }
 
-    /// See `ActivityStore/saveJoin(_:components:replacing:)`. One `modelContext.save()` covers the
-    /// merged record, the link, and the replaced joins' removal, so it's all-or-nothing.
-    public func saveJoin(_ merged: Activity, components: [UUID], replacing replacedJoinIDs: [UUID]) async throws {
-        for id in replacedJoinIDs {
-            try deleteJoinRecords(joinID: id)
-            if let record = try fetchActivityRecord(id: id) { modelContext.delete(record) }
-        }
-        if let existing = try fetchActivityRecord(id: merged.id) {
-            try existing.update(from: merged)
-        } else {
-            modelContext.insert(try ActivityRecord(activity: merged))
-        }
-        try deleteJoinRecords(joinID: merged.id)
-        modelContext.insert(try ActivityJoinRecord(joinID: merged.id, componentIDs: components))
-        try modelContext.save()
-    }
-
-    /// See `ActivityStore/components(ofJoinedActivity:)`.
-    public func components(ofJoinedActivity id: UUID) async throws -> [Activity] {
-        let componentIDs = try joinComponentIDs()[id] ?? []
-        return try componentIDs.compactMap { try fetchActivityRecord(id: $0)?.toActivity() }
-            .sorted { $0.start < $1.start }
-    }
-
-    /// See `ActivityStore/unjoinActivity(id:)`.
-    public func unjoinActivity(id: UUID) async throws {
-        guard try joinComponentIDs()[id] != nil else { return }
-        try deleteJoinRecords(joinID: id)
-        if let record = try fetchActivityRecord(id: id) { modelContext.delete(record) }
-        try modelContext.save()
-    }
-
-    /// Join id → component ids, for every stored join.
-    private func joinComponentIDs() throws -> [UUID: [UUID]] {
-        var result: [UUID: [UUID]] = [:]
-        for record in try modelContext.fetch(FetchDescriptor<ActivityJoinRecord>()) {
-            result[record.joinID] = try record.componentIDs()
-        }
-        return result
-    }
-
-    private func deleteJoinRecords(joinID: UUID) throws {
-        let descriptor = FetchDescriptor<ActivityJoinRecord>(predicate: #Predicate { $0.joinID == joinID })
-        for record in try modelContext.fetch(descriptor) { modelContext.delete(record) }
-    }
-
     /// See `ActivityStore/upsert(_:)`.
     ///
     /// Looks up every existing record with one fetch of the whole table, rather than one fetch
@@ -195,7 +149,10 @@ public actor SwiftDataStore: ActivityStore, PlanStore, WorkoutLibraryStore, Cycl
         // Deleting a joined activity deletes its components too (each tombstoned below).
         if let componentIDs = try joinComponentIDs()[id] {
             try deleteJoinRecords(joinID: id)
-            for componentID in componentIDs {
+            // Pieces another join still uses stay, so deleting one of two overlapping joins (e.g.
+            // the same session joined independently on two devices) can't take the other's data.
+            let stillJoined = Set(try joinComponentIDs().values.joined())
+            for componentID in componentIDs where !stillJoined.contains(componentID) {
                 guard let component = try fetchActivityRecord(id: componentID) else { continue }
                 if !ActivitySource.keysWithoutNaturalKey.contains(component.sourceKey) {
                     try tombstone(sourceKey: component.sourceKey)
@@ -280,7 +237,7 @@ public actor SwiftDataStore: ActivityStore, PlanStore, WorkoutLibraryStore, Cycl
         return removed.sorted { $0.start < $1.start }
     }
 
-    private func fetchActivityRecord(id: UUID) throws -> ActivityRecord? {
+    func fetchActivityRecord(id: UUID) throws -> ActivityRecord? {
         let descriptor = FetchDescriptor<ActivityRecord>(predicate: #Predicate { $0.id == id })
         return try modelContext.fetch(descriptor).first
     }

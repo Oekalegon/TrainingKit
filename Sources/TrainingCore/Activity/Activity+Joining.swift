@@ -27,8 +27,10 @@ extension Activity {
     /// - Parameters:
     ///   - a: One piece.
     ///   - b: The other piece, in either order.
+    ///   - id: The combined activity's id; a new one by default. Pass an existing joined activity's
+    ///     id to rebuild it in place (see ``TrainingModel/importActivities(from:asOf:)``).
     /// - Returns: The combined activity.
-    public static func joined(_ a: Activity, _ b: Activity) -> Activity {
+    public static func joined(_ a: Activity, _ b: Activity, id: UUID = UUID()) -> Activity {
         let (first, second) = a.start <= b.start ? (a, b) : (b, a)
         let end = max(first.dateRange.upperBound, second.dateRange.upperBound)
         let weightA = max(first.duration, 0)
@@ -83,6 +85,7 @@ extension Activity {
         }
 
         return Activity(
+            id: id,
             source: .manual,
             sport: weightB > weightA ? second.sport : first.sport,
             start: first.start,
@@ -96,5 +99,23 @@ extension Activity {
             perceivedExertion: exertion,
             linkedPlanID: first.linkedPlanID ?? second.linkedPlanID
         )
+    }
+
+    /// Combines any number of pieces, earliest first, by folding ``joined(_:_:id:)`` — so three
+    /// pieces of one session become one activity, not a join of a join.
+    ///
+    /// - Parameters:
+    ///   - pieces: The pieces, in any order.
+    ///   - id: The combined activity's id; a new one by default.
+    /// - Returns: The combined activity, or `nil` if `pieces` has fewer than two.
+    public static func joined(_ pieces: [Activity], id: UUID = UUID()) -> Activity? {
+        guard pieces.count >= 2 else { return nil }
+        let sorted = pieces.sorted { $0.start < $1.start }
+        var result = sorted[0]
+        for (offset, next) in sorted.dropFirst().enumerated() {
+            let isLast = offset == sorted.count - 2
+            result = joined(result, next, id: isLast ? id : UUID())
+        }
+        return result
     }
 }

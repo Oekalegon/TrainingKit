@@ -105,7 +105,20 @@ extension TrainingModel {
         // full resync) would silently re-insert every duplicate/conflict the athlete had already
         // cleaned up, since the external source has no notion of TrainingKit's own deletes.
         let tombstoned = try await stores.activityStore.tombstonedSources(among: result.upserted.map(\.source))
-        let toUpsert = tombstoned.isEmpty ? result.upserted : result.upserted.filter { !tombstoned.contains($0.source) }
+        let untombstoned = tombstoned.isEmpty ? result.upserted : result.upserted.filter { !tombstoned.contains($0.source) }
+
+        // An importer builds each activity fresh, without the athlete's or reconciler's plan link
+        // (see ``Activity/linkedPlanID``); carry an existing link over so a re-import of a changed
+        // workout doesn't silently drop a match, including a manual one.
+        var toUpsert: [Activity] = untombstoned
+        var newActivities: [Activity] = []
+        for index in toUpsert.indices {
+            if let existing = try await stores.activityStore.activity(id: toUpsert[index].id) {
+                if toUpsert[index].linkedPlanID == nil { toUpsert[index].linkedPlanID = existing.linkedPlanID }
+            } else {
+                newActivities.append(toUpsert[index])
+            }
+        }
 
         var refreshedJoinDays: [Date] = []
         if !toUpsert.isEmpty {
@@ -117,6 +130,10 @@ extension TrainingModel {
             try await stores.activityStore.deleteActivity(source: source)
         }
         try await stores.athleteStore.saveImportAnchor(result.anchor)
+
+        // Only brand-new activities are auto-matched, so an activity the athlete unlinked stays
+        // unlinked when it's re-imported.
+        try await reconcile(newActivities)
 
         let affectedDates = toUpsert.map(\.start) + deletedStarts + refreshedJoinDays
         if let cache = stores.fitnessMetricsCacheStore, let earliest = affectedDates.min() {

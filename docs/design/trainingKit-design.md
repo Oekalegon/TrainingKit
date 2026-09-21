@@ -648,7 +648,7 @@ struct CycleLayoutBuilder: Sendable {
 
 `CycleLayoutBuilder` works backwards from the race: race micro, taper micro(s), then fills toward the start with repeating meso templates, trimming the first meso if the total doesn't divide. Output is just `[TrainingCycle]`; the user can edit the result. Built-in templates: `3:1`, `2:1`, and `linear` (no recovery micro, for short blocks).
 
-In MVP 1 the builder is driven by the user ("lay out a 3:1 block from today to this race"); in MVP 2 the generator calls it and then fills the micros. A `MacroTemplate` is the ordered list of meso phases (`[.base, .base, .build, .build, .peak, .taper]`) with meso lengths; `Race` in MVP 1 is just `id`, `name`, `date`, `priority` — enough to anchor a layout and the race-day TSB rule.
+In MVP 1 the builder is driven by the user ("lay out a 3:1 block from today to this race"); in MVP 2 the generator calls it and then fills the micros. A `MacroTemplate` is the ordered list of meso phases (`[.base, .base, .build, .build, .peak, .taper]`) with meso lengths; `Race` in MVP 1 is just `id`, `name`, `date`, `priority` (`RacePriority`: `.primary`/`.secondary`/`.tertiary`, model-only until MVP 5) — enough to anchor a layout and the race-day TSB rule.
 
 ### 10.3 Statistics over cycles
 

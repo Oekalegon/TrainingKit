@@ -68,17 +68,16 @@ public struct PlanReconciler: Sendable {
 
         var activities = activities
         var plans = plans
-        var claimedPlanIndices = Set<Int>()
-        var ambiguities: [PlanMatchAmbiguity] = []
 
+        // Every viable (activity, plan) pair with its mismatch score. Plans are only ever candidates
+        // for activities on their own day (and sport), so a link never crosses days.
+        var candidatesByActivity: [Int: [(plan: Int, score: Double)]] = [:]
         for activityIndex in activities.indices {
             guard activities[activityIndex].linkedPlanID == nil else { continue }
             let activity = activities[activityIndex]
             let activityDay = calendar.startOfDay(for: activity.start)
 
-            var candidates: [(index: Int, delta: Double)] = []
             for planIndex in plans.indices {
-                guard !claimedPlanIndices.contains(planIndex) else { continue }
                 let plan = plans[planIndex]
                 guard plan.completedActivityID == nil else { continue }
                 guard calendar.isDate(plan.date, inSameDayAs: activityDay) else { continue }
@@ -97,25 +96,43 @@ public struct PlanReconciler: Sendable {
                 if errors.isEmpty {
                     errors.append(Self.relativeError(durationByWorkoutID[plan.workoutID] ?? 0, activity.duration))
                 }
-                candidates.append((planIndex, errors.reduce(0, +) / Double(errors.count)))
+                candidatesByActivity[activityIndex, default: []].append((planIndex, errors.reduce(0, +) / Double(errors.count)))
             }
-            // Stable: on an exact tie the earlier plan in `plans` wins.
-            candidates.sort { $0.delta < $1.delta }
+        }
 
-            if let best = candidates.first {
-                claimedPlanIndices.insert(best.index)
-                activities[activityIndex].linkedPlanID = plans[best.index].id
-                plans[best.index].completedActivityID = activity.id
+        // Best pairs first across *all* activities, so the outcome doesn't depend on the order the
+        // activities were passed in: a plan goes to whichever activity fits it best. Exact ties fall
+        // back to array order (stable).
+        let pairs = candidatesByActivity
+            .flatMap { activityIndex, candidates in candidates.map { (activity: activityIndex, plan: $0.plan, score: $0.score) } }
+            .sorted { ($0.score, $0.activity, $0.plan) < ($1.score, $1.activity, $1.plan) }
+        var planByActivity: [Int: (plan: Int, score: Double)] = [:]
+        var claimedPlanIndices = Set<Int>()
+        for pair in pairs where planByActivity[pair.activity] == nil && !claimedPlanIndices.contains(pair.plan) {
+            planByActivity[pair.activity] = (pair.plan, pair.score)
+            claimedPlanIndices.insert(pair.plan)
+        }
 
-                let closeRunnersUp = candidates.dropFirst().filter { $0.delta - best.delta <= ambiguityTolerance }
-                if !closeRunnersUp.isEmpty {
-                    ambiguities.append(PlanMatchAmbiguity(
-                        activityID: activity.id,
-                        linkedPlanID: plans[best.index].id,
-                        alternativePlanIDs: closeRunnersUp.map { plans[$0.index].id }
-                    ))
-                }
+        var ambiguities: [PlanMatchAmbiguity] = []
+        for activityIndex in planByActivity.keys.sorted() {
+            guard let chosen = planByActivity[activityIndex] else { continue }
+            let activityID = activities[activityIndex].id
+            let chosenPlanID = plans[chosen.plan].id
+            // Alternatives are plans no *other* activity took and that fit almost as well.
+            let alternatives = (candidatesByActivity[activityIndex] ?? []).filter {
+                $0.plan != chosen.plan && !claimedPlanIndices.contains($0.plan)
+                    && abs($0.score - chosen.score) <= ambiguityTolerance
             }
+            if !alternatives.isEmpty {
+                ambiguities.append(PlanMatchAmbiguity(
+                    activityID: activityID, linkedPlanID: chosenPlanID,
+                    alternativePlanIDs: alternatives.map { plans[$0.plan].id }
+                ))
+            }
+        }
+        for (activityIndex, chosen) in planByActivity {
+            activities[activityIndex].linkedPlanID = plans[chosen.plan].id
+            plans[chosen.plan].completedActivityID = activities[activityIndex].id
         }
 
         return PlanReconciliation(activities: activities, plans: plans, ambiguities: ambiguities)

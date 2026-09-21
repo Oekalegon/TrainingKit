@@ -360,7 +360,7 @@ struct WorkoutKitBridge {
 
 ### 5.3 Reconciliation (`TrainingCore`)
 
-`PlanReconciler` links a completed `Activity` to a `PlannedActivity` on the same day with the same sport; closest duration wins if there are several. Sets `PlannedActivity.completedActivityID` and `Activity.linkedPlanID`. In MVP 1 this only affects the merge rule (today's actual beats today's estimate); in MVP 4 the `(expected, actual)` pairs it produces are the training data for calibration.
+`PlanReconciler` links a completed `Activity` to a `PlannedActivity` on the same day with the same sport. With several candidates the best fit wins, judged on what the plan explicitly sets (total duration if every step has a time goal, distance if every step has a distance goal); an estimated duration is only a fallback. Assignment is best-pair-first across all activities of a day, and a close runner-up is flagged (`PlanMatchAmbiguity`) rather than silently resolved. Only newly imported activities are auto-matched, so a manual unlink sticks; a manual link (`TrainingModel.linkActivity`) is also same-day only. Sets `PlannedActivity.completedActivityID` and `Activity.linkedPlanID`. In MVP 1 this only affects the merge rule (today's actual beats today's estimate); in MVP 4 the `(expected, actual)` pairs it produces are the training data for calibration.
 
 ---
 

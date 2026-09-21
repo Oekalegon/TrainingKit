@@ -216,6 +216,8 @@ public final class TrainingModel {
     ///   - id: The plan to remove.
     ///   - today: Passed through to ``recompute(asOf:)``.
     public func deletePlan(id: UUID, asOf today: Date = .now) async throws {
+        // An activity matched to this plan is freed, not left holding a link to nothing.
+        try await releaseActivity(heldBy: id)
         try await stores.planStore.deletePlan(id: id)
         if let loadedRange {
             plans = try await stores.planStore.plans(in: loadedRange)

@@ -7,11 +7,15 @@ extension TrainingModel {
     /// Links the activity `activityID` to the plan `planID`, replacing whatever either was linked to.
     ///
     /// If the activity was linked to another plan, that plan becomes unmatched; likewise a different
-    /// activity previously linked to `planID` becomes unlinked. Unlike the automatic match, a manual
-    /// link isn't restricted to the same day or sport — the athlete knows best. Clears any
-    /// ``planMatchAmbiguities`` entry for the activity, and reloads and recomputes.
+    /// activity previously linked to `planID` becomes unlinked. Like the automatic match, a link must
+    /// be within one calendar day (in the athlete's time zone); unlike it, the sport isn't checked —
+    /// the athlete knows best. Clears any ``planMatchAmbiguities`` entry for the activity, and reloads
+    /// and recomputes.
     ///
     /// A no-op if either id isn't in the store.
+    ///
+    /// - Throws: ``PlanLinkError/differentDay`` if the activity and the plan aren't on the same day
+    ///   (nothing is changed), or whatever the stores throw.
     ///
     /// - Parameters:
     ///   - activityID: The completed activity.
@@ -70,6 +74,10 @@ extension TrainingModel {
         guard var activity = try await stores.activityStore.activity(id: activityID),
               var plan = try await stores.planStore.plan(id: planID) else { return }
 
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = athlete.timeZone
+        guard calendar.isDate(activity.start, inSameDayAs: plan.date) else { throw PlanLinkError.differentDay }
+
         var activitiesToSave: [Activity] = []
         var plansToSave: [PlannedActivity] = []
         var earliest = min(activity.start, plan.date)
@@ -121,5 +129,48 @@ extension TrainingModel {
         activities = try await stores.activityStore.activities(in: range)
         plans = try await stores.planStore.plans(in: range)
         await recompute(asOf: today)
+    }
+
+    /// Frees the plans held by the activities `ids` (each one whose ``PlannedActivity/completedActivityID``
+    /// is that activity), for when those activities are about to be removed — otherwise the plan would
+    /// stay "completed" by an activity that no longer exists and could never be matched again. Call
+    /// *before* removing them, since it reads their links from the store.
+    func releasePlans(heldBy ids: [UUID]) async throws {
+        for id in ids {
+            guard let activity = try await stores.activityStore.activity(id: id),
+                  let planID = activity.linkedPlanID,
+                  var plan = try await stores.planStore.plan(id: planID),
+                  plan.completedActivityID == id else { continue }
+            plan.completedActivityID = nil
+            try await stores.planStore.upsert([plan])
+        }
+        planMatchAmbiguities.removeAll { ids.contains($0.activityID) }
+        if let loadedRange { plans = try await stores.planStore.plans(in: loadedRange) }
+    }
+
+    /// Frees the activity linked to the plan `planID`, for when the plan is about to be deleted —
+    /// otherwise the activity would keep a dead ``Activity/linkedPlanID`` and never be matched again.
+    func releaseActivity(heldBy planID: UUID) async throws {
+        if let plan = try await stores.planStore.plan(id: planID),
+           let activityID = plan.completedActivityID,
+           var activity = try await stores.activityStore.activity(id: activityID),
+           activity.linkedPlanID == planID {
+            activity.linkedPlanID = nil
+            try await stores.activityStore.upsert([activity])
+            if let loadedRange { activities = try await stores.activityStore.activities(in: loadedRange) }
+        }
+        planMatchAmbiguities.removeAll { $0.linkedPlanID == planID }
+    }
+
+    /// Repoints the plans held by `oldOwnerIDs` (pieces or joins that `merged` replaces) at `merged`.
+    /// A plan `merged` doesn't carry is freed instead: a join has only one ``Activity/linkedPlanID``.
+    func handOverPlans(from oldOwnerIDs: [UUID], planIDs: [UUID], to merged: Activity) async throws {
+        for planID in Set(planIDs) {
+            guard var plan = try await stores.planStore.plan(id: planID),
+                  let holder = plan.completedActivityID, oldOwnerIDs.contains(holder) else { continue }
+            plan.completedActivityID = merged.linkedPlanID == planID ? merged.id : nil
+            try await stores.planStore.upsert([plan])
+        }
+        planMatchAmbiguities.removeAll { oldOwnerIDs.contains($0.activityID) }
     }
 }

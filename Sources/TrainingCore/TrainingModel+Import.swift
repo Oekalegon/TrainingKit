@@ -94,9 +94,12 @@ extension TrainingModel {
                 // Removing a piece dissolves the join it belongs to, which is attributed to the
                 // *earliest* piece's day — possibly the day before this piece's, e.g. a session
                 // split across midnight — so that day's cached load has to be rebuilt too.
+                var removedIDs = [existing.id]
                 if let join = try await stores.activityStore.joinedActivity(containing: existing.id) {
                     deletedStarts.append(join.start)
+                    removedIDs.append(join.id)
                 }
+                try await releasePlans(heldBy: removedIDs)
             }
         }
 
@@ -133,7 +136,13 @@ extension TrainingModel {
 
         // Only brand-new activities are auto-matched, so an activity the athlete unlinked stays
         // unlinked when it's re-imported.
-        try await reconcile(newActivities)
+        // Best-effort: the import itself has already landed (and its anchor is saved), so a failure
+        // matching plans must not skip the cache invalidation and reload below.
+        do {
+            try await reconcile(newActivities)
+        } catch {
+            Logging.dataImport.error("Matching imported activities to plans failed: \(error.localizedDescription)")
+        }
 
         let affectedDates = toUpsert.map(\.start) + deletedStarts + refreshedJoinDays
         if let cache = stores.fitnessMetricsCacheStore, let earliest = affectedDates.min() {

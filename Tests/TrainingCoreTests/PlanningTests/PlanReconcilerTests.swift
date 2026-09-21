@@ -131,4 +131,22 @@ struct PlanReconcilerTests {
         // and it is flagged rather than silently resolved.
         #expect(result.ambiguities.first?.alternativePlanIDs.count == 1)
     }
+
+    @Test("the outcome doesn't depend on the order activities are passed in")
+    func orderIndependent() {
+        let aID = UUID(), bID = UUID()
+        let workouts = [workout(id: aID, sport: .running, minutes: 30), workout(id: bID, sport: .running, minutes: 40)]
+        let plans = [PlannedActivity(workoutID: aID, date: day(0)), PlannedActivity(workoutID: bID, date: day(0))]
+        // 36 min is slightly closer to the 40-min plan than the 30-min one, but the 31-min activity
+        // fits the 30-min plan far better and should get it; the 36-min one then takes the 40-min plan.
+        let near30 = Activity(source: .manual, sport: .running, start: day(0), duration: 31 * 60)
+        let near40 = Activity(source: .manual, sport: .running, start: day(0), duration: 36 * 60)
+
+        for order in [[near30, near40], [near40, near30]] {
+            let result = reconciler.reconcile(activities: order, plans: plans, workouts: workouts, athlete: athlete)
+            let linked = Dictionary(uniqueKeysWithValues: result.activities.map { ($0.id, $0.linkedPlanID) })
+            #expect(linked[near30.id] == plans[0].id)
+            #expect(linked[near40.id] == plans[1].id)
+        }
+    }
 }

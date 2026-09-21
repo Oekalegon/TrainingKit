@@ -37,7 +37,25 @@ public actor SwiftDataStore: ActivityStore, PlanStore, WorkoutLibraryStore, Cycl
         let descriptor = FetchDescriptor<ActivityRecord>(
             predicate: #Predicate { $0.start >= lowerBound && $0.start <= upperBound }
         )
-        return try modelContext.fetch(descriptor).map { try $0.toActivity() }
+        let inRange = try modelContext.fetch(descriptor)
+
+        // The join table is tiny (one row per joined session), so it's read whole rather than
+        // predicated — same reasoning as the tombstone table in `upsert(_:)`.
+        let joins = try joinComponentIDs()
+        guard !joins.isEmpty else { return try inRange.map { try $0.toActivity() } }
+
+        let hidden = Set(joins.values.joined())
+        let inRangeIDs = Set(inRange.map(\.id))
+        var records = inRange.filter { !hidden.contains($0.id) }
+        // A joined activity starts at its earliest component, so a range starting between two
+        // components would otherwise show the later piece alone: include the join whenever any
+        // component is in range, even though the join's own `start` isn't.
+        for (joinID, componentIDs) in joins where !inRangeIDs.contains(joinID) {
+            guard componentIDs.contains(where: inRangeIDs.contains), let record = try fetchActivityRecord(id: joinID)
+            else { continue }
+            records.append(record)
+        }
+        return try records.map { try $0.toActivity() }
     }
 
     /// See `ActivityStore/upsert(_:)`.
@@ -114,6 +132,13 @@ public actor SwiftDataStore: ActivityStore, PlanStore, WorkoutLibraryStore, Cycl
     /// See `ActivityStore/deleteActivity(source:)`.
     public func deleteActivity(source: ActivitySource) async throws {
         guard let record = try fetchActivityRecord(source: source) else { return }
+        // A piece removed at its origin dissolves any join it belongs to, so the surviving pieces
+        // reappear rather than staying folded into a session that no longer exists as recorded.
+        let removedID = record.id
+        for (joinID, componentIDs) in try joinComponentIDs() where componentIDs.contains(removedID) {
+            try deleteJoinRecords(joinID: joinID)
+            if let joined = try fetchActivityRecord(id: joinID) { modelContext.delete(joined) }
+        }
         modelContext.delete(record)
         try modelContext.save()
     }
@@ -121,6 +146,20 @@ public actor SwiftDataStore: ActivityStore, PlanStore, WorkoutLibraryStore, Cycl
     /// See `ActivityStore/deleteActivity(id:)`.
     public func deleteActivity(id: UUID) async throws {
         guard let record = try fetchActivityRecord(id: id) else { return }
+        // Deleting a joined activity deletes its components too (each tombstoned below).
+        if let componentIDs = try joinComponentIDs()[id] {
+            try deleteJoinRecords(joinID: id)
+            // Pieces another join still uses stay, so deleting one of two overlapping joins (e.g.
+            // the same session joined independently on two devices) can't take the other's data.
+            let stillJoined = Set(try joinComponentIDs().values.joined())
+            for componentID in componentIDs where !stillJoined.contains(componentID) {
+                guard let component = try fetchActivityRecord(id: componentID) else { continue }
+                if !ActivitySource.keysWithoutNaturalKey.contains(component.sourceKey) {
+                    try tombstone(sourceKey: component.sourceKey)
+                }
+                modelContext.delete(component)
+            }
+        }
         if !ActivitySource.keysWithoutNaturalKey.contains(record.sourceKey) {
             try tombstone(sourceKey: record.sourceKey)
         }
@@ -198,7 +237,7 @@ public actor SwiftDataStore: ActivityStore, PlanStore, WorkoutLibraryStore, Cycl
         return removed.sorted { $0.start < $1.start }
     }
 
-    private func fetchActivityRecord(id: UUID) throws -> ActivityRecord? {
+    func fetchActivityRecord(id: UUID) throws -> ActivityRecord? {
         let descriptor = FetchDescriptor<ActivityRecord>(predicate: #Predicate { $0.id == id })
         return try modelContext.fetch(descriptor).first
     }

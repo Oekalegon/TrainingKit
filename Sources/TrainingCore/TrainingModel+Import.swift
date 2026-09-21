@@ -91,6 +91,12 @@ extension TrainingModel {
         for source in result.deletedSources {
             if let existing = try await stores.activityStore.activity(source: source) {
                 deletedStarts.append(existing.start)
+                // Removing a piece dissolves the join it belongs to, which is attributed to the
+                // *earliest* piece's day — possibly the day before this piece's, e.g. a session
+                // split across midnight — so that day's cached load has to be rebuilt too.
+                if let join = try await stores.activityStore.joinedActivity(containing: existing.id) {
+                    deletedStarts.append(join.start)
+                }
             }
         }
 
@@ -101,15 +107,18 @@ extension TrainingModel {
         let tombstoned = try await stores.activityStore.tombstonedSources(among: result.upserted.map(\.source))
         let toUpsert = tombstoned.isEmpty ? result.upserted : result.upserted.filter { !tombstoned.contains($0.source) }
 
+        var refreshedJoinDays: [Date] = []
         if !toUpsert.isEmpty {
             try await stores.activityStore.upsert(toUpsert)
+            // A re-imported piece of a joined session changes what that join should show.
+            refreshedJoinDays = try await refreshJoins(containing: toUpsert.map(\.id))
         }
         for source in result.deletedSources {
             try await stores.activityStore.deleteActivity(source: source)
         }
         try await stores.athleteStore.saveImportAnchor(result.anchor)
 
-        let affectedDates = toUpsert.map(\.start) + deletedStarts
+        let affectedDates = toUpsert.map(\.start) + deletedStarts + refreshedJoinDays
         if let cache = stores.fitnessMetricsCacheStore, let earliest = affectedDates.min() {
             try? await cache.markDirty(from: earliest)
         }

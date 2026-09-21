@@ -10,6 +10,7 @@ public enum TrainingPersistenceContainer {
         [
             ActivityRecord.self,
             DeletedActivitySourceRecord.self,
+            ActivityJoinRecord.self,
             PlannedActivityRecord.self,
             StructuredWorkoutRecord.self,
             TrainingCycleRecord.self,

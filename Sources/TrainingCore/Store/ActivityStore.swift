@@ -2,7 +2,15 @@ import Foundation
 
 /// Storage contract for completed activities.
 public protocol ActivityStore: Sendable {
-    /// All activities whose `start` falls within `range`.
+    /// All activities whose `start` falls within `range`, with any activity that has been joined
+    /// into another (see ``saveJoin(_:components:replacing:)``) hidden and the joined activity
+    /// shown in its place — so callers (fitness recompute, overlap checks, the UI) see one
+    /// activity for a joined session without having to know it was ever split.
+    ///
+    /// A joined activity is included when *any* of its components starts in `range`, even if its
+    /// own `start` (the earliest component's) falls before it, so a range boundary never shows one
+    /// piece on its own. Lookups by id/source (``activity(id:)``, ``activity(source:)``) still
+    /// find hidden components.
     func activities(in range: ClosedRange<Date>) async throws -> [Activity]
 
     /// Inserts new activities or replaces existing ones matched by `id`.
@@ -32,6 +40,11 @@ public protocol ActivityStore: Sendable {
     /// Removes the activity with this id, if any — the resolution action for a specific
     /// ``ActivityOverlapChecker`` pair (MVP1-63), as distinct from ``deleteActivity(source:)``
     /// (which removes whatever's currently on a given source, regardless of id).
+    ///
+    /// Deleting a joined activity removes its components too (each tombstoned like any other
+    /// deleted activity) — "delete this activity" means the whole session — except any component
+    /// that another join still uses, which stays. Use
+    /// ``unjoinActivity(id:)`` to split it back into its pieces instead.
     func deleteActivity(id: UUID) async throws
 
     /// The subset of `sources` that were deleted via ``deleteActivity(id:)`` and haven't been
@@ -57,4 +70,37 @@ public protocol ActivityStore: Sendable {
     ///   anything keyed on their dates (e.g. a fitness-metrics cache).
     @discardableResult
     func deduplicateActivities() async throws -> [Activity]
+
+    /// Stores `merged` — one activity standing in for a session that was recorded in pieces — and
+    /// records that `components` are its pieces, in a single atomic step.
+    ///
+    /// The components stay in the store untouched (still keyed by their own `source`, so a
+    /// re-import keeps updating them in place and never resurrects them as separate activities),
+    /// but ``activities(in:)`` hides them from now on. ``unjoinActivity(id:)`` reverses this.
+    ///
+    /// Storing a join under an existing joined activity's own id (with `replacing` empty) rebuilds it
+    /// in place.
+    ///
+    /// - Throws: ``ActivityJoinError/componentAlreadyJoined(_:)`` if any of `components` already
+    ///   belongs to a different join that isn't in `replacedJoinIDs`; nothing is stored then.
+    ///
+    /// - Parameters:
+    ///   - merged: The combined activity to store.
+    ///   - components: The ids of the underlying, non-joined activities it was built from.
+    ///   - replacedJoinIDs: Ids of existing joined activities that `merged` supersedes (because
+    ///     one of them was itself joined further); each one's activity and link is removed. Their
+    ///     components must be included in `components`.
+    func saveJoin(_ merged: Activity, components: [UUID], replacing replacedJoinIDs: [UUID]) async throws
+
+    /// The joined activity that `componentID` is a piece of, if any — how an import finds the join a
+    /// changed or removed piece belongs to.
+    func joinedActivity(containing componentID: UUID) async throws -> Activity?
+
+    /// The component activities `id`'s joined activity was built from, earliest first, or an empty
+    /// array if `id` isn't a joined activity.
+    func components(ofJoinedActivity id: UUID) async throws -> [Activity]
+
+    /// Undoes a join: removes the joined activity `id` and its link, so its components show up
+    /// individually again. A no-op if `id` isn't a joined activity.
+    func unjoinActivity(id: UUID) async throws
 }

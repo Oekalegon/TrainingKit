@@ -490,6 +490,16 @@ private actor FailingFetchActivityStore: ActivityStore {
     func deleteActivity(id: UUID) async throws {
         try await wrapped.deleteActivity(id: id)
     }
+    func saveJoin(_ merged: Activity, components: [UUID], replacing replacedJoinIDs: [UUID]) async throws {
+        try await wrapped.saveJoin(merged, components: components, replacing: replacedJoinIDs)
+    }
+    func components(ofJoinedActivity id: UUID) async throws -> [Activity] {
+        try await wrapped.components(ofJoinedActivity: id)
+    }
+    func unjoinActivity(id: UUID) async throws { try await wrapped.unjoinActivity(id: id) }
+    func joinedActivity(containing componentID: UUID) async throws -> Activity? {
+        try await wrapped.joinedActivity(containing: componentID)
+    }
     func tombstonedSources(among sources: [ActivitySource]) async throws -> Set<ActivitySource> {
         try await wrapped.tombstonedSources(among: sources)
     }

@@ -724,6 +724,10 @@ private actor DeduplicatingActivityStore: ActivityStore {
     func deleteActivity(id: UUID) async throws {
         activitiesByID.removeValue(forKey: id)
     }
+    func saveJoin(_ merged: Activity, components: [UUID], replacing replacedJoinIDs: [UUID]) async throws {}
+    func components(ofJoinedActivity id: UUID) async throws -> [Activity] { [] }
+    func unjoinActivity(id: UUID) async throws {}
+    func joinedActivity(containing componentID: UUID) async throws -> Activity? { nil }
     func tombstonedSources(among sources: [ActivitySource]) async throws -> Set<ActivitySource> { [] }
     func deduplicateActivities() async throws -> [Activity] {
         for activity in toRemove { activitiesByID.removeValue(forKey: activity.id) }
@@ -749,6 +753,10 @@ private struct ThrowingActivityStore: ActivityStore {
     func activity(id: UUID) async throws -> Activity? { nil }
     func deleteActivity(source: ActivitySource) async throws {}
     func deleteActivity(id: UUID) async throws {}
+    func saveJoin(_ merged: Activity, components: [UUID], replacing replacedJoinIDs: [UUID]) async throws {}
+    func components(ofJoinedActivity id: UUID) async throws -> [Activity] { [] }
+    func unjoinActivity(id: UUID) async throws {}
+    func joinedActivity(containing componentID: UUID) async throws -> Activity? { nil }
     func tombstonedSources(among sources: [ActivitySource]) async throws -> Set<ActivitySource> { [] }
     func deduplicateActivities() async throws -> [Activity] { [] }
 }
@@ -765,7 +773,7 @@ private struct ThrowingAthleteStore: AthleteStore {
 
 /// An actor, not a plain class with `@unchecked Sendable`, so `receivedAnchor` is genuinely
 /// data-race-safe even if a future test calls `importActivities(since:)` concurrently.
-private actor FakeImporter: ActivityImporting {
+actor FakeImporter: ActivityImporting {
     private let result: ImportResult
     private(set) var receivedAnchor: ImportAnchor?
     private(set) var callCount = 0
@@ -835,6 +843,10 @@ private actor GatedActivityStore: ActivityStore {
     func activity(id: UUID) async throws -> Activity? { nil }
     func deleteActivity(source: ActivitySource) async throws {}
     func deleteActivity(id: UUID) async throws {}
+    func saveJoin(_ merged: Activity, components: [UUID], replacing replacedJoinIDs: [UUID]) async throws {}
+    func components(ofJoinedActivity id: UUID) async throws -> [Activity] { [] }
+    func unjoinActivity(id: UUID) async throws {}
+    func joinedActivity(containing componentID: UUID) async throws -> Activity? { nil }
     func tombstonedSources(among sources: [ActivitySource]) async throws -> Set<ActivitySource> { [] }
 
     func deduplicateActivities() async throws -> [Activity] {

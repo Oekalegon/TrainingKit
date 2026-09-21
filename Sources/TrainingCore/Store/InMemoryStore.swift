@@ -10,6 +10,8 @@ public actor InMemoryStore: ActivityStore, PlanStore, WorkoutLibraryStore, Worko
     AthleteStore, FitnessMetricsCacheStore {
     private var activitiesByID: [UUID: Activity] = [:]
     private var deletedSources: Set<ActivitySource> = []
+    /// Joined activity id → its component ids. See ``ActivityStore/saveJoin(_:components:replacing:)``.
+    var componentIDsByJoinID: [UUID: [UUID]] = [:]
     private var plansByID: [UUID: PlannedActivity] = [:]
     private var workoutsByID: [UUID: StructuredWorkout] = [:]
     private var templatesByID: [UUID: WorkoutTemplate] = [:]
@@ -26,7 +28,45 @@ public actor InMemoryStore: ActivityStore, PlanStore, WorkoutLibraryStore, Worko
 
     /// See ``ActivityStore/activities(in:)``.
     public func activities(in range: ClosedRange<Date>) async throws -> [Activity] {
-        activitiesByID.values.filter { range.contains($0.start) }
+        let hidden = Set(componentIDsByJoinID.values.joined())
+        var result = activitiesByID.values.filter { range.contains($0.start) && !hidden.contains($0.id) }
+        let shown = Set(result.map(\.id))
+        for (joinID, componentIDs) in componentIDsByJoinID where !shown.contains(joinID) {
+            let anyComponentInRange = componentIDs.contains { id in activitiesByID[id].map { range.contains($0.start) } ?? false }
+            if anyComponentInRange, let joined = activitiesByID[joinID] { result.append(joined) }
+        }
+        return result
+    }
+
+    /// See ``ActivityStore/saveJoin(_:components:replacing:)``.
+    public func saveJoin(_ merged: Activity, components: [UUID], replacing replacedJoinIDs: [UUID]) async throws {
+        let ignored = Set(replacedJoinIDs).union([merged.id])
+        let taken = Set(componentIDsByJoinID.filter { !ignored.contains($0.key) }.values.joined())
+        if let duplicate = components.first(where: taken.contains) {
+            throw ActivityJoinError.componentAlreadyJoined(duplicate)
+        }
+        for id in replacedJoinIDs {
+            componentIDsByJoinID.removeValue(forKey: id)
+            activitiesByID.removeValue(forKey: id)
+        }
+        activitiesByID[merged.id] = merged
+        componentIDsByJoinID[merged.id] = components
+    }
+
+    /// See ``ActivityStore/joinedActivity(containing:)``.
+    public func joinedActivity(containing componentID: UUID) async throws -> Activity? {
+        componentIDsByJoinID.first { $0.value.contains(componentID) }.flatMap { activitiesByID[$0.key] }
+    }
+
+    /// See ``ActivityStore/components(ofJoinedActivity:)``.
+    public func components(ofJoinedActivity id: UUID) async throws -> [Activity] {
+        (componentIDsByJoinID[id] ?? []).compactMap { activitiesByID[$0] }.sorted { $0.start < $1.start }
+    }
+
+    /// See ``ActivityStore/unjoinActivity(id:)``.
+    public func unjoinActivity(id: UUID) async throws {
+        guard componentIDsByJoinID.removeValue(forKey: id) != nil else { return }
+        activitiesByID.removeValue(forKey: id)
     }
 
     /// See ``ActivityStore/upsert(_:)``. Builds a `source` → `id` index once up front (kept in
@@ -65,10 +105,22 @@ public actor InMemoryStore: ActivityStore, PlanStore, WorkoutLibraryStore, Worko
     public func deleteActivity(source: ActivitySource) async throws {
         guard let id = activitiesByID.values.first(where: { $0.source == source })?.id else { return }
         activitiesByID.removeValue(forKey: id)
+        // A piece removed at its origin leaves its joined activity describing a session that no
+        // longer exists as recorded, so the join dissolves and the surviving pieces reappear.
+        for (joinID, componentIDs) in componentIDsByJoinID where componentIDs.contains(id) {
+            componentIDsByJoinID.removeValue(forKey: joinID)
+            activitiesByID.removeValue(forKey: joinID)
+        }
     }
 
     /// See ``ActivityStore/deleteActivity(id:)``.
     public func deleteActivity(id: UUID) async throws {
+        if let componentIDs = componentIDsByJoinID.removeValue(forKey: id) {
+            let stillJoined = Set(componentIDsByJoinID.values.joined())
+            for componentID in componentIDs where !stillJoined.contains(componentID) {
+                try await deleteActivity(id: componentID)
+            }
+        }
         if let activity = activitiesByID[id], activity.source.hasNaturalKey {
             deletedSources.insert(activity.source)
         }

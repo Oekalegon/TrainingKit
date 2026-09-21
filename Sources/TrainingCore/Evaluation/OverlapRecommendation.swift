@@ -17,6 +17,13 @@ public enum OverlapRecommendation: Sendable, Hashable {
     /// logged from two sources. Ask the user which fields to keep from which source; a plain
     /// "delete one" should also be offered as a fallback to merging.
     case merge
+    /// The two activities are the same sport family and back-to-back, separated by no more than
+    /// ``ActivityOverlapThresholds/joinGapTolerance`` — almost certainly one session that was
+    /// accidentally stopped and restarted. Offer to combine them into a single activity
+    /// (``TrainingModel/joinActivities(_:_:asOf:)``) rather than treating them as a multisport
+    /// pairing. The join is reversible (``TrainingModel/unjoinActivity(id:asOf:)``): the originals
+    /// stay stored and are only hidden behind the joined activity.
+    case join
     /// The two activities overlap with a different start/end (beyond tolerance) or a different
     /// sport — likely two separate logging attempts at one real activity rather than two real
     /// activities. Ask the user which one actually happened and delete the other.

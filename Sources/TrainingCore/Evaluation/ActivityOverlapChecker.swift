@@ -3,17 +3,22 @@ import Foundation
 /// Classifies what to do about activities whose ``Activity/dateRange``s overlap or sit close
 /// together, rather than just flagging that they do.
 ///
-/// Four outcomes, checked in this order for each pair — see ``OverlapRecommendation``:
+/// Five outcomes, checked in this order for each pair — see ``OverlapRecommendation``:
 /// 1. Same time span (within tolerance) and sport family (``Sport/isSameFamily(as:)``), identical
 ///    data → ``OverlapRecommendation/duplicate(keep:remove:)``.
 /// 2. Same time span and sport family, differing data → ``OverlapRecommendation/merge``.
 /// 3. Overlapping with a different time span or sport family, and neither contains the other →
-///    ``OverlapRecommendation/conflict``.
-/// 4. One contains the other, or they're merely close together (not overlapping) →
+///    ``OverlapRecommendation/conflict`` (unless rule 4 applies first, for a barely-overlapping
+///    same-sport pair).
+/// 4. Same sport family, neither containing the other, and either separated by at most
+///    ``ActivityOverlapThresholds/joinGapTolerance`` or overlapping by no more than it (one session
+///    stopped and restarted) → ``OverlapRecommendation/join``.
+/// 5. One contains the other, or they're merely close together (not overlapping) →
 ///    ``OverlapRecommendation/possibleMultisport``.
 public enum ActivityOverlapChecker {
-    /// Finds every pair of `activities` worth advising on: overlapping pairs, plus pairs close
-    /// enough together to plausibly be multisport legs.
+    /// Finds every pair of `activities` worth advising on: overlapping pairs, pairs close enough
+    /// together to plausibly be multisport legs, and back-to-back same-sport pairs that read as one
+    /// session split in two (``OverlapRecommendation/join``).
     ///
     /// Sorts `activities` by start once, then for each activity only scans forward while a later
     /// activity's start still falls within `thresholds.multisportGapTolerance` of its own end —
@@ -61,6 +66,7 @@ public enum ActivityOverlapChecker {
             let gap = a.dateRange.upperBound <= b.dateRange.lowerBound
                 ? b.dateRange.lowerBound.timeIntervalSince(a.dateRange.upperBound)
                 : a.dateRange.lowerBound.timeIntervalSince(b.dateRange.upperBound)
+            if a.sport.isSameFamily(as: b.sport), gap <= thresholds.joinGapTolerance { return .join }
             return gap <= thresholds.multisportGapTolerance ? .possibleMultisport : nil
         }
 
@@ -73,14 +79,23 @@ public enum ActivityOverlapChecker {
             return .duplicate(keep: keep, remove: remove)
         }
 
+        let aContainsB = a.dateRange.lowerBound <= b.dateRange.lowerBound && b.dateRange.upperBound <= a.dateRange.upperBound
+        let bContainsA = b.dateRange.lowerBound <= a.dateRange.lowerBound && a.dateRange.upperBound <= b.dateRange.upperBound
+
+        // A watch stopped and restarted can record the second piece starting a few seconds before
+        // the first's padded end — a tiny overlap, but still one session in two pieces, not a
+        // conflict. Containment is excluded so a short activity inside a long one isn't a join.
+        let overlap = overlapEnd.timeIntervalSince(overlapStart)
+        if a.sport.isSameFamily(as: b.sport), overlap <= thresholds.joinGapTolerance, !aContainsB, !bContainsA {
+            return .join
+        }
+
         // Exact-range equality doesn't count as containment: two entries spanning the identical
         // instant with a different sport read as one activity mislabeled twice (a conflict), not
         // a parent activity containing a shorter child leg.
         let sameRange = a.dateRange.lowerBound == b.dateRange.lowerBound && a.dateRange.upperBound == b.dateRange.upperBound
         guard !sameRange else { return .conflict }
 
-        let aContainsB = a.dateRange.lowerBound <= b.dateRange.lowerBound && b.dateRange.upperBound <= a.dateRange.upperBound
-        let bContainsA = b.dateRange.lowerBound <= a.dateRange.lowerBound && a.dateRange.upperBound <= b.dateRange.upperBound
         return aContainsB || bContainsA ? .possibleMultisport : .conflict
     }
 

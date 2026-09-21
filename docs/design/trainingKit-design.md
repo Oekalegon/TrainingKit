@@ -293,6 +293,12 @@ protocol ActivityStore: Sendable {
     func activities(in range: ClosedRange<Date>) async throws -> [Activity]
     func upsert(_ activities: [Activity]) async throws
     func activity(sourceID: String) async throws -> Activity?   // dedupe on re-import
+
+    // Joined activities (MVP1-80): one session accidentally recorded in pieces.
+    func saveJoin(_ merged: Activity, components: [UUID], replacing: [UUID]) async throws
+    func components(ofJoinedActivity id: UUID) async throws -> [Activity]
+    func joinedActivity(containing componentID: UUID) async throws -> Activity?
+    func unjoinActivity(id: UUID) async throws
 }
 
 protocol PlanStore: Sendable { ... }
@@ -302,6 +308,17 @@ protocol AthleteStore: Sendable { ... }
 ```
 
 An `InMemoryStore` implementing all five ships in Core for tests and previews.
+
+**Joined activities.** When the overlap checker recommends `.join` (same sport family, pieces within `joinGapTolerance` of each other), `TrainingModel.joinActivities` stores a combined `Activity` plus a link to its pieces (`saveJoin`, atomic). Nothing is deleted:
+
+- The pieces keep their own `source`, so a re-import updates them in place and never resurrects them as separate activities.
+- `activities(in:)` **hides the pieces and returns the join** (a range that reaches only a later piece still returns the join), so the fitness recompute, overlap checks and the UI see one activity.
+- The link lives in its own table so a re-import rewriting a piece's record can't clear it.
+- `unjoinActivity` reverses a join. Deleting a join deletes its pieces (tombstoned) except any piece another join still uses.
+- A piece deleted at its origin dissolves the join; a re-import that changes a piece rebuilds the join in place, keeping its own plan link and perceived exertion.
+- A component can belong to one join at a time (`ActivityJoinError.componentAlreadyJoined`); joining a joined activity flattens into one join of N.
+
+The join operations are part of `ActivityStore` (rather than a separate protocol) because the hiding has to happen inside `activities(in:)`; this costs every conformer three extra methods. Revisit if a second conformer family appears.
 
 ---
 

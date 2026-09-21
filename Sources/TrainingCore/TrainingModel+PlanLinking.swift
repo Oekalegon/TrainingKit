@@ -37,7 +37,8 @@ extension TrainingModel {
         try await runQueued { try await self.performUnlink(activityID: id, asOf: today) }
     }
 
-    /// Automatically matches the loaded, still-unlinked ``activities`` to unmatched plans.
+    /// Automatically matches the loaded, still-unlinked ``activities`` to unmatched plans, first
+    /// repairing any half-made link (see ``repairPlanLinks()``).
     ///
     /// Import already does this for the activities it adds; call this after adding plans for days
     /// that already have activities. Reads plans from the store, not ``plans``.
@@ -45,6 +46,7 @@ extension TrainingModel {
     /// - Parameter today: Passed through to ``recompute(asOf:)``.
     public func reconcilePlans(asOf today: Date = .now) async throws {
         try await runQueued {
+            try await self.repairPlanLinks()
             try await self.reconcile(self.activities.filter { $0.linkedPlanID == nil })
             try await self.reloadAfterLinkChange(from: self.activities.map(\.start).min(), asOf: today)
         }
@@ -78,30 +80,34 @@ extension TrainingModel {
         calendar.timeZone = athlete.timeZone
         guard calendar.isDate(activity.start, inSameDayAs: plan.date) else { throw PlanLinkError.differentDay }
 
-        var activitiesToSave: [Activity] = []
-        var plansToSave: [PlannedActivity] = []
+        var releasedActivities: [Activity] = []
+        var releasedPlans: [PlannedActivity] = []
         var earliest = min(activity.start, plan.date)
 
         if let oldPlanID = activity.linkedPlanID, oldPlanID != planID,
            var oldPlan = try await stores.planStore.plan(id: oldPlanID) {
             oldPlan.completedActivityID = nil
-            plansToSave.append(oldPlan)
+            releasedPlans.append(oldPlan)
             earliest = min(earliest, oldPlan.date)
         }
         if let oldActivityID = plan.completedActivityID, oldActivityID != activityID,
            var oldActivity = try await stores.activityStore.activity(id: oldActivityID) {
             oldActivity.linkedPlanID = nil
-            activitiesToSave.append(oldActivity)
+            releasedActivities.append(oldActivity)
             earliest = min(earliest, oldActivity.start)
         }
 
         activity.linkedPlanID = planID
         plan.completedActivityID = activityID
-        activitiesToSave.append(activity)
-        plansToSave.append(plan)
 
-        try await stores.activityStore.upsert(activitiesToSave)
-        try await stores.planStore.upsert(plansToSave)
+        // Activities and plans live in two stores that can't commit together, so the order limits
+        // what a failure can leave behind: everything being released is written first, the new
+        // link's two halves last. A throw before them leaves things unlinked, never double-linked;
+        // a throw between the last two leaves a half link that ``repairPlanLinks()`` completes.
+        try await stores.activityStore.upsert(releasedActivities)
+        try await stores.planStore.upsert(releasedPlans)
+        try await stores.activityStore.upsert([activity])
+        try await stores.planStore.upsert([plan])
         planMatchAmbiguities.removeAll { $0.activityID == activityID }
         try await reloadAfterLinkChange(from: earliest, asOf: today)
     }
@@ -172,5 +178,52 @@ extension TrainingModel {
             try await stores.planStore.upsert([plan])
         }
         planMatchAmbiguities.removeAll { oldOwnerIDs.contains($0.activityID) }
+    }
+
+    /// Makes the two halves of every loaded link agree again.
+    ///
+    /// A link is stored on both sides (``Activity/linkedPlanID`` and ``PlannedActivity/completedActivityID``)
+    /// in two stores that can't commit together, so a failure partway through a change can leave one
+    /// side set. For each loaded activity that names a plan: a missing plan drops the link; a plan
+    /// that's free (or held by one of the activity's own pieces) is pointed back at the activity; a
+    /// plan held by something else drops the activity's link. Then any loaded plan whose holder is
+    /// gone, or doesn't name the plan back, is freed.
+    func repairPlanLinks() async throws {
+        for activity in activities {
+            guard let planID = activity.linkedPlanID else { continue }
+            guard var plan = try await stores.planStore.plan(id: planID) else {
+                var cleared = activity
+                cleared.linkedPlanID = nil
+                try await stores.activityStore.upsert([cleared])
+                continue
+            }
+            if plan.completedActivityID == activity.id { continue }
+            let pieces = try await stores.activityStore.components(ofJoinedActivity: activity.id).map(\.id)
+            if plan.completedActivityID == nil || plan.completedActivityID.map(pieces.contains) == true {
+                plan.completedActivityID = activity.id
+                try await stores.planStore.upsert([plan])
+            } else {
+                var cleared = activity
+                cleared.linkedPlanID = nil
+                try await stores.activityStore.upsert([cleared])
+            }
+        }
+        for var plan in try await loadedPlansFromStore() {
+            guard let holderID = plan.completedActivityID else { continue }
+            let holder = try await stores.activityStore.activity(id: holderID)
+            if holder?.linkedPlanID != plan.id {
+                plan.completedActivityID = nil
+                try await stores.planStore.upsert([plan])
+            }
+        }
+        if let loadedRange {
+            activities = try await stores.activityStore.activities(in: loadedRange)
+            plans = try await stores.planStore.plans(in: loadedRange)
+        }
+    }
+
+    private func loadedPlansFromStore() async throws -> [PlannedActivity] {
+        guard let loadedRange else { return [] }
+        return try await stores.planStore.plans(in: loadedRange)
     }
 }

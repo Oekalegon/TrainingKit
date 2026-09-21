@@ -31,6 +31,19 @@ struct SwiftDataStoreTests {
         #expect(try await store.activity(id: outOfRange.id) == outOfRange)
     }
 
+    @Test("ActivityStore activities(ids:) returns the stored ones keyed by id, skipping unknown ids")
+    func activityStoreBatchLookup() async throws {
+        let store = try makeStore()
+        let a = Activity(source: .manual, sport: .running, start: day(0), duration: 1800)
+        let b = Activity(source: .manual, sport: .cycling, start: day(1), duration: 3600)
+        try await store.upsert([a, b])
+
+        let found = try await store.activities(ids: [a.id, b.id, UUID()])
+
+        #expect(found == [a.id: a, b.id: b])
+        #expect(try await store.activities(ids: []).isEmpty)
+    }
+
     @Test("ActivityStore upsert replaces an existing record matched by id, rather than duplicating it")
     func activityStoreUpsertReplacesExisting() async throws {
         let store = try makeStore()

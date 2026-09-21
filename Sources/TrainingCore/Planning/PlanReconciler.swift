@@ -81,7 +81,7 @@ public struct PlanReconciler: Sendable {
                 let plan = plans[planIndex]
                 guard plan.completedActivityID == nil else { continue }
                 guard calendar.isDate(plan.date, inSameDayAs: activityDay) else { continue }
-                guard sportByWorkoutID[plan.workoutID] == activity.sport else { continue }
+                guard sportByWorkoutID[plan.workoutID]?.isSameFamily(as: activity.sport) == true else { continue }
 
                 // Explicit targets only: a duration or distance the plan actually sets outranks one
                 // merely estimated from the other. The estimate is a last resort, for workouts that

@@ -115,8 +115,9 @@ extension TrainingModel {
         // workout doesn't silently drop a match, including a manual one.
         var toUpsert: [Activity] = untombstoned
         var newActivities: [Activity] = []
+        let existingByID = try await stores.activityStore.activities(ids: toUpsert.map(\.id))
         for index in toUpsert.indices {
-            if let existing = try await stores.activityStore.activity(id: toUpsert[index].id) {
+            if let existing = existingByID[toUpsert[index].id] {
                 if toUpsert[index].linkedPlanID == nil { toUpsert[index].linkedPlanID = existing.linkedPlanID }
             } else {
                 newActivities.append(toUpsert[index])

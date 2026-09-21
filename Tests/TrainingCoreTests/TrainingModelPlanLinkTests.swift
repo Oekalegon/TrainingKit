@@ -205,4 +205,42 @@ struct TrainingModelPlanLinkTests {
 
         #expect(model.activities.map(\.id) == [activity.id])
     }
+
+    @Test("reconcilePlans links an already-stored activity once its plan exists")
+    func reconcilePlansLinksExisting() async throws {
+        let (store, model) = makeModel()
+        let w = workout(minutes: 30)
+        try await model.add(w, asOf: day(0))
+        let activity = Activity(source: .healthKit(UUID()), sport: .running, start: day(0), duration: 1800)
+        try await store.upsert([activity])
+        try await model.load(in: day(0)...day(1), asOf: day(0))
+        let plan = PlannedActivity(workoutID: w.id, date: day(0))
+        try await model.add(plan, asOf: day(0))
+        #expect(model.activities.first?.linkedPlanID == nil)
+
+        try await model.reconcilePlans(asOf: day(0))
+
+        #expect(model.activities.first?.linkedPlanID == plan.id)
+        #expect(model.plans.first?.completedActivityID == activity.id)
+    }
+
+    @Test("reconcilePlans completes a half-made link and drops dangling ones")
+    func repairsHalfLinks() async throws {
+        let (store, model) = makeModel()
+        let w = workout(minutes: 30)
+        try await model.add(w, asOf: day(0))
+        let plan = PlannedActivity(workoutID: w.id, date: day(0))
+        try await model.add(plan, asOf: day(0))
+        // Half link: the activity names the plan, the plan doesn't name it back.
+        let halfLinked = Activity(source: .healthKit(UUID()), sport: .running, start: day(0), duration: 1800, linkedPlanID: plan.id)
+        // Dangling: names a plan that doesn't exist.
+        let dangling = Activity(source: .healthKit(UUID()), sport: .cycling, start: day(0), duration: 1800, linkedPlanID: UUID())
+        try await store.upsert([halfLinked, dangling])
+        try await model.load(in: day(0)...day(1), asOf: day(0))
+
+        try await model.reconcilePlans(asOf: day(0))
+
+        #expect(try await store.plan(id: plan.id)?.completedActivityID == halfLinked.id)
+        #expect(try await store.activity(id: dangling.id)?.linkedPlanID == nil)
+    }
 }

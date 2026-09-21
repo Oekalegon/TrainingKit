@@ -33,6 +33,12 @@ public protocol ActivityStore: Sendable {
     /// The activity with this id, if any.
     func activity(id: UUID) async throws -> Activity?
 
+    /// The activities with these ids (hidden join pieces included, like ``activity(id:)``), keyed by
+    /// id; ids that aren't in the store are simply absent. One store round trip where a backing
+    /// store can do it — an import checks every upserted activity for an existing record, and doing
+    /// that one `await` at a time is needlessly slow on a full resync.
+    func activities(ids: [UUID]) async throws -> [UUID: Activity]
+
     /// Removes the activity from this source, if any — the delete half of an ``ActivityImporting``
     /// run that reports a source as removed at the origin.
     func deleteActivity(source: ActivitySource) async throws
@@ -103,4 +109,16 @@ public protocol ActivityStore: Sendable {
     /// Undoes a join: removes the joined activity `id` and its link, so its components show up
     /// individually again. A no-op if `id` isn't a joined activity.
     func unjoinActivity(id: UUID) async throws
+}
+
+extension ActivityStore {
+    /// Default ``activities(ids:)``: one ``activity(id:)`` lookup per id. Stores that can fetch
+    /// several records at once should override it.
+    public func activities(ids: [UUID]) async throws -> [UUID: Activity] {
+        var result: [UUID: Activity] = [:]
+        for id in ids {
+            if let activity = try await activity(id: id) { result[id] = activity }
+        }
+        return result
+    }
 }

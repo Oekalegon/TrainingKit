@@ -129,6 +129,17 @@ public actor SwiftDataStore: ActivityStore, PlanStore, WorkoutLibraryStore, Cycl
         try fetchActivityRecord(id: id)?.toActivity()
     }
 
+    /// See `ActivityStore/activities(ids:)`.
+    public func activities(ids: [UUID]) async throws -> [UUID: Activity] {
+        guard !ids.isEmpty else { return [:] }
+        let descriptor = FetchDescriptor<ActivityRecord>(predicate: #Predicate { ids.contains($0.id) })
+        var result: [UUID: Activity] = [:]
+        for record in try modelContext.fetch(descriptor) {
+            result[record.id] = try record.toActivity()
+        }
+        return result
+    }
+
     /// See `ActivityStore/deleteActivity(source:)`.
     public func deleteActivity(source: ActivitySource) async throws {
         guard let record = try fetchActivityRecord(source: source) else { return }

@@ -1,6 +1,7 @@
 # Intensity Classification (MVP2-43)
 
-Status: **draft for review — nothing implemented yet.**
+Status: phases 1–3 implemented in TrainingCore (`Sources/TrainingCore/Intensity/`); phases 4–5 (pace/bout detection,
+app display) and real-data tuning outstanding.
 
 ## 1. Goal
 
@@ -107,16 +108,26 @@ is `high`; a 90 min run with a final 20 min at Z3 is `medium` (≥ 15 %).
 
 Three evidence sources, combined in order of trust:
 
-1. **Plan-guided (activity has `linkedPlanID`)** — segment the activity by the planned steps and
-   evaluate each step over a **lag-shifted window**:
-   - the window for step *i* starts `lag` seconds after the step starts and ends `lag` seconds after it ends
-     (default `lag` ≈ 30 s for the rise; recovery windows are judged on their *minimum* HR, not the mean);
-   - achieved effort of a work step = a high percentile (P90) of HR in its shifted window, not the mean;
-   - this handles both failure modes: Z5 arriving during the next recovery is still credited to the rep, and
-     an un-reached recovery zone is not held against the athlete.
-   The category is the **planned category** unless measured data contradicts it strongly
-   (e.g. planned `low` but ≥ `overrideMinutes` of sustained Z3+ → promote one level; planned `high` but
-   no sustained Z4+ at all → demote one level). Output is flagged `.blended`.
+1. **Plan-guided (activity has `linkedPlanID`)** — implemented as `PlanGuidedIntensityClassifier`.
+   The plan states the intent; heart rate verifies it.
+   - *Verified plan.* If every plan step has a fixed (time) duration, the steps are laid out on the
+     activity's timeline (assuming they ran back to back from the start). Each hard or tempo step
+     (zone ≥ 3, not warm-up/cool-down) is checked against the **lag-corrected effort** (§4.3.2's series, so
+     no separate window shift is needed): the P90 effort during the step gives the zone reached, and the
+     step counts at `min(planned, reached)`. The ladder is applied to these verified zones, so short reps
+     that the HR-only debounce would drop still count, and skipped or under-performed reps don't.
+     Steps with < 50 % heart-rate coverage are taken at their planned zone.
+   - *Unplanned effort.* Whole-activity HR-only evidence (§4.3.2) can move the verified category
+     **one level up, never more** (HR can rise from heat/drift/illness without the effort changing).
+     It never moves it down: the per-step check already covers under-performance.
+   - *Plan can't be laid out* (distance or open steps): the planned category is moved one level towards the
+     measured one, in either direction.
+   - No usable heart rate: the planned category, `source = .planned`, low confidence.
+   - Confidence: `high` only when the verified category agrees with the measured one and ≥ 75 % of hard/tempo
+     step time could be checked.
+   The recovery-step handling in the original sketch (judging recoveries on minimum HR) turned out to be
+   unnecessary: the lag correction already stops a slow fall from being read as continued effort, and only
+   hard/tempo steps affect the category.
 
 2. **HR-only (unlinked, no steps)** — smooth the HR series, apply the same lag compensation
    (shift/first-order deconvolution of the rise), debounce excursions shorter than `minExcursion`,
@@ -181,7 +192,7 @@ agreement of each classifier, plus the confusion matrix. Thresholds are paramete
    workouts. Still open: is the 6 min / 10 % floor for `high` right for short-rep sessions?
 2. `AthleteProfile.paceModel` requires a threshold pace: where does it come from today, and is it trustworthy
    enough to drive bout detection?
-3. Default for plan-linked activities: trust the plan and only override on strong contradiction (proposed),
-   or always show measured?
+3. ~~Default for plan-linked activities~~ — implemented as proposed (trust the plan, verify with heart rate,
+   move at most one level on contradiction). **Assumed accepted when phase 3 was started; revisit on real data.**
 4. v1 scope: running only for pace/bout logic, other sports HR-plan only?
 5. Is the importer spike (speed samples + workout events) acceptable inside this todo, or its own todo?

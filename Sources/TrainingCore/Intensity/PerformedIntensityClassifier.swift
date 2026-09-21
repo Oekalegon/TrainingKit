@@ -23,7 +23,7 @@ public struct PerformedIntensityClassifier: Sendable {
     public var gapThresholdSeconds: TimeInterval
 
     /// The spacing of the resampled heart-rate grid, in seconds.
-    private static let gridSeconds: TimeInterval = 5
+    static let gridSeconds: TimeInterval = 5
     /// How many grid points the smoothing moving average spans (centred).
     private static let smoothingPoints = 3
 
@@ -62,9 +62,8 @@ public struct PerformedIntensityClassifier: Sendable {
         var moderateSeconds: TimeInterval = 0
         var aboveFirstZoneSeconds: TimeInterval = 0
 
-        for run in uninterruptedRuns(of: activity.heartRate) {
-            let effort = effortSeries(for: run, settings: settings)
-            let zones = effort.map { TimeInZoneBuilder.zone(for: zoneModel.deltaHRRatio(for: $0), boundaries: boundaries) }
+        for series in effortSeries(for: activity, settings: settings) {
+            let zones = series.bpm.map { TimeInZoneBuilder.zone(for: zoneModel.deltaHRRatio(for: $0), boundaries: boundaries) }
 
             let hard = sustained(zones, where: { $0 >= 4 })
             let tempoOrAbove = sustained(zones, where: { $0 >= 3 })
@@ -127,8 +126,22 @@ public struct PerformedIntensityClassifier: Sendable {
         return runs
     }
 
+    /// A lag-corrected effort series, in bpm, on the regular grid starting at `start`.
+    struct EffortSeries: Sendable {
+        let start: Date
+        let bpm: [Double]
+    }
+
+    /// The lag-corrected effort over each uninterrupted stretch of the activity's heart rate.
+    func effortSeries(for activity: Activity, settings: HeartRateZoneSettings) -> [EffortSeries] {
+        uninterruptedRuns(of: activity.heartRate).compactMap { run in
+            guard let first = run.first else { return nil }
+            return EffortSeries(start: first.time, bpm: effort(for: run, settings: settings))
+        }
+    }
+
     /// The lag-corrected effort, in bpm, on the regular grid over `run`.
-    private func effortSeries(for run: [HeartRateSample], settings: HeartRateZoneSettings) -> [Double] {
+    private func effort(for run: [HeartRateSample], settings: HeartRateZoneSettings) -> [Double] {
         let smoothed = smooth(resample(run))
         let lag = parameters.heartRateLagSeconds
         guard lag > 0, smoothed.count > 1 else { return smoothed }

@@ -2,9 +2,7 @@ import Foundation
 import Testing
 @testable import TrainingCore
 
-/// Heart rate here is simulated as a first-order response to a piecewise-constant effort, with a
-/// time constant (25 s) deliberately different from the classifier's default correction (30 s) and a
-/// little deterministic jitter, so the tests exercise the lag correction rather than mirror it.
+/// Heart rate is simulated by ``SimulatedHeartRate``.
 ///
 /// With the fixture athlete (Karvonen, resting 50 / max 190) the zones are: Z1 120–134 bpm,
 /// Z2 134–148, Z3 148–162, Z4 162–176, Z5 176–190.
@@ -14,29 +12,14 @@ struct PerformedIntensityClassifierTests {
     private let athlete = AthleteProfile.fixture()
     private let start = Date(timeIntervalSince1970: 1_800_000_000)
 
-    private typealias Effort = (seconds: Double, bpm: Double)
+    private typealias Effort = SimulatedHeartRate.Effort
 
     private func minutes(_ minutes: Double, _ bpm: Double) -> Effort {
         (minutes * 60, bpm)
     }
 
-    /// Simulated heart-rate samples every 5 s, beginning at `offset` seconds after `start`.
-    private func samples(_ profile: [Effort], offset: TimeInterval = 0, lag: Double = 25) -> [HeartRateSample] {
-        var result: [HeartRateSample] = []
-        var heartRate = 60.0
-        var second = 0
-        let decay = 1 - exp(-1 / lag)
-        for effort in profile {
-            for _ in 0..<Int(effort.seconds) {
-                heartRate += (effort.bpm - heartRate) * decay
-                if second % 5 == 0 {
-                    let jitter = 1.5 * sin(Double(second) * 0.7)
-                    result.append(HeartRateSample(time: start.addingTimeInterval(offset + Double(second)), bpm: heartRate + jitter))
-                }
-                second += 1
-            }
-        }
-        return result
+    private func samples(_ profile: [Effort], offset: TimeInterval = 0) -> [HeartRateSample] {
+        SimulatedHeartRate.samples(profile, start: start, offset: offset)
     }
 
     private func activity(_ profile: [Effort]) -> Activity {

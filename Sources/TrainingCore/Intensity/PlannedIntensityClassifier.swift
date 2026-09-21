@@ -24,6 +24,27 @@ public struct PlannedIntensityClassifier: Sendable {
         self.durationEstimator = durationEstimator
     }
 
+    /// One step of a workout with its repetitions unrolled, placed on the workout's timeline.
+    struct PlannedStep: Sendable {
+        /// Seconds from the start of the workout, assuming steps run back to back.
+        let offset: TimeInterval
+        let seconds: TimeInterval
+        let kind: StepKind
+        /// The zone the step's target resolves to, or the default for its kind.
+        let zone: Int
+        /// Whether `zone` came from an explicit, resolvable target.
+        let isExplicit: Bool
+        /// Whether `seconds` is fixed by the step's goal, so `offset` is reliable. Distance and
+        /// open goals last however long they take, which shifts everything after them.
+        let hasFixedDuration: Bool
+        let isOpen: Bool
+
+        /// Warm-up and cool-down never count as hard or moderate time.
+        var isEdge: Bool { kind == .warmup || kind == .cooldown }
+        /// The zone counted towards the ladder: edges are capped at zone 2.
+        var countedZone: Int { isEdge ? min(zone, 2) : zone }
+    }
+
     /// Classifies `workout` for `athlete`.
     ///
     /// A workout with no duration is ``IntensityCategory/veryLow`` with ``IntensityAssessment/Confidence/low``
@@ -32,37 +53,65 @@ public struct PlannedIntensityClassifier: Sendable {
     /// heart-rate range without recorded zone settings falls back to a default and lowers it to
     /// ``IntensityAssessment/Confidence/medium``.
     public func assess(_ workout: StructuredWorkout, athlete: AthleteProfile) -> IntensityAssessment {
+        assess(steps: plannedSteps(workout, athlete: athlete), zone: \.countedZone)
+    }
+
+    /// The workout's steps with repetitions unrolled, in order.
+    func plannedSteps(_ workout: StructuredWorkout, athlete: AthleteProfile) -> [PlannedStep] {
         let zoneModel = athlete.currentHeartRateZoneSettings.map(HeartRateZoneModel.init(settings:))
         let boundaries = zoneModel.flatMap(TimeInZoneBuilder.zoneBoundaries)
 
+        var steps: [PlannedStep] = []
+        var offset: TimeInterval = 0
+        for block in workout.blocks {
+            for _ in 0..<max(block.repetitions, 0) {
+                for step in block.steps {
+                    let seconds = durationEstimator.duration(for: step, athlete: athlete)
+                    guard seconds > 0 else { continue }
+
+                    let resolved = resolveZone(for: step, athlete: athlete, zoneModel: zoneModel, boundaries: boundaries)
+                    var hasFixedDuration = false
+                    if case .time = step.goal { hasFixedDuration = true }
+                    steps.append(PlannedStep(
+                        offset: offset,
+                        seconds: seconds,
+                        kind: step.kind,
+                        zone: resolved.zone,
+                        isExplicit: resolved.isExplicit,
+                        hasFixedDuration: hasFixedDuration,
+                        isOpen: step.goal == .open
+                    ))
+                    offset += seconds
+                }
+            }
+        }
+        return steps
+    }
+
+    /// Classifies `steps`, counting each step towards the zone `zone` returns for it.
+    ///
+    /// This lets a caller substitute the zone a step was actually performed in for the zone it
+    /// was planned at.
+    func assess(steps: [PlannedStep], zone: (PlannedStep) -> Int) -> IntensityAssessment {
         var totalSeconds: TimeInterval = 0
         var hardSeconds: TimeInterval = 0
         var moderateSeconds: TimeInterval = 0
         var aboveFirstZoneSeconds: TimeInterval = 0
         var allTargetsResolved = true
 
-        for block in workout.blocks {
-            for step in block.steps {
-                let seconds = durationEstimator.duration(for: step, athlete: athlete) * Double(block.repetitions)
-                guard seconds > 0 else { continue }
-
-                let resolved = resolveZone(for: step, athlete: athlete, zoneModel: zoneModel, boundaries: boundaries)
-                if !resolved.isExplicit || step.goal == .open {
-                    allTargetsResolved = false
-                }
-
-                let isEdge = step.kind == .warmup || step.kind == .cooldown
-                let zone = isEdge ? min(resolved.zone, 2) : resolved.zone
-
-                totalSeconds += seconds
-                if zone >= 4 {
-                    hardSeconds += seconds
-                } else if zone == 3 {
-                    moderateSeconds += seconds
-                }
-                if zone >= 2 {
-                    aboveFirstZoneSeconds += seconds
-                }
+        for step in steps {
+            if !step.isExplicit || step.isOpen {
+                allTargetsResolved = false
+            }
+            let counted = zone(step)
+            totalSeconds += step.seconds
+            if counted >= 4 {
+                hardSeconds += step.seconds
+            } else if counted == 3 {
+                moderateSeconds += step.seconds
+            }
+            if counted >= 2 {
+                aboveFirstZoneSeconds += step.seconds
             }
         }
 

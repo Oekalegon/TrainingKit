@@ -91,6 +91,12 @@ public final class TrainingModel {
     /// Public so a caller that needs the underlying stores directly (e.g. `PlanSandbox`, to
     /// snapshot a what-if simulation) can get them without this model growing a bespoke pass-through
     /// for every store-level operation it doesn't otherwise need itself.
+    /// The thresholds behind ``intensity(of:)-(Activity)`` and ``intensity(of:)-(PlannedActivity)``.
+    ///
+    /// Changing them takes effect on the next call; nothing is cached, so unlike ``parameters``
+    /// they don't invalidate ``metrics``.
+    public var intensityParameters: IntensityClassifierParameters
+
     public let stores: StoreSet
     private let estimator: any PlannedLoadEstimator
     private let calculators: [any LoadCalculator]
@@ -123,6 +129,7 @@ public final class TrainingModel {
     ///   - stores: Where activities/plans/workouts/cycles/the athlete profile are persisted.
     ///   - athlete: The athlete this model reflects.
     ///   - parameters: EWMA time constants and monotony window; defaults to the standard values.
+    ///   - intensityParameters: The thresholds for classifying intensity; defaults to the standard values.
     ///   - estimator: Estimates load for planned activities; defaults to ``TRIMPPlanEstimator``.
     ///   - calculators: Tried in order per activity; defaults to
     ///     ``ExponentialTRIMPCalculator``/``DurationRPECalculator``.
@@ -130,12 +137,14 @@ public final class TrainingModel {
         stores: StoreSet,
         athlete: AthleteProfile,
         parameters: LoadModelParameters = LoadModelParameters(),
+        intensityParameters: IntensityClassifierParameters = IntensityClassifierParameters(),
         estimator: any PlannedLoadEstimator = TRIMPPlanEstimator(),
         calculators: [any LoadCalculator] = [ExponentialTRIMPCalculator(), DurationRPECalculator()]
     ) {
         self.stores = stores
         self.athlete = athlete
         self.parameters = parameters
+        self.intensityParameters = intensityParameters
         self.estimator = estimator
         self.calculators = calculators
     }

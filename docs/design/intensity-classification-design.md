@@ -164,10 +164,13 @@ label consistently.
 ### 4.5 Where it lives
 
 `Sources/TrainingCore/Intensity/`: `IntensityCategory`, `IntensityAssessment`, `IntensityClassifierParameters`,
-`PlannedIntensityClassifier`, `PerformedIntensityClassifier` (+ `HRLagCompensator`, `BoutDetector` internals).
-Surfaced through `TrainingModel` (e.g. `intensity(of: Activity)` / `intensity(of: PlannedActivity)`) and as
-a field on `ActivitySummary`. **No persistence** for performed results in v1 (derived health data; compute on demand,
-cache locally only if profiling demands it).
+`PlannedIntensityClassifier`, `PerformedIntensityClassifier`, `PlanGuidedIntensityClassifier`.
+Surfaced through `TrainingModel` (`intensity(of: Activity)` — plan-guided when the activity's plan and workout are
+loaded, heart-rate-only otherwise — and `intensity(of: PlannedActivity)`), with the thresholds in
+`TrainingModel.intensityParameters`. **Not a field on `ActivitySummary`**: the result depends on the linked plan,
+which a summary (built from the activity alone) doesn't have, so it would disagree with the model's answer.
+**No persistence** for performed results in v1 (derived health data; compute on demand, not cached, so callers
+should compute once per load rather than in a re-evaluating view body; cache locally only if profiling demands it).
 
 ## 5. Phasing
 

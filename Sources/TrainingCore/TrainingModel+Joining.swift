@@ -84,14 +84,39 @@ extension TrainingModel {
         }
         guard let merged = Activity.joined(pieces) else { return }
         try await stores.activityStore.saveJoin(merged, components: pieces.map(\.id), replacing: replacedJoinIDs)
+        // The plan a piece (or replaced join) held is now held by the join, so it must say so.
+        try await handOverPlans(
+            from: pieces.map(\.id) + replacedJoinIDs,
+            planIDs: (pieces + [first, second]).compactMap(\.linkedPlanID),
+            to: merged
+        )
 
         try await reloadAfterJoinChange(from: earliest.start, asOf: today)
     }
 
     private func performUnjoin(id: UUID, asOf today: Date) async throws {
         guard let joined = try await stores.activityStore.activity(id: id) else { return }
+        let pieces = try await stores.activityStore.components(ofJoinedActivity: id)
         try await stores.activityStore.unjoinActivity(id: id)
+        try await handBackPlan(of: joined, to: pieces)
         try await reloadAfterJoinChange(from: joined.start, asOf: today)
+    }
+
+    /// After an unjoin, the plan the join held goes to the piece that already carries it, else the
+    /// earliest piece, so it stays matched rather than pointing at the removed join.
+    private func handBackPlan(of joined: Activity, to pieces: [Activity]) async throws {
+        guard let planID = joined.linkedPlanID,
+              var plan = try await stores.planStore.plan(id: planID),
+              plan.completedActivityID == joined.id else { return }
+        guard var heir = pieces.first(where: { $0.linkedPlanID == planID }) ?? pieces.first else {
+            plan.completedActivityID = nil
+            try await stores.planStore.upsert([plan])
+            return
+        }
+        heir.linkedPlanID = planID
+        plan.completedActivityID = heir.id
+        try await stores.activityStore.upsert([heir])
+        try await stores.planStore.upsert([plan])
     }
 
     private func reloadAfterJoinChange(from day: Date, asOf today: Date) async throws {
@@ -100,6 +125,7 @@ extension TrainingModel {
         }
         let range = loadedRange ?? (today...today)
         activities = try await stores.activityStore.activities(in: range)
+        plans = try await stores.planStore.plans(in: range)
         await recompute(asOf: today)
     }
 

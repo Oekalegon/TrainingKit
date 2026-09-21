@@ -94,9 +94,12 @@ extension TrainingModel {
                 // Removing a piece dissolves the join it belongs to, which is attributed to the
                 // *earliest* piece's day — possibly the day before this piece's, e.g. a session
                 // split across midnight — so that day's cached load has to be rebuilt too.
+                var removedIDs = [existing.id]
                 if let join = try await stores.activityStore.joinedActivity(containing: existing.id) {
                     deletedStarts.append(join.start)
+                    removedIDs.append(join.id)
                 }
+                try await releasePlans(heldBy: removedIDs)
             }
         }
 
@@ -105,7 +108,21 @@ extension TrainingModel {
         // full resync) would silently re-insert every duplicate/conflict the athlete had already
         // cleaned up, since the external source has no notion of TrainingKit's own deletes.
         let tombstoned = try await stores.activityStore.tombstonedSources(among: result.upserted.map(\.source))
-        let toUpsert = tombstoned.isEmpty ? result.upserted : result.upserted.filter { !tombstoned.contains($0.source) }
+        let untombstoned = tombstoned.isEmpty ? result.upserted : result.upserted.filter { !tombstoned.contains($0.source) }
+
+        // An importer builds each activity fresh, without the athlete's or reconciler's plan link
+        // (see ``Activity/linkedPlanID``); carry an existing link over so a re-import of a changed
+        // workout doesn't silently drop a match, including a manual one.
+        var toUpsert: [Activity] = untombstoned
+        var newActivities: [Activity] = []
+        let existingByID = try await stores.activityStore.activities(ids: toUpsert.map(\.id))
+        for index in toUpsert.indices {
+            if let existing = existingByID[toUpsert[index].id] {
+                if toUpsert[index].linkedPlanID == nil { toUpsert[index].linkedPlanID = existing.linkedPlanID }
+            } else {
+                newActivities.append(toUpsert[index])
+            }
+        }
 
         var refreshedJoinDays: [Date] = []
         if !toUpsert.isEmpty {
@@ -117,6 +134,16 @@ extension TrainingModel {
             try await stores.activityStore.deleteActivity(source: source)
         }
         try await stores.athleteStore.saveImportAnchor(result.anchor)
+
+        // Only brand-new activities are auto-matched, so an activity the athlete unlinked stays
+        // unlinked when it's re-imported.
+        // Best-effort: the import itself has already landed (and its anchor is saved), so a failure
+        // matching plans must not skip the cache invalidation and reload below.
+        do {
+            try await reconcile(newActivities)
+        } catch {
+            Logging.dataImport.error("Matching imported activities to plans failed: \(error.localizedDescription)")
+        }
 
         let affectedDates = toUpsert.map(\.start) + deletedStarts + refreshedJoinDays
         if let cache = stores.fitnessMetricsCacheStore, let earliest = affectedDates.min() {

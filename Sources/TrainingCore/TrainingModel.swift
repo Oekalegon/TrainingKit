@@ -12,7 +12,7 @@ import Foundation
 @MainActor
 public final class TrainingModel {
     public internal(set) var activities: [Activity] = []
-    public private(set) var plans: [PlannedActivity] = []
+    public internal(set) var plans: [PlannedActivity] = []
     public private(set) var workouts: [StructuredWorkout] = []
     public private(set) var cycles: [TrainingCycle] = []
     public private(set) var metrics: [FitnessMetrics] = []
@@ -41,6 +41,11 @@ public final class TrainingModel {
     /// anchor on every call, so a `false` from a genuinely never-connected athlete is unaffected —
     /// only a same-session `true` survives a later `nil`-anchor import.
     public internal(set) var hasEverImportedActivities = false
+
+    /// Automatic activity-to-plan matches made this session that had a close runner-up, for the
+    /// athlete to confirm or correct (see ``PlanMatchAmbiguity``). Cleared for an activity once it's
+    /// manually linked or unlinked. In-memory only: not persisted, so it starts empty after a relaunch.
+    public internal(set) var planMatchAmbiguities: [PlanMatchAmbiguity] = []
     /// The athlete this model reflects. A plain, caller-managed property — `TrainingModel` doesn't
     /// automatically load or save it via `AthleteStore`.
     ///
@@ -211,6 +216,8 @@ public final class TrainingModel {
     ///   - id: The plan to remove.
     ///   - today: Passed through to ``recompute(asOf:)``.
     public func deletePlan(id: UUID, asOf today: Date = .now) async throws {
+        // An activity matched to this plan is freed, not left holding a link to nothing.
+        try await releaseActivity(heldBy: id)
         try await stores.planStore.deletePlan(id: id)
         if let loadedRange {
             plans = try await stores.planStore.plans(in: loadedRange)

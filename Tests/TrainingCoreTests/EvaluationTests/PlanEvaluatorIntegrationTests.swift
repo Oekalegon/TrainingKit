@@ -8,7 +8,7 @@ struct PlanEvaluatorIntegrationTests {
     func mesoProgressMatchesRealLayoutBoundaries() {
         let athlete = AthleteProfile.fixture()
         let raceDate = Date(timeIntervalSince1970: 1_700_000_000)
-        let race = Race(name: "Goal Race", date: raceDate, priority: .a)
+        let race = Race(name: "Goal Race", date: raceDate, priority: .primary)
         let macro = MacroTemplate(name: "Block", mesoBlocks: [MacroTemplate.MesoBlock(phase: .build, microCount: 5)])
         let meso = MesocycleTemplate.threeToOne
 

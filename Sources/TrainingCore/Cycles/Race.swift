@@ -2,8 +2,8 @@ import Foundation
 
 /// A target race a training cycle is built around.
 ///
-/// Just enough to anchor a ``CycleLayoutBuilder`` layout and, later, the race-day TSB rule
-/// (`PlanEvaluator`, MVP 2) — `Goal`/richer race metadata are MVP 2 additions.
+/// A dated event with a ``RacePriority``. It anchors a ``CycleLayoutBuilder`` layout and the
+/// race-day TSB rule in ``PlanEvaluator``; a non-event target with no date is a separate `Goal`.
 public struct Race: Identifiable, Sendable, Codable, Hashable {
     /// A stable identifier for this race.
     public let id: UUID

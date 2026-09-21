@@ -9,14 +9,20 @@ extension Activity {
     /// this one via ``ActivityStore/saveJoin(_:components:replacing:)``.
     ///
     /// - The span runs from the earlier ``start`` to the later end, so the (short) gap between the
-    ///   two pieces counts as part of the session.
+    ///   two pieces counts as part of the session. That keeps ``dateRange`` contiguous, but a load
+    ///   that falls back to duration × RPE (see ``DurationRPECalculator``) includes the gap, by up
+    ///   to ``ActivityOverlapThresholds/joinGapTolerance``; heart-rate TRIMP skips gaps over 60 s.
+    ///   When the pieces overlap slightly, ``distanceMeters`` is a plain sum and so counts the
+    ///   overlapped stretch twice.
     /// - ``heartRate`` and ``speed`` samples are concatenated in time order; ``distanceMeters``
     ///   sums whichever sides report one.
     /// - ``elevation`` sums gain and loss and widens min/max; ``geographicBounds`` is the union.
     /// - ``cadence`` min/max widen; mean and median are duration-weighted averages of the two
     ///   pieces' values — the raw stream isn't kept, so the merged median is an approximation.
     /// - ``perceivedExertion`` is the duration-weighted average of whichever sides have one.
-    /// - ``sport`` is the longer piece's; ``linkedPlanID`` is the earlier piece's, else the later's.
+    /// - ``sport`` is the longer piece's. ``linkedPlanID`` is the earlier piece's, else the later's:
+    ///   if the pieces were reconciled to two different plans, the later piece's plan loses its
+    ///   match.
     ///
     /// - Parameters:
     ///   - a: One piece.

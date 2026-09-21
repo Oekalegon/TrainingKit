@@ -121,6 +121,29 @@ struct TrainingModelJoinTests {
         #expect(try await store.tombstonedSources(among: [a.source, b.source]) == [a.source, b.source])
     }
 
+    @Test("Joining invalidates the fitness-metrics cache from the pieces' day, so a past day is rebuilt (MVP1-80)")
+    func joinInvalidatesCache() async throws {
+        let store = InMemoryStore()
+        let cache = InMemoryStore()
+        let stores = StoreSet(
+            activityStore: store, planStore: store, workoutStore: store,
+            cycleStore: store, athleteStore: store, fitnessMetricsCacheStore: cache
+        )
+        // A 4-minute gap between RPE-5 pieces: the joined session's duration spans the gap, so
+        // its fallback load is 4 min × 5 = 20 higher than the two pieces' sum.
+        let a = piece(0, 600)
+        let b = piece(840, 600)
+        try await store.upsert([a, b])
+        let model = TrainingModel(stores: stores, athlete: AthleteProfile.fixture())
+        try await model.load(in: day(0)...day(5), asOf: day(3))
+        let before = try #require(try await cache.cachedMetrics(in: day(-1)...day(2)).first { $0.load > 0 }).load
+
+        try await model.joinActivities(a.id, b.id, asOf: day(3))
+
+        let after = try #require(try await cache.cachedMetrics(in: day(-1)...day(2)).first { $0.load > 0 }).load
+        #expect(abs((after - before) - 20) < 0.5)
+    }
+
     @Test("Same id twice, or a missing id, is a no-op (MVP1-80)")
     func noOps() async throws {
         let (store, model) = makeModel()

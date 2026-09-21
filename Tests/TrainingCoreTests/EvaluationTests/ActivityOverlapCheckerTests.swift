@@ -240,6 +240,64 @@ struct ActivityOverlapCheckerJoinTests {
         #expect(advice.recommendation == .join)
     }
 
+    @Test("A gap of exactly joinGapTolerance is a join; one second more is not")
+    func gapBoundary() throws {
+        let first = Activity(source: .manual, sport: .running, start: t0, duration: 600)
+        func advice(gap: TimeInterval) throws -> OverlapRecommendation {
+            let second = Activity(source: .manual, sport: .running, start: t0.addingTimeInterval(600 + gap), duration: 600)
+            return try #require(ActivityOverlapChecker.findOverlaps(in: [first, second]).first).recommendation
+        }
+
+        #expect(try advice(gap: 300) == .join)
+        #expect(try advice(gap: 301) == .possibleMultisport)
+    }
+
+    @Test("A custom joinGapTolerance moves the boundary")
+    func customJoinTolerance() throws {
+        let first = Activity(source: .manual, sport: .running, start: t0, duration: 600)
+        let second = Activity(source: .manual, sport: .running, start: t0.addingTimeInterval(600 + 120), duration: 600)
+        let tight = ActivityOverlapThresholds(joinGapTolerance: 60)
+
+        #expect(try #require(ActivityOverlapChecker.findOverlaps(in: [first, second], thresholds: tight).first).recommendation == .possibleMultisport)
+        #expect(try #require(ActivityOverlapChecker.findOverlaps(in: [first, second]).first).recommendation == .join)
+    }
+
+    @Test("A small overlap between same-sport pieces (watch restarted early) is a join, not a conflict")
+    func smallOverlap() throws {
+        let first = Activity(source: .manual, sport: .running, start: t0, duration: 1800)
+        // Starts 20 s before the first ends, runs 40 min: start/end differ by far more than the
+        // same-session tolerance, and neither contains the other.
+        let second = Activity(source: .manual, sport: .running, start: t0.addingTimeInterval(1780), duration: 2400)
+
+        #expect(try #require(ActivityOverlapChecker.findOverlaps(in: [first, second]).first).recommendation == .join)
+    }
+
+    @Test("A larger overlap, a contained activity, or a different sport is not a join")
+    func overlapsThatAreNotJoins() throws {
+        let long = Activity(source: .manual, sport: .running, start: t0, duration: 3600)
+        let bigOverlap = Activity(source: .manual, sport: .running, start: t0.addingTimeInterval(1800), duration: 3600)
+        let contained = Activity(source: .manual, sport: .running, start: t0.addingTimeInterval(600), duration: 300)
+        let otherSport = Activity(source: .manual, sport: .cycling, start: t0.addingTimeInterval(3500), duration: 3600)
+
+        #expect(try #require(ActivityOverlapChecker.findOverlaps(in: [long, bigOverlap]).first).recommendation == .conflict)
+        #expect(try #require(ActivityOverlapChecker.findOverlaps(in: [long, contained]).first).recommendation == .possibleMultisport)
+        #expect(try #require(ActivityOverlapChecker.findOverlaps(in: [long, otherSport]).first).recommendation == .conflict)
+    }
+
+    @Test("Thresholds encoded before joinGapTolerance existed still decode, with the default")
+    func legacyThresholdsDecode() throws {
+        let legacy = Data(#"{"sameSessionTolerance":300,"multisportGapTolerance":1800}"#.utf8)
+
+        let decoded = try JSONDecoder().decode(ActivityOverlapThresholds.self, from: legacy)
+
+        #expect(decoded == ActivityOverlapThresholds())
+        let roundTrip = try JSONDecoder().decode(
+            ActivityOverlapThresholds.self,
+            from: JSONEncoder().encode(ActivityOverlapThresholds(joinGapTolerance: 42))
+        )
+        #expect(roundTrip.joinGapTolerance == 42)
+    }
+
     @Test("A gap beyond joinGapTolerance stays possibleMultisport")
     func widerGap() throws {
         let first = Activity(source: .manual, sport: .running, start: t0, duration: 600)

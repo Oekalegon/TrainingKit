@@ -22,6 +22,9 @@ extension TrainingModel {
     ///
     /// A no-op if either id isn't in the store or both ids are the same.
     ///
+    /// - Throws: Whatever the ``ActivityStore`` throws saving the join or reloading afterwards; the
+    ///   join itself is saved atomically, so a failure there leaves the store unchanged.
+    ///
     /// - Parameters:
     ///   - firstID: One piece (or joined activity).
     ///   - secondID: The other piece (or joined activity).

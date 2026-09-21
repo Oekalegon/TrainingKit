@@ -15,4 +15,12 @@ struct RaceTests {
         let decoded = try JSONDecoder().decode(Race.self, from: JSONEncoder().encode(race))
         #expect(decoded == race)
     }
+
+    @Test("Priorities decode from their raw string keys, pinning the wire format")
+    func decodesRawKeys() throws {
+        for (key, expected) in [("primary", RacePriority.primary), ("secondary", .secondary), ("tertiary", .tertiary)] {
+            let json = Data("{\"\(key)\":{}}".utf8)
+            #expect(try JSONDecoder().decode(RacePriority.self, from: json) == expected)
+        }
+    }
 }

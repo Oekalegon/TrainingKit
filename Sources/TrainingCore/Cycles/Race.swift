@@ -11,7 +11,7 @@ public struct Race: Identifiable, Sendable, Codable, Hashable {
     public var name: String
     /// The calendar day the race takes place, in the athlete's timezone.
     public var date: Date
-    /// How much this race matters, for taper sizing.
+    /// How much this race matters to the athlete; not yet acted on (MVP 5).
     public var priority: RacePriority
 
     /// Creates a race.
@@ -20,7 +20,7 @@ public struct Race: Identifiable, Sendable, Codable, Hashable {
     ///   - id: A stable identifier; defaults to a new random `UUID`.
     ///   - name: The race's display name.
     ///   - date: The calendar day the race takes place, in the athlete's timezone.
-    ///   - priority: How much this race matters, for taper sizing.
+    ///   - priority: How much this race matters to the athlete; not yet acted on (MVP 5).
     public init(id: UUID = UUID(), name: String, date: Date, priority: RacePriority) {
         self.id = id
         self.name = name

@@ -6,8 +6,8 @@
 public enum RacePriority: Sendable, Codable, Hashable, CaseIterable {
     /// The goal race a macrocycle is built around; the layout tapers fully for it.
     case primary
-    /// An important tune-up race, worth a shorter taper than a ``primary`` race.
+    /// An important tune-up race; MVP 5 intends a shorter taper for it than for a ``primary`` race.
     case secondary
-    /// A low-priority or training race, raced through rather than tapered for.
+    /// A low-priority or training race; MVP 5 intends to race through it rather than taper.
     case tertiary
 }

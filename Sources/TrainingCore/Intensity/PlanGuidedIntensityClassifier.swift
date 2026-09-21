@@ -32,15 +32,22 @@ public struct PlanGuidedIntensityClassifier: Sendable {
     /// Gaps between consecutive heart-rate samples longer than this are treated as a pause.
     public var gapThresholdSeconds: TimeInterval
 
-    /// The percentile of a step's effort taken as the zone it reached, so a rep that only touches
-    /// its target near the end, or a brief dip, doesn't decide the step.
-    private static let stepEffortPercentile = 0.9
+    /// The percentile of a step's effort taken as the zone it reached. The median: an upper
+    /// percentile of a noisy series sits well above its centre, so with ordinary sensor noise a
+    /// tempo step run 4 bpm below zone 3 was credited as tempo in every one of 20 simulated runs
+    /// at the 90th percentile (see `IntensityNoiseRobustnessTests`).
+    private static let stepEffortPercentile = 0.5
     /// The share of a step's duration that must have heart-rate data before it can be checked.
     private static let stepMinimumCoverage = 0.5
     /// The share of hard and tempo step time that must have been checked for high confidence.
     private static let verifiedShareForHighConfidence = 0.75
 
     /// Creates a classifier.
+    ///
+    /// - Parameters:
+    ///   - parameters: The thresholds applied to the session's time in zones.
+    ///   - durationEstimator: Converts step goals to durations.
+    ///   - gapThresholdSeconds: Gaps between heart-rate samples longer than this are pauses.
     public init(
         parameters: IntensityClassifierParameters = IntensityClassifierParameters(),
         durationEstimator: WorkoutDurationEstimator = WorkoutDurationEstimator(),
@@ -60,13 +67,21 @@ public struct PlanGuidedIntensityClassifier: Sendable {
         let performedClassifier = PerformedIntensityClassifier(parameters: parameters, gapThresholdSeconds: gapThresholdSeconds)
 
         let planned = plannedClassifier.assess(workout, athlete: athlete)
-        // Perceived-exertion and sparse-heart-rate results are too weak to move a planned category.
-        let measured = performedClassifier.assess(activity, athlete: athlete).flatMap { $0.confidence >= .medium ? $0 : nil }
 
-        if let verification = verify(
-            activity, workout: workout, athlete: athlete,
-            plannedClassifier: plannedClassifier, performedClassifier: performedClassifier
-        ) {
+        // The effort series is computed once and shared by the whole-activity classification and
+        // the per-step check.
+        let context = performedClassifier.zoneContext(for: activity, athlete: athlete)
+        let series = context.map { performedClassifier.effortSeries(for: activity, settings: $0.settings) } ?? []
+        let wholeActivity: IntensityAssessment?
+        if let context {
+            wholeActivity = performedClassifier.assess(activity, context: context, series: series)
+        } else {
+            wholeActivity = performedClassifier.assess(activity, athlete: athlete)
+        }
+        // Perceived-exertion and sparse-heart-rate results are too weak to move a planned category.
+        let measured = wholeActivity.flatMap { $0.confidence >= .medium ? $0 : nil }
+
+        if let verification = verify(activity, workout: workout, athlete: athlete, context: context, series: series, plannedClassifier: plannedClassifier) {
             let verified = verification.assessment
             var category = verified.category
             var confidence = IntensityAssessment.Confidence.medium
@@ -117,18 +132,14 @@ public struct PlanGuidedIntensityClassifier: Sendable {
         _ activity: Activity,
         workout: StructuredWorkout,
         athlete: AthleteProfile,
-        plannedClassifier: PlannedIntensityClassifier,
-        performedClassifier: PerformedIntensityClassifier
+        context: PerformedIntensityClassifier.ZoneContext?,
+        series: [PerformedIntensityClassifier.EffortSeries],
+        plannedClassifier: PlannedIntensityClassifier
     ) -> Verification? {
-        guard let settings = athlete.heartRateZoneSettings(asOf: activity.start) else { return nil }
-        let zoneModel = HeartRateZoneModel(settings: settings)
-        guard let boundaries = TimeInZoneBuilder.zoneBoundaries(zoneModel) else { return nil }
+        guard let context, !series.isEmpty else { return nil }
 
         let steps = plannedClassifier.plannedSteps(workout, athlete: athlete)
         guard !steps.isEmpty, steps.allSatisfy(\.hasFixedDuration) else { return nil }
-
-        let series = performedClassifier.effortSeries(for: activity, settings: settings)
-        guard !series.isEmpty else { return nil }
 
         var qualitySeconds: TimeInterval = 0
         var verifiedSeconds: TimeInterval = 0
@@ -148,8 +159,8 @@ public struct PlanGuidedIntensityClassifier: Sendable {
             verifiedSeconds += step.seconds
 
             let reached = TimeInZoneBuilder.zone(
-                for: zoneModel.deltaHRRatio(for: Self.percentile(Self.stepEffortPercentile, of: efforts)),
-                boundaries: boundaries
+                for: context.model.deltaHRRatio(for: Self.percentile(Self.stepEffortPercentile, of: efforts)),
+                boundaries: context.boundaries
             )
             verifiedSteps.append(step.at(zone: min(step.zone, reached)))
         }
@@ -182,29 +193,5 @@ public struct PlanGuidedIntensityClassifier: Sendable {
         let sorted = values.sorted()
         let index = Int((Double(sorted.count - 1) * fraction).rounded(.down))
         return sorted[index]
-    }
-}
-
-extension PlannedIntensityClassifier.PlannedStep {
-    /// This step with its zone replaced, e.g. by the zone it was actually performed in.
-    func at(zone: Int) -> PlannedIntensityClassifier.PlannedStep {
-        PlannedIntensityClassifier.PlannedStep(
-            offset: offset,
-            seconds: seconds,
-            kind: kind,
-            zone: zone,
-            isExplicit: isExplicit,
-            hasFixedDuration: hasFixedDuration,
-            isOpen: isOpen
-        )
-    }
-}
-
-extension IntensityCategory {
-    /// This category moved one level towards `target`, or unchanged if already there.
-    func moved(toward target: IntensityCategory) -> IntensityCategory {
-        if target > self { return IntensityCategory(rawValue: rawValue + 1) ?? self }
-        if target < self { return IntensityCategory(rawValue: rawValue - 1) ?? self }
-        return self
     }
 }

@@ -7,12 +7,15 @@ import Foundation
 ///
 /// 1. It is resampled onto a regular grid within each uninterrupted stretch of samples (gaps
 ///    longer than ``gapThresholdSeconds`` are pauses and are excluded, as for time in zone).
-/// 2. It is lightly smoothed to suppress sensor jitter.
+/// 2. It is smoothed over about half a minute to suppress sensor noise. This matters more than it
+///    looks: the next step differentiates the signal, which amplifies whatever noise is left.
 /// 3. The lag is undone by treating heart rate as a first-order response to effort:
 ///    `effort = heartRate + lag × d(heartRate)/dt`. A rise is credited to the interval that caused
 ///    it instead of the recovery after, and a slow fall is not mistaken for continued effort.
 /// 4. Only stretches that last at least ``IntensityClassifierParameters/minimumExcursionSeconds``
 ///    count as hard (zones 4–5) or moderate (zone 3), so brief drifts and spikes are ignored.
+///
+/// Samples that are not finite or not positive are dropped before any of this, as a gap.
 ///
 /// The result goes through the same ladder as ``PlannedIntensityClassifier``, so a planned and a
 /// performed session are directly comparable.
@@ -24,8 +27,10 @@ public struct PerformedIntensityClassifier: Sendable {
 
     /// The spacing of the resampled heart-rate grid, in seconds.
     static let gridSeconds: TimeInterval = 5
-    /// How many grid points the smoothing moving average spans (centred).
-    private static let smoothingPoints = 3
+    /// How many grid points the smoothing moving average spans (centred): 7 × 5 s = 35 s. Narrower
+    /// windows leave enough noise after the lag correction's differentiation to break up a steady
+    /// effort (an easy run read as recovery) and to inflate a step's effort above its true zone.
+    private static let smoothingPoints = 7
 
     /// Creates a classifier.
     ///
@@ -50,27 +55,49 @@ public struct PerformedIntensityClassifier: Sendable {
     /// ``IntensityAssessment/Confidence/medium`` for heart rate alone, and ``IntensityAssessment/Confidence/low``
     /// when the samples cover less than half of the activity.
     public func assess(_ activity: Activity, athlete: AthleteProfile) -> IntensityAssessment? {
-        guard let settings = athlete.heartRateZoneSettings(asOf: activity.start),
-              let boundaries = TimeInZoneBuilder.zoneBoundaries(HeartRateZoneModel(settings: settings))
-        else {
+        guard let context = zoneContext(for: activity, athlete: athlete) else {
             return exertionAssessment(for: activity)
         }
-        let zoneModel = HeartRateZoneModel(settings: settings)
+        return assess(activity, context: context, series: effortSeries(for: activity, settings: context.settings))
+    }
 
+    /// The zone settings in force on an activity's start, and what is derived from them.
+    struct ZoneContext {
+        let settings: HeartRateZoneSettings
+        let model: HeartRateZoneModel
+        let boundaries: [Double]
+    }
+
+    /// The athlete's zone context as of `activity.start`, or `nil` when none is recorded.
+    func zoneContext(for activity: Activity, athlete: AthleteProfile) -> ZoneContext? {
+        guard let settings = athlete.heartRateZoneSettings(asOf: activity.start) else { return nil }
+        let model = HeartRateZoneModel(settings: settings)
+        guard let boundaries = TimeInZoneBuilder.zoneBoundaries(model) else { return nil }
+        return ZoneContext(settings: settings, model: model, boundaries: boundaries)
+    }
+
+    /// Classifies `activity` from an effort series already computed for it, so a caller that needs
+    /// the series too (``PlanGuidedIntensityClassifier``) computes it once.
+    func assess(_ activity: Activity, context: ZoneContext, series: [EffortSeries]) -> IntensityAssessment? {
         var totalSeconds: TimeInterval = 0
         var hardSeconds: TimeInterval = 0
         var moderateSeconds: TimeInterval = 0
         var aboveFirstZoneSeconds: TimeInterval = 0
 
-        for series in effortSeries(for: activity, settings: settings) {
-            let zones = series.bpm.map { TimeInZoneBuilder.zone(for: zoneModel.deltaHRRatio(for: $0), boundaries: boundaries) }
+        for run in series {
+            let zones = run.bpm.map {
+                TimeInZoneBuilder.zone(for: context.model.deltaHRRatio(for: $0), boundaries: context.boundaries)
+            }
+            guard zones.count >= 2 else { continue }
 
             let hard = sustained(zones, where: { $0 >= 4 })
             let tempoOrAbove = sustained(zones, where: { $0 >= 3 })
             let aerobicOrAbove = sustained(zones, where: { $0 >= 2 })
 
-            totalSeconds += Double(zones.count) * Self.gridSeconds
-            for index in zones.indices {
+            // n grid points bound n − 1 intervals, each attributed to the zone at its start, so a
+            // run's total is its real length rather than one grid step too long.
+            totalSeconds += Double(zones.count - 1) * Self.gridSeconds
+            for index in zones.indices.dropLast() {
                 if hard[index] {
                     hardSeconds += Self.gridSeconds
                 } else if tempoOrAbove[index] {
@@ -103,9 +130,12 @@ public struct PerformedIntensityClassifier: Sendable {
     // MARK: - Heart-rate cleaning
 
     /// Splits `samples` into stretches with no gap longer than ``gapThresholdSeconds``, dropping
-    /// samples that share a timestamp and stretches too short to interpolate.
+    /// samples that are not a finite positive bpm or that share a timestamp, and stretches too
+    /// short to interpolate.
     private func uninterruptedRuns(of samples: [HeartRateSample]) -> [[HeartRateSample]] {
-        let sorted = samples.sorted { $0.time < $1.time }
+        let sorted = samples
+            .filter { $0.bpm.isFinite && $0.bpm > 0 }
+            .sorted { $0.time < $1.time }
         var runs: [[HeartRateSample]] = []
         var current: [HeartRateSample] = []
         for sample in sorted {

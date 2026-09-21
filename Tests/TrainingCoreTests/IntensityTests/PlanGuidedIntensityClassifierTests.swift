@@ -189,4 +189,17 @@ struct PlanGuidedIntensityClassifierTests {
         #expect(result.category == .veryLow)
         #expect(result.confidence == .high)
     }
+
+    @Test("an open-ended hard step can't be laid out on the timeline, so the planned category moves one level towards the measured one")
+    func openStepFallsBackToBlend() {
+        let plan = workout([WorkoutBlock(steps: [WorkoutStep(kind: .work, goal: .open, target: .heartRateZone(4))])])
+        let easyRun = activity([minutes(20, 140)])
+
+        let result = classifier.assess(easyRun, workout: plan, athlete: athlete)
+
+        // The open step defaults to 10 minutes at zone 4 (planned high); the run was easy (low).
+        #expect(result.category == .medium)
+        #expect(result.source == .blended)
+        #expect(result.confidence == .medium)
+    }
 }

@@ -17,8 +17,11 @@ public struct IntensityAssessment: Sendable, Codable, Hashable {
 
     /// How much the result should be trusted.
     public enum Confidence: Int, Sendable, Codable, Hashable, Comparable {
+        /// Little to go on: no usable heart rate, sparse samples, or only perceived exertion.
         case low = 0
+        /// One good source, or two that couldn't be compared.
         case medium = 1
+        /// Independent sources agree: a plan whose targets all resolved and heart rate that confirms it.
         case high = 2
 
         public static func < (lhs: Confidence, rhs: Confidence) -> Bool {
@@ -38,6 +41,13 @@ public struct IntensityAssessment: Sendable, Codable, Hashable {
     public let moderateSeconds: TimeInterval
 
     /// Creates an assessment.
+    ///
+    /// - Parameters:
+    ///   - category: The resulting category.
+    ///   - source: Where the assessment comes from.
+    ///   - confidence: How much the result should be trusted.
+    ///   - hardSeconds: Time in zones 4–5 that counted towards the category.
+    ///   - moderateSeconds: Time in zone 3 that counted towards the category.
     public init(
         category: IntensityCategory,
         source: Source,

@@ -131,4 +131,22 @@ struct TrainingModelIntensityTests {
 
         #expect(model.intensity(of: plan)?.category == .high)
     }
+
+    @Test("a linked plan outside the loaded range isn't available, so the activity falls back to heart rate alone")
+    func linkedPlanOutsideLoadedRange() async throws {
+        let model = makeModel()
+        let workout = shortRepWorkout
+        try await model.add(workout, asOf: start)
+        let plan = PlannedActivity(workoutID: workout.id, date: start)
+        try await model.add(plan, asOf: start)
+        // Load a window that doesn't include the plan's day.
+        let later = start.addingTimeInterval(20 * 86_400)
+        try await model.load(in: later...later.addingTimeInterval(86_400), asOf: later)
+        #expect(!model.plans.contains { $0.id == plan.id })
+
+        var activity = shortRepActivity()
+        activity.linkedPlanID = plan.id
+
+        #expect(model.intensity(of: activity)?.source == .measured)
+    }
 }

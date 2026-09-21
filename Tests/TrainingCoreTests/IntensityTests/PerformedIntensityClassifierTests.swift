@@ -197,4 +197,42 @@ struct PerformedIntensityClassifierTests {
 
         #expect(classifier.assess(run, athlete: athlete) == nil)
     }
+
+    @Test("samples that are NaN, zero or negative are dropped, so they neither crash nor change the result")
+    func invalidSamplesAreDropped() throws {
+        var samples = self.samples([minutes(30, 140)])
+        for index in stride(from: 40, to: 300, by: 37) {
+            samples[index] = HeartRateSample(time: samples[index].time, bpm: [.nan, 0, -10, .infinity][index % 4])
+        }
+        let run = Activity(source: .testing, sport: .running, start: start, duration: 1800, heartRate: samples)
+
+        let result = try #require(classifier.assess(run, athlete: athlete))
+
+        #expect(result.category == .low)
+        #expect(result.hardSeconds == 0)
+        #expect(result.moderateSeconds == 0)
+    }
+
+    @Test("a run whose samples are all invalid falls back to exertion, or nothing")
+    func allInvalidSamples() {
+        let samples = (0..<100).map { HeartRateSample(time: start.addingTimeInterval(Double($0) * 5), bpm: .nan) }
+        var run = Activity(source: .testing, sport: .running, start: start, duration: 500, heartRate: samples)
+
+        #expect(classifier.assess(run, athlete: athlete) == nil)
+
+        run.perceivedExertion = 7
+        #expect(classifier.assess(run, athlete: athlete)?.category == .high)
+    }
+
+    @Test("time in zone is the run's real length, not one grid step longer")
+    func totalsAreNotOverCounted() throws {
+        // A perfectly steady zone 3 heart rate for exactly 10 minutes: 121 samples, 120 intervals.
+        let samples = (0...120).map { HeartRateSample(time: start.addingTimeInterval(Double($0) * 5), bpm: 155) }
+        let run = Activity(source: .testing, sport: .running, start: start, duration: 600, heartRate: samples)
+        let noLag = PerformedIntensityClassifier(parameters: IntensityClassifierParameters(heartRateLagSeconds: 0))
+
+        let result = try #require(noLag.assess(run, athlete: athlete))
+
+        #expect(result.moderateSeconds == 600)
+    }
 }

@@ -4,7 +4,11 @@ import Foundation
 ///
 /// These read the loaded ``activities``, ``plans`` and ``workouts`` and are computed on demand,
 /// not cached: classifying a performed activity walks its heart-rate samples, so compute once per
-/// load (for example in a view model) rather than in a view body that re-evaluates often.
+/// load (for example in a view model) rather than in a view body that re-evaluates often. They run
+/// on the main actor like the rest of the model; the classifiers themselves
+/// (``PerformedIntensityClassifier``, ``PlanGuidedIntensityClassifier``,
+/// ``PlannedIntensityClassifier``) are `Sendable` values, so an app that classifies many activities
+/// can run them off the main actor with the model's ``athlete`` and ``intensityParameters``.
 ///
 /// The result depends on the plan an activity is linked to, so it isn't part of ``ActivitySummary``,
 /// which is built from an activity alone.

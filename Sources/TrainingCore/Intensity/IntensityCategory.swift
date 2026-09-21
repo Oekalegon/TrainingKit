@@ -18,4 +18,11 @@ public enum IntensityCategory: Int, Sendable, Codable, Hashable, CaseIterable, C
     public static func < (lhs: IntensityCategory, rhs: IntensityCategory) -> Bool {
         lhs.rawValue < rhs.rawValue
     }
+
+    /// This category moved one level towards `target`, or unchanged if already there.
+    func moved(toward target: IntensityCategory) -> IntensityCategory {
+        if target > self { return IntensityCategory(rawValue: rawValue + 1) ?? self }
+        if target < self { return IntensityCategory(rawValue: rawValue - 1) ?? self }
+        return self
+    }
 }

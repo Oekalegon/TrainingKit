@@ -32,6 +32,11 @@ public struct IntensityClassifierParameters: Sendable, Codable, Hashable {
     public var heartRateLagSeconds: TimeInterval
 
     /// Creates a parameter set; the defaults are the documented starting values.
+    ///
+    /// Values are made usable rather than trusted: times are clamped to be non-negative, fractions
+    /// to `0...1`, and a value that isn't finite falls back to its default (a `NaN` threshold would
+    /// otherwise make every comparison false and silently disable a category). Properties assigned
+    /// after creation are not checked.
     public init(
         highMinimumSeconds: TimeInterval = 6 * 60,
         highMinimumFraction: Double = 0.10,
@@ -41,13 +46,21 @@ public struct IntensityClassifierParameters: Sendable, Codable, Hashable {
         minimumExcursionSeconds: TimeInterval = 60,
         heartRateLagSeconds: TimeInterval = 30
     ) {
-        self.highMinimumSeconds = highMinimumSeconds
-        self.highMinimumFraction = highMinimumFraction
-        self.mediumMinimumSeconds = mediumMinimumSeconds
-        self.mediumMinimumFraction = mediumMinimumFraction
-        self.lowMinimumFraction = lowMinimumFraction
-        self.minimumExcursionSeconds = minimumExcursionSeconds
-        self.heartRateLagSeconds = heartRateLagSeconds
+        self.highMinimumSeconds = Self.seconds(highMinimumSeconds, default: 6 * 60)
+        self.highMinimumFraction = Self.fraction(highMinimumFraction, default: 0.10)
+        self.mediumMinimumSeconds = Self.seconds(mediumMinimumSeconds, default: 8 * 60)
+        self.mediumMinimumFraction = Self.fraction(mediumMinimumFraction, default: 0.15)
+        self.lowMinimumFraction = Self.fraction(lowMinimumFraction, default: 0.10)
+        self.minimumExcursionSeconds = Self.seconds(minimumExcursionSeconds, default: 60)
+        self.heartRateLagSeconds = Self.seconds(heartRateLagSeconds, default: 30)
+    }
+
+    private static func seconds(_ value: TimeInterval, default fallback: TimeInterval) -> TimeInterval {
+        value.isFinite ? max(value, 0) : fallback
+    }
+
+    private static func fraction(_ value: Double, default fallback: Double) -> Double {
+        value.isFinite ? min(max(value, 0), 1) : fallback
     }
 
     /// Applies the intensity ladder.

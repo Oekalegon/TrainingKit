@@ -52,7 +52,8 @@ removing the artefacts in §2:
 
 - `hardSeconds`: sustained time in Z4–Z5
 - `moderateSeconds`: sustained time in Z3
-- both also as a fraction of the working (non-warm-up/cool-down) duration
+- both also as a fraction of the **whole session's duration**, warm-up and cool-down included (they count
+  towards the duration but never towards hard or moderate time; see §4.2)
 
 Zone semantics (decided with the athlete):
 
@@ -92,13 +93,17 @@ This is what stops an easy run that briefly touches Z3 from becoming "medium".
 
 ### 4.2 Planned activities (pure, no sensor data)
 
-Walk the `StructuredWorkout` steps, excluding `.warmup`/`.cooldown`, convert each step to (seconds, effective zone):
+Walk the `StructuredWorkout` steps and convert each to (seconds, effective zone). Warm-up and cool-down steps
+count towards the session's duration, but their zone is capped at Z2, so they never add hard or moderate time:
 
-- `.heartRateZone(z)` → z; `.heartRateRange` → zone of its midpoint via the athlete's zone model
+- `.heartRateZone(z)` → z (independent of the athlete's settings; every built-in template uses these)
+- `.heartRateRange` → zone of its midpoint via the athlete's zone model. Absolute-bpm ranges and pace targets
+  only arrive through WorkoutKit alerts and are read with the athlete's **current** settings / pace model, which
+  for a very old workout may differ from what was in force then (documented limitation)
 - `.pace(range)` → nearest zone via `PaceModel`
 - `.rpe(n)` → fixed mapping (≤3 → Z1–2, 4–5 → Z3, 6–7 → Z4, ≥8 → Z5)
 - `.power` → unmapped for now (no power model) → falls back to the default below
-- no target → default by `StepKind` (`.work` → Z3, `.recovery` → Z1, others excluded)
+- no target → default by `StepKind` (`.work` → Z3, everything else → Z1)
 
 Distance goals are converted to seconds by `WorkoutDurationEstimator`. Then apply the §4.1 ladder.
 Recovery steps inside intervals count as time but not as quality time, so 5×1 km at Z4 with jog recoveries
@@ -112,12 +117,12 @@ Three evidence sources, combined in order of trust:
    The plan states the intent; heart rate verifies it.
    - *Verified plan.* If every plan step has a fixed (time) duration, the steps are laid out on the
      activity's timeline (assuming they ran back to back from the start). Each hard or tempo step
-     (zone ≥ 3, not warm-up/cool-down) is checked against the **lag-corrected effort** (§4.3.2's series, so
-     no separate window shift is needed): the P90 effort during the step gives the zone reached, and the
+     (zone ≥ 3, not warm-up/cool-down) is checked against the **lag-corrected effort** (the HR-only classifier's series below, so
+     no separate window shift is needed): the **median** effort during the step gives the zone reached, and the
      step counts at `min(planned, reached)`. The ladder is applied to these verified zones, so short reps
      that the HR-only debounce would drop still count, and skipped or under-performed reps don't.
      Steps with < 50 % heart-rate coverage are taken at their planned zone.
-   - *Unplanned effort.* Whole-activity HR-only evidence (§4.3.2) can move the verified category
+   - *Unplanned effort.* Whole-activity HR-only evidence (item 2 below) can move the verified category
      **one level up, never more** (HR can rise from heat/drift/illness without the effort changing).
      It never moves it down: the per-step check already covers under-performance.
    - *Plan can't be laid out* (distance or open steps): the planned category is moved one level towards the
@@ -129,9 +134,17 @@ Three evidence sources, combined in order of trust:
    unnecessary: the lag correction already stops a slow fall from being read as continued effort, and only
    hard/tempo steps affect the category.
 
-2. **HR-only (unlinked, no steps)** — smooth the HR series, apply the same lag compensation
-   (shift/first-order deconvolution of the rise), debounce excursions shorter than `minExcursion`,
-   build `TimeInZone` from the cleaned series, apply the §4.1 ladder.
+2. **HR-only (unlinked, no steps)** — drop invalid samples (NaN, non-positive), resample onto a 5 s grid,
+   smooth over ~35 s, apply first-order lag compensation (`effort = HR + lag·dHR/dt`), debounce
+   excursions shorter than `minExcursion`, and apply the §4.1 ladder.
+
+   *Noise.* The lag term differentiates the signal, so it amplifies sensor noise. With white noise of
+   σ = 5 bpm and the original 15 s smoothing, a steady run in the middle of Z2 read as `veryLow` in 14 of 20
+   simulated runs (the noise broke the ≥ Z2 stretch into pieces shorter than `minExcursion`); with 35 s
+   smoothing all 20 read `low`. Likewise the plan-guided step check uses the **median** effort, not the P90: at
+   σ = 3 bpm a tempo step run 4 bpm below Z3 was credited as tempo in 20 of 20 runs with P90 and in 0 of 20 with
+   the median, while a genuine tempo step was credited in 20 of 20 either way. These cases are pinned by
+   `IntensityNoiseRobustnessTests` (white Gaussian noise is an assumption, not a measurement of any watch).
 
 3. **Pace as structure evidence (running only, needs speed data)** — detect bouts as alternating fast/slow
    segments at ~30 s scale (bimodal smoothed speed, or high coefficient of variation on flat terrain).

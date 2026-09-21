@@ -16,6 +16,10 @@ public struct PlannedIntensityClassifier: Sendable {
     public var durationEstimator: WorkoutDurationEstimator
 
     /// Creates a classifier.
+    ///
+    /// - Parameters:
+    ///   - parameters: The thresholds applied to the session's time in zones.
+    ///   - durationEstimator: Converts step goals to durations.
     public init(
         parameters: IntensityClassifierParameters = IntensityClassifierParameters(),
         durationEstimator: WorkoutDurationEstimator = WorkoutDurationEstimator()
@@ -43,6 +47,19 @@ public struct PlannedIntensityClassifier: Sendable {
         var isEdge: Bool { kind == .warmup || kind == .cooldown }
         /// The zone counted towards the ladder: edges are capped at zone 2.
         var countedZone: Int { isEdge ? min(zone, 2) : zone }
+
+        /// This step with its zone replaced, e.g. by the zone it was actually performed in.
+        func at(zone: Int) -> PlannedStep {
+            PlannedStep(
+                offset: offset,
+                seconds: seconds,
+                kind: kind,
+                zone: zone,
+                isExplicit: isExplicit,
+                hasFixedDuration: hasFixedDuration,
+                isOpen: isOpen
+            )
+        }
     }
 
     /// Classifies `workout` for `athlete`.
@@ -52,6 +69,11 @@ public struct PlannedIntensityClassifier: Sendable {
     /// zone came from an explicit, resolvable target; a step with no target, a power target, or a
     /// heart-rate range without recorded zone settings falls back to a default and lowers it to
     /// ``IntensityAssessment/Confidence/medium``.
+    ///
+    /// A zone target (``IntensityTarget/heartRateZone(_:)``, every built-in template's kind) resolves
+    /// to the same zone whatever the athlete's settings. Absolute-bpm ranges and pace targets, which
+    /// only arrive through WorkoutKit alerts, are read with the athlete's *current* zone settings
+    /// and pace model — for a workout from long ago they may differ from what was in force then.
     public func assess(_ workout: StructuredWorkout, athlete: AthleteProfile) -> IntensityAssessment {
         assess(steps: plannedSteps(workout, athlete: athlete), zone: \.countedZone)
     }

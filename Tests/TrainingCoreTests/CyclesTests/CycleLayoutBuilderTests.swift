@@ -24,7 +24,7 @@ struct CycleLayoutBuilderTests {
     private let meso = MesocycleTemplate.threeToOne // [.build, .build, .build, .recovery], 7-day micros
 
     private func race() -> Race {
-        Race(name: "Goal Marathon", date: raceDate, priority: .a)
+        Race(name: "Goal Marathon", date: raceDate, priority: .primary)
     }
 
     /// The `start` that exactly fits the whole macro (10 micros × 7 days) ending on race day, with

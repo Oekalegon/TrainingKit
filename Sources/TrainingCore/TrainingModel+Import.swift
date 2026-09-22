@@ -156,6 +156,15 @@ extension TrainingModel {
 
         let range = loadedRange ?? Self.union(of: toUpsert.map { $0.start...$0.start }, fallback: today)
         activities = try await stores.activityStore.activities(in: range)
+        // Auto-matching above updates `completedActivityID` on the plan side too, so `plans` must be
+        // refreshed alongside `activities` or the week view keeps showing a newly-linked plan as pending.
+        // Best-effort like the reconcile above: a plan-store hiccup here must not fail an import that
+        // has already landed.
+        do {
+            plans = try await stores.planStore.plans(in: range)
+        } catch {
+            Logging.dataImport.error("Refreshing plans after import failed: \(error.localizedDescription)")
+        }
         loadedRange = range
         await recompute(asOf: today)
     }

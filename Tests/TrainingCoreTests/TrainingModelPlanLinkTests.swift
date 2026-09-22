@@ -43,6 +43,9 @@ struct TrainingModelPlanLinkTests {
 
         #expect(model.activities.first?.linkedPlanID == plan.id)
         #expect(try await store.plan(id: plan.id)?.completedActivityID == activity.id)
+        // Not just the store: `plans` must reflect the auto-match too, or a UI reading straight off
+        // the model (like the week view) keeps showing the plan as unmatched until the next full load.
+        #expect(model.plans.first?.completedActivityID == activity.id)
     }
 
     @Test("a re-import keeps an existing link, and an unlinked activity isn't re-matched")

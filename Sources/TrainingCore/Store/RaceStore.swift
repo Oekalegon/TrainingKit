@@ -2,7 +2,8 @@ import Foundation
 
 /// Storage contract for races.
 public protocol RaceStore: Sendable {
-    /// All races whose `date` falls within `range`.
+    /// All races whose `date` falls within `range`, inclusive of both endpoints, in no
+    /// guaranteed order.
     func races(in range: ClosedRange<Date>) async throws -> [Race]
 
     /// The race with this id, if any.

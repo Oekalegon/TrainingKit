@@ -18,6 +18,10 @@ extension TrainingModel {
     ///   skipped, so a failed anchor save simply makes the next import re-fetch what this one
     ///   already wrote, which `upsert`'s id-matched replace makes harmless.
     ///
+    /// Also reloads ``plans`` alongside ``activities`` (best-effort — a failure refreshing plans
+    /// doesn't fail the import) so a newly imported activity auto-matched to a plan by this run
+    /// shows as completed on the plan side immediately, not just in the store.
+    ///
     /// Serialized against any other in-flight ``importActivities(from:asOf:)``/
     /// ``resyncActivities(from:asOf:)`` call via ``pendingImport``: this run waits for whatever's
     /// already queued to finish before doing its own anchor-read-then-upsert. Without this, two
@@ -154,18 +158,39 @@ extension TrainingModel {
         // back as "never imported" just because this particular run didn't produce one.
         hasEverImportedActivities = hasEverImportedActivities || result.anchor != nil
 
-        let range = loadedRange ?? Self.union(of: toUpsert.map { $0.start...$0.start }, fallback: today)
-        activities = try await stores.activityStore.activities(in: range)
-        // Auto-matching above updates `completedActivityID` on the plan side too, so `plans` must be
-        // refreshed alongside `activities` or the week view keeps showing a newly-linked plan as pending.
-        // Best-effort like the reconcile above: a plan-store hiccup here must not fail an import that
-        // has already landed.
-        do {
-            plans = try await stores.planStore.plans(in: range)
-        } catch {
-            Logging.dataImport.error("Refreshing plans after import failed: \(error.localizedDescription)")
-        }
+        // A day either side of each activity's own timestamp: a plan the reconciler just matched to
+        // it can land up to a day away in absolute time (the reconciler itself widens its own plan
+        // fetch the same way, for the athlete-timezone-aware same-day check — see `reconcile(_:)`).
+        // Without this margin, a single newly-imported activity collapses the fallback to a
+        // zero-width `start...start` instant, and `plans(in:)`'s exact-instant containment check
+        // would then almost never match the plan's own `date`, silently leaving `plans` empty.
+        let day: TimeInterval = 86_400
+        let range = loadedRange ?? Self.union(
+            of: toUpsert.map { $0.start.addingTimeInterval(-day)...$0.start.addingTimeInterval(day) },
+            fallback: today
+        )
+        try await reloadActivitiesAndPlans(in: range, bestEffortPlans: true)
         loadedRange = range
         await recompute(asOf: today)
+    }
+
+    /// Reloads ``activities`` and ``plans`` from their stores for `range`.
+    ///
+    /// - Parameter bestEffortPlans: When `true`, a failure reloading `plans` is logged and
+    ///   swallowed rather than thrown, for a caller (import) that has already persisted its own
+    ///   changes and must not undo them over an unrelated plan-store hiccup. When `false` (a
+    ///   manual link/unlink, which hasn't persisted anything the caller can't also just retry), the
+    ///   failure propagates as usual.
+    func reloadActivitiesAndPlans(in range: ClosedRange<Date>, bestEffortPlans: Bool) async throws {
+        activities = try await stores.activityStore.activities(in: range)
+        if bestEffortPlans {
+            do {
+                plans = try await stores.planStore.plans(in: range)
+            } catch {
+                Logging.dataImport.error("Refreshing plans failed: \(error.localizedDescription)")
+            }
+        } else {
+            plans = try await stores.planStore.plans(in: range)
+        }
     }
 }

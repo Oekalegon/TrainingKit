@@ -132,8 +132,7 @@ extension TrainingModel {
             try? await cache.markDirty(from: day)
         }
         let range = loadedRange ?? (today...today)
-        activities = try await stores.activityStore.activities(in: range)
-        plans = try await stores.planStore.plans(in: range)
+        try await reloadActivitiesAndPlans(in: range, bestEffortPlans: false)
         await recompute(asOf: today)
     }
 

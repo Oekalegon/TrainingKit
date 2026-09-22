@@ -13,7 +13,7 @@ struct TrainingModelTests {
         let store = InMemoryStore()
         let stores = StoreSet(
             activityStore: store, planStore: store, workoutStore: store,
-            cycleStore: store, athleteStore: store
+            cycleStore: store, raceStore: store, athleteStore: store
         )
         return (store, stores)
     }
@@ -191,6 +191,36 @@ struct TrainingModelTests {
 
         #expect(model.cycles.map(\.id) == [meso.id])
         #expect(try await store.cycle(id: meso.id) == meso)
+    }
+
+    @Test("add(_ race:) persists to the store and updates local state")
+    func addRacePersistsAndUpdates() async throws {
+        let (store, stores) = makeStores()
+        let athlete = AthleteProfile.fixture()
+        let model = TrainingModel(stores: stores, athlete: athlete)
+        try await model.load(in: day(0)...day(13), asOf: day(0))
+        #expect(model.races.isEmpty)
+
+        let race = Race(name: "Local 10K", date: day(5), priority: .secondary)
+        try await model.add(race, asOf: day(0))
+
+        #expect(model.races.map(\.id) == [race.id])
+        #expect(try await store.race(id: race.id) == race)
+    }
+
+    @Test("deleteRace(id:) removes it from the store and local state")
+    func deleteRaceRemovesFromStoreAndState() async throws {
+        let (store, stores) = makeStores()
+        let athlete = AthleteProfile.fixture()
+        let model = TrainingModel(stores: stores, athlete: athlete)
+        try await model.load(in: day(0)...day(13), asOf: day(0))
+        let race = Race(name: "Local 10K", date: day(5), priority: .secondary)
+        try await model.add(race, asOf: day(0))
+
+        try await model.deleteRace(id: race.id, asOf: day(0))
+
+        #expect(model.races.isEmpty)
+        #expect(try await store.race(id: race.id) == nil)
     }
 
     @Test("recompute(asOf:) is deterministic for a fixed today")
@@ -580,7 +610,7 @@ struct TrainingModelTests {
         let otherStores = InMemoryStore()
         let stores = StoreSet(
             activityStore: fakeActivityStore, planStore: otherStores, workoutStore: otherStores,
-            cycleStore: otherStores, athleteStore: otherStores
+            cycleStore: otherStores, raceStore: otherStores, athleteStore: otherStores
         )
 
         let model = TrainingModel(stores: stores, athlete: athlete)
@@ -667,7 +697,7 @@ struct TrainingModelTests {
         let otherStores = InMemoryStore()
         let stores = StoreSet(
             activityStore: gatedStore, planStore: otherStores, workoutStore: otherStores,
-            cycleStore: otherStores, athleteStore: otherStores
+            cycleStore: otherStores, raceStore: otherStores, athleteStore: otherStores
         )
         let model = TrainingModel(stores: stores, athlete: athlete)
 

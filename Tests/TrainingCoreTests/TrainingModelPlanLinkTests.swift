@@ -20,7 +20,7 @@ struct TrainingModelPlanLinkTests {
         let store = InMemoryStore()
         let stores = StoreSet(
             activityStore: store, planStore: store, workoutStore: store,
-            cycleStore: store, athleteStore: store
+            cycleStore: store, raceStore: store, athleteStore: store
         )
         return (store, TrainingModel(stores: stores, athlete: AthleteProfile.fixture()))
     }
@@ -194,7 +194,7 @@ struct TrainingModelPlanLinkTests {
         let store = InMemoryStore()
         let planStore = FlakyPlanStore(base: store)
         let model = TrainingModel(
-            stores: StoreSet(activityStore: store, planStore: planStore, workoutStore: store, cycleStore: store, athleteStore: store),
+            stores: StoreSet(activityStore: store, planStore: planStore, workoutStore: store, cycleStore: store, raceStore: store, athleteStore: store),
             athlete: AthleteProfile.fixture()
         )
         try await model.load(in: day(0)...day(1), asOf: day(0))

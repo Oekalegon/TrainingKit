@@ -22,7 +22,7 @@ struct PlanSandboxTests {
         try await store.save(athlete)
         let stores = StoreSet(
             activityStore: store, planStore: store, workoutStore: store,
-            cycleStore: store, athleteStore: store
+            cycleStore: store, raceStore: store, athleteStore: store
         )
         return (store, stores, athlete)
     }
@@ -32,7 +32,7 @@ struct PlanSandboxTests {
         let store = InMemoryStore()
         let stores = StoreSet(
             activityStore: store, planStore: store, workoutStore: store,
-            cycleStore: store, athleteStore: store
+            cycleStore: store, raceStore: store, athleteStore: store
         )
         await #expect(throws: PlanSandboxError.missingAthleteProfile) {
             _ = try await PlanSandbox(snapshotOf: stores)

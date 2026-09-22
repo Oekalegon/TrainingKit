@@ -14,6 +14,7 @@ public enum TrainingPersistenceContainer {
             PlannedActivityRecord.self,
             StructuredWorkoutRecord.self,
             TrainingCycleRecord.self,
+            RaceRecord.self,
             AthleteProfileRecord.self,
             FitnessMetricsRecord.self,
             FitnessMetricsCacheStateRecord.self,

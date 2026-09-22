@@ -20,7 +20,7 @@ struct TrainingModelCacheTests {
         let store = InMemoryStore()
         let stores = StoreSet(
             activityStore: store, planStore: store, workoutStore: store,
-            cycleStore: store, athleteStore: store, fitnessMetricsCacheStore: cache
+            cycleStore: store, raceStore: store, athleteStore: store, fitnessMetricsCacheStore: cache
         )
         return (store, stores)
     }
@@ -99,7 +99,7 @@ struct TrainingModelCacheTests {
         let cache = InMemoryStore()
         let stores = StoreSet(
             activityStore: failingActivityStore, planStore: backing, workoutStore: backing,
-            cycleStore: backing, athleteStore: backing, fitnessMetricsCacheStore: cache
+            cycleStore: backing, raceStore: backing, athleteStore: backing, fitnessMetricsCacheStore: cache
         )
         let model = TrainingModel(stores: stores, athlete: athlete)
 
@@ -141,7 +141,7 @@ struct TrainingModelCacheTests {
         let failingActivityStore = FailingFetchActivityStore(wrapping: backing)
         let stores = StoreSet(
             activityStore: failingActivityStore, planStore: backing, workoutStore: backing,
-            cycleStore: backing, athleteStore: backing, fitnessMetricsCacheStore: cache
+            cycleStore: backing, raceStore: backing, athleteStore: backing, fitnessMetricsCacheStore: cache
         )
         let model = TrainingModel(stores: stores, athlete: athlete)
 
@@ -177,7 +177,7 @@ struct TrainingModelCacheTests {
         let failingActivityStore = FailingFetchActivityStore(wrapping: backing)
         let stores = StoreSet(
             activityStore: failingActivityStore, planStore: backing, workoutStore: backing,
-            cycleStore: backing, athleteStore: backing, fitnessMetricsCacheStore: cache
+            cycleStore: backing, raceStore: backing, athleteStore: backing, fitnessMetricsCacheStore: cache
         )
         let model = TrainingModel(stores: stores, athlete: athlete)
 

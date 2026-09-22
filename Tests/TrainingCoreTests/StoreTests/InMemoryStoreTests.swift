@@ -390,4 +390,47 @@ struct InMemoryStoreTests {
         try await store.deleteCycle(id: meso.id)
         #expect(try await store.cycle(id: meso.id) == nil)
     }
+
+    @Test("RaceStore upsert/fetch round-trips and filters by date range")
+    func raceStoreRoundTrip() async throws {
+        let store = InMemoryStore()
+        let inRange = Race(name: "Local 10K", date: day(5), priority: .secondary)
+        let outOfRange = Race(name: "Marathon", date: day(50), priority: .primary)
+
+        try await store.upsert([inRange, outOfRange])
+
+        let fetched = try await store.races(in: day(0)...day(10))
+        #expect(fetched == [inRange])
+        #expect(try await store.race(id: outOfRange.id) == outOfRange)
+    }
+
+    @Test("RaceStore upsert replaces an existing race matched by id")
+    func raceStoreUpsertReplaces() async throws {
+        let store = InMemoryStore()
+        var race = Race(name: "Local 10K", date: day(5), priority: .tertiary)
+        try await store.upsert([race])
+
+        race.name = "Local 10K (renamed)"
+        race.priority = .primary
+        try await store.upsert([race])
+
+        #expect(try await store.race(id: race.id) == race)
+    }
+
+    @Test("RaceStore delete removes a race")
+    func raceStoreDelete() async throws {
+        let store = InMemoryStore()
+        let race = Race(name: "Local 10K", date: day(5), priority: .primary)
+        try await store.upsert([race])
+
+        try await store.deleteRace(id: race.id)
+
+        #expect(try await store.race(id: race.id) == nil)
+    }
+
+    @Test("RaceStore delete is a no-op for an id that doesn't exist")
+    func raceStoreDeleteMissingIsNoOp() async throws {
+        let store = InMemoryStore()
+        try await store.deleteRace(id: UUID())
+    }
 }

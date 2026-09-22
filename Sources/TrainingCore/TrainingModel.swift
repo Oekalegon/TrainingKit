@@ -15,6 +15,7 @@ public final class TrainingModel {
     public internal(set) var plans: [PlannedActivity] = []
     public private(set) var workouts: [StructuredWorkout] = []
     public private(set) var cycles: [TrainingCycle] = []
+    public private(set) var races: [Race] = []
     public private(set) var metrics: [FitnessMetrics] = []
     /// Advice on activities in ``activities`` whose ``Activity/dateRange``s overlap or sit close
     /// together — see ``ActivityOverlapChecker/findOverlaps(in:thresholds:)``. Recomputed on every
@@ -126,7 +127,7 @@ public final class TrainingModel {
     /// Creates a training model.
     ///
     /// - Parameters:
-    ///   - stores: Where activities/plans/workouts/cycles/the athlete profile are persisted.
+    ///   - stores: Where activities/plans/workouts/cycles/races/the athlete profile are persisted.
     ///   - athlete: The athlete this model reflects.
     ///   - parameters: EWMA time constants and monotony window; defaults to the standard values.
     ///   - intensityParameters: The thresholds for classifying intensity; defaults to the standard values.
@@ -160,12 +161,14 @@ public final class TrainingModel {
         let newPlans = try await stores.planStore.plans(in: range)
         let newWorkouts = try await stores.workoutStore.workouts()
         let newCycles = try await stores.cycleStore.cycles(in: range)
+        let newRaces = try await stores.raceStore.races(in: range)
         let newHasEverImportedActivities = try await stores.athleteStore.importAnchor() != nil
 
         activities = newActivities
         plans = newPlans
         workouts = newWorkouts
         cycles = newCycles
+        races = newRaces
         hasEverImportedActivities = newHasEverImportedActivities
         loadedRange = range
         await recompute(asOf: today)
@@ -260,6 +263,36 @@ public final class TrainingModel {
         let range = loadedRange ?? Self.union(of: newCycles.map(\.dateRange), fallback: today)
         cycles = try await stores.cycleStore.cycles(in: range)
         loadedRange = range
+        await recompute(asOf: today)
+    }
+
+    /// Upserts `race` into ``RaceStore``, reloads races from the store, and recomputes.
+    ///
+    /// If `load(in:asOf:)` hasn't been called yet, this falls back to a range covering just
+    /// `race.date` (and adopts it as the loaded range), for the same reason as the
+    /// `PlannedActivity` overload of `add` above. Always recomputes even though nothing in
+    /// ``metrics`` depends on races yet (`PlanEvaluator`'s race-day TSB rule isn't wired up here
+    /// until MVP2-18) — matching every other `add` overload's behavior rather than special-casing
+    /// this one to skip it.
+    public func add(_ race: Race, asOf today: Date = .now) async throws {
+        try await stores.raceStore.upsert([race])
+        let range = loadedRange ?? (race.date...race.date)
+        races = try await stores.raceStore.races(in: range)
+        loadedRange = range
+        await recompute(asOf: today)
+    }
+
+    /// Removes the race with id `id`, reloads ``races`` and recomputes. A no-op, other than the
+    /// reload and recompute, if `id` doesn't exist in the store.
+    ///
+    /// - Parameters:
+    ///   - id: The race to remove.
+    ///   - today: Passed through to ``recompute(asOf:)``.
+    public func deleteRace(id: UUID, asOf today: Date = .now) async throws {
+        try await stores.raceStore.deleteRace(id: id)
+        if let loadedRange {
+            races = try await stores.raceStore.races(in: loadedRange)
+        }
         await recompute(asOf: today)
     }
 

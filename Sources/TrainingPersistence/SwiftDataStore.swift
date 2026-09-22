@@ -21,7 +21,7 @@ import SwiftData
 /// indexed date fields if profiling ever shows otherwise. `activities(in:)` is the one query that
 /// already needed this: see its doc comment below.
 @ModelActor
-public actor SwiftDataStore: ActivityStore, PlanStore, WorkoutLibraryStore, CycleStore, AthleteStore,
+public actor SwiftDataStore: ActivityStore, PlanStore, WorkoutLibraryStore, CycleStore, RaceStore, AthleteStore,
     FitnessMetricsCacheStore {
     // MARK: ActivityStore
 
@@ -405,6 +405,48 @@ public actor SwiftDataStore: ActivityStore, PlanStore, WorkoutLibraryStore, Cycl
 
     private func fetchCycleRecord(id: UUID) throws -> TrainingCycleRecord? {
         let descriptor = FetchDescriptor<TrainingCycleRecord>(predicate: #Predicate { $0.id == id })
+        return try modelContext.fetch(descriptor).first
+    }
+
+    // MARK: RaceStore
+
+    /// See `RaceStore/races(in:)`.
+    public func races(in range: ClosedRange<Date>) async throws -> [Race] {
+        try modelContext.fetch(FetchDescriptor<RaceRecord>())
+            .map { try $0.toRace() }
+            .filter { range.contains($0.date) }
+    }
+
+    /// See `RaceStore/race(id:)`.
+    public func race(id: UUID) async throws -> Race? {
+        try fetchRaceRecord(id: id)?.toRace()
+    }
+
+    /// See `RaceStore/upsert(_:)`.
+    public func upsert(_ races: [Race]) async throws {
+        var existingRecordsByID: [UUID: RaceRecord] = [:]
+        for record in try modelContext.fetch(FetchDescriptor<RaceRecord>()) {
+            existingRecordsByID[record.id] = record
+        }
+        for race in races {
+            if let existing = existingRecordsByID[race.id] {
+                try existing.update(from: race)
+            } else {
+                modelContext.insert(try RaceRecord(race: race))
+            }
+        }
+        try modelContext.save()
+    }
+
+    /// See `RaceStore/deleteRace(id:)`.
+    public func deleteRace(id: UUID) async throws {
+        guard let record = try fetchRaceRecord(id: id) else { return }
+        modelContext.delete(record)
+        try modelContext.save()
+    }
+
+    private func fetchRaceRecord(id: UUID) throws -> RaceRecord? {
+        let descriptor = FetchDescriptor<RaceRecord>(predicate: #Predicate { $0.id == id })
         return try modelContext.fetch(descriptor).first
     }
 

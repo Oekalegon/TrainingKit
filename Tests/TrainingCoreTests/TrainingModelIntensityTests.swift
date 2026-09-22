@@ -18,7 +18,7 @@ struct TrainingModelIntensityTests {
         let store = InMemoryStore()
         let stores = StoreSet(
             activityStore: store, planStore: store, workoutStore: store,
-            cycleStore: store, athleteStore: store
+            cycleStore: store, raceStore: store, athleteStore: store
         )
         return TrainingModel(stores: stores, athlete: AthleteProfile.fixture(), intensityParameters: intensityParameters)
     }

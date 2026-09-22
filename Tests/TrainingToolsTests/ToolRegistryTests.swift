@@ -29,7 +29,7 @@ struct ToolRegistryTests {
         try await store.save(athlete)
         let stores = StoreSet(
             activityStore: store, planStore: store, workoutStore: store,
-            cycleStore: store, athleteStore: store
+            cycleStore: store, raceStore: store, athleteStore: store
         )
         let sandbox = try await PlanSandbox(snapshotOf: stores)
         return ToolContext(stores: stores, sandbox: sandbox, today: Date(), athlete: athlete)

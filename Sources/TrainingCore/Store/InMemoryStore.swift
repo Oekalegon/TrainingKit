@@ -7,7 +7,7 @@ import Foundation
 /// `delete(id:)`) — Swift can't satisfy identically-shaped requirements from different protocols
 /// with different implementations on one conforming type.
 public actor InMemoryStore: ActivityStore, PlanStore, WorkoutLibraryStore, WorkoutTemplateStore, CycleStore,
-    AthleteStore, FitnessMetricsCacheStore {
+    AthleteStore, FitnessMetricsCacheStore, RaceStore {
     private var activitiesByID: [UUID: Activity] = [:]
     private var deletedSources: Set<ActivitySource> = []
     /// Joined activity id → its component ids. See ``ActivityStore/saveJoin(_:components:replacing:)``.
@@ -16,6 +16,7 @@ public actor InMemoryStore: ActivityStore, PlanStore, WorkoutLibraryStore, Worko
     private var workoutsByID: [UUID: StructuredWorkout] = [:]
     private var templatesByID: [UUID: WorkoutTemplate] = [:]
     private var cyclesByID: [UUID: TrainingCycle] = [:]
+    private var racesByID: [UUID: Race] = [:]
     private var profile: AthleteProfile?
     private var anchor: ImportAnchor?
     private var cachedMetricsByDay: [Date: FitnessMetrics] = [:]
@@ -251,6 +252,30 @@ public actor InMemoryStore: ActivityStore, PlanStore, WorkoutLibraryStore, Worko
             throw CycleStoreError.hasChildren(id)
         }
         cyclesByID.removeValue(forKey: id)
+    }
+
+    // MARK: RaceStore
+
+    /// See ``RaceStore/races(in:)``.
+    public func races(in range: ClosedRange<Date>) async throws -> [Race] {
+        racesByID.values.filter { range.contains($0.date) }
+    }
+
+    /// See ``RaceStore/race(id:)``.
+    public func race(id: UUID) async throws -> Race? {
+        racesByID[id]
+    }
+
+    /// See ``RaceStore/upsert(_:)``.
+    public func upsert(_ races: [Race]) async throws {
+        for race in races {
+            racesByID[race.id] = race
+        }
+    }
+
+    /// See ``RaceStore/deleteRace(id:)``.
+    public func deleteRace(id: UUID) async throws {
+        racesByID.removeValue(forKey: id)
     }
 
     // MARK: AthleteStore

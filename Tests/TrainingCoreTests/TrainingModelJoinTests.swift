@@ -13,7 +13,7 @@ struct TrainingModelJoinTests {
         let store = InMemoryStore()
         let stores = StoreSet(
             activityStore: store, planStore: store, workoutStore: store,
-            cycleStore: store, athleteStore: store
+            cycleStore: store, raceStore: store, athleteStore: store
         )
         return (store, TrainingModel(stores: stores, athlete: AthleteProfile.fixture()))
     }
@@ -127,7 +127,7 @@ struct TrainingModelJoinTests {
         let cache = InMemoryStore()
         let stores = StoreSet(
             activityStore: store, planStore: store, workoutStore: store,
-            cycleStore: store, athleteStore: store, fitnessMetricsCacheStore: cache
+            cycleStore: store, raceStore: store, athleteStore: store, fitnessMetricsCacheStore: cache
         )
         // A 4-minute gap between RPE-5 pieces: the joined session's duration spans the gap, so
         // its fallback load is 4 min × 5 = 20 higher than the two pieces' sum.
@@ -206,7 +206,7 @@ struct TrainingModelJoinTests {
         let cache = InMemoryStore()
         let stores = StoreSet(
             activityStore: store, planStore: store, workoutStore: store,
-            cycleStore: store, athleteStore: store, fitnessMetricsCacheStore: cache
+            cycleStore: store, raceStore: store, athleteStore: store, fitnessMetricsCacheStore: cache
         )
         var utc = Calendar(identifier: .gregorian)
         utc.timeZone = TimeZone(identifier: "UTC")!

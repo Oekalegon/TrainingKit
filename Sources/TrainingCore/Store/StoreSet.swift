@@ -1,5 +1,5 @@
-/// Bundles the five Core store protocols so callers (``TrainingModel`` here, the MVP 2 LLM tool
-/// layer later) can pass one value instead of five separate store parameters.
+/// Bundles the six Core store protocols so callers (``TrainingModel`` here, the MVP 2 LLM tool
+/// layer later) can pass one value instead of six separate store parameters.
 public struct StoreSet: Sendable {
     /// Storage for completed activities.
     public var activityStore: any ActivityStore
@@ -9,6 +9,8 @@ public struct StoreSet: Sendable {
     public var workoutStore: any WorkoutLibraryStore
     /// Storage for training cycles.
     public var cycleStore: any CycleStore
+    /// Storage for races.
+    public var raceStore: any RaceStore
     /// Storage for the athlete profile.
     public var athleteStore: any AthleteStore
     /// Storage for the persisted CTL/ATL/TSB/monotony/strain cache. `nil` disables caching
@@ -23,6 +25,7 @@ public struct StoreSet: Sendable {
     ///   - planStore: Storage for planned activities.
     ///   - workoutStore: Storage for the workout library.
     ///   - cycleStore: Storage for training cycles.
+    ///   - raceStore: Storage for races.
     ///   - athleteStore: Storage for the athlete profile.
     ///   - fitnessMetricsCacheStore: Storage for the persisted fitness-metrics cache; defaults to
     ///     `nil` (caching disabled), so every existing caller is unaffected.
@@ -31,6 +34,7 @@ public struct StoreSet: Sendable {
         planStore: any PlanStore,
         workoutStore: any WorkoutLibraryStore,
         cycleStore: any CycleStore,
+        raceStore: any RaceStore,
         athleteStore: any AthleteStore,
         fitnessMetricsCacheStore: (any FitnessMetricsCacheStore)? = nil
     ) {
@@ -38,6 +42,7 @@ public struct StoreSet: Sendable {
         self.planStore = planStore
         self.workoutStore = workoutStore
         self.cycleStore = cycleStore
+        self.raceStore = raceStore
         self.athleteStore = athleteStore
         self.fitnessMetricsCacheStore = fitnessMetricsCacheStore
     }

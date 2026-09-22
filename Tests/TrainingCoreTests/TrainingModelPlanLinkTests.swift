@@ -43,6 +43,33 @@ struct TrainingModelPlanLinkTests {
 
         #expect(model.activities.first?.linkedPlanID == plan.id)
         #expect(try await store.plan(id: plan.id)?.completedActivityID == activity.id)
+        // Not just the store: `plans` must reflect the auto-match too, or a UI reading straight off
+        // the model (like the week view) keeps showing the plan as unmatched until the next full load.
+        #expect(model.plans.first?.completedActivityID == activity.id)
+    }
+
+    @Test("import matches a plan even before any load(in:) has populated the model")
+    func importLinksBeforeAnyLoad() async throws {
+        let (store, model) = makeModel()
+        let w = workout(minutes: 30)
+        // Inserted straight into the store, bypassing `model.add`, which would itself set
+        // `loadedRange` (to `plan.date...plan.date`) and mask the fallback-range path this test
+        // exists to exercise: `performImport`'s own `loadedRange ?? Self.union(...)` computation
+        // when the model has never been loaded.
+        try await store.upsert([w])
+        let plan = PlannedActivity(workoutID: w.id, date: day(0))
+        try await store.upsert([plan])
+        #expect(model.loadedRange == nil)
+
+        // The activity's own timestamp is offset from the plan's `date` (same calendar day, not the
+        // same instant) — with a `loadedRange` of `nil`, a fallback range collapsed to a zero-width
+        // `activity.start...activity.start` instant would miss `plan.date` entirely and leave
+        // `model.plans` without the freshly-matched plan.
+        let activity = Activity(source: .healthKit(UUID()), sport: .running, start: day(0).addingTimeInterval(1800), duration: 1800)
+        try await model.importActivities(from: StubImporter(activities: [activity]), asOf: day(0))
+
+        #expect(model.activities.first?.linkedPlanID == plan.id)
+        #expect(model.plans.first?.completedActivityID == activity.id)
     }
 
     @Test("a re-import keeps an existing link, and an unlinked activity isn't re-matched")

@@ -63,6 +63,20 @@ struct AthleteProfileMaxHeartRateTests {
         #expect(raised.heartRateZoneSettings(asOf: day(10))?.restingHeartRateBPM == 49)
     }
 
+    @Test("raising from a date before every entry copies the earliest entry there and raises the rest")
+    func raisingBeforeEveryEntry() {
+        let original = profile([settings(day(30), max: 178, resting: 52), settings(day(60), max: 180)])
+
+        let raised = original.raisingMaxHeartRate(to: 189, from: day(10), source: .workout(activityID: UUID()))
+
+        #expect(raised.heartRateZoneHistory.count == 3)
+        let fromDate = raised.heartRateZoneHistory.first { $0.effectiveDate == day(10) }
+        #expect(fromDate?.maxHeartRateBPM == 189)
+        #expect(fromDate?.restingHeartRateBPM == 52)
+        #expect(raised.heartRateZoneSettings(asOf: day(30))?.maxHeartRateBPM == 189)
+        #expect(raised.heartRateZoneSettings(asOf: day(60))?.maxHeartRateBPM == 189)
+    }
+
     @Test("a profile without heart-rate settings is returned unchanged")
     func noSettingsNoChange() {
         let original = profile([])

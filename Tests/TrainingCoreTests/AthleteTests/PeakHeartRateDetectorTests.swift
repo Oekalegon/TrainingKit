@@ -44,6 +44,47 @@ struct PeakHeartRateDetectorTests {
         #expect(detector.sustainedPeak(in: samples([240, 240, 240, 240])) == nil)
     }
 
+    @Test("a stuck, implausible stretch doesn't hide a genuine peak elsewhere in the activity")
+    func stuckStretchDoesNotHideGenuinePeak() {
+        let genuine = samples([185, 186, 187, 186])
+        let stuck = samples([240, 240, 240, 240], from: 600)
+
+        let peak = detector.sustainedPeak(in: genuine + stuck)
+
+        #expect(peak?.bpm == 186)
+    }
+
+    @Test("a cadence lock (a jump no heart makes, held for 30 s) is discarded")
+    func cadenceLockDiscarded() {
+        let peak = detector.sustainedPeak(in: samples([150, 151, 150, 182, 182, 183, 182, 182, 182, 150, 151]))
+
+        #expect(peak?.bpm == 150)
+    }
+
+    @Test("a jump with no matching drop is kept, so one misfire can't discard the rest of the workout")
+    func unreleasedJumpKept() {
+        let peak = detector.sustainedPeak(in: samples([150, 151, 150, 182, 182, 183, 182, 182]))
+
+        #expect(peak?.bpm == 182)
+    }
+
+    @Test("a fast but physiological rise (3 bpm/s) is kept")
+    func physiologicalRiseKept() {
+        let peak = detector.sustainedPeak(in: samples([150, 165, 180, 188, 189, 189, 188]))
+
+        #expect(peak?.bpm == 188)
+    }
+
+    @Test("with 1 s sampling, a jump is measured over 5 s, so ordinary sample noise isn't a lock")
+    func oneSecondNoiseNotALock() {
+        // ±4 bpm alternating noise around 185: 8 bpm/s sample to sample, but flat over 5 s.
+        let noisy = (0..<30).map { 185 + ($0 % 2 == 0 ? 4.0 : -4.0) }
+
+        let peak = detector.sustainedPeak(in: samples(noisy, every: 1))
+
+        #expect(peak?.bpm == 181)
+    }
+
     @Test("non-finite and non-positive samples are dropped, not treated as the window minimum")
     func invalidSamplesDropped() {
         let peak = detector.sustainedPeak(in: samples([180, .nan, 0, 181, 182], every: 3))
@@ -95,10 +136,13 @@ struct PeakHeartRateDetectorTests {
 
     @Test("out-of-range parameters are clamped")
     func parametersClamped() {
-        let clamped = PeakHeartRateDetector(sustainSeconds: -5, maximumGapSeconds: .nan, plausibleMaximumBPM: 20)
+        let clamped = PeakHeartRateDetector(
+            sustainSeconds: -5, maximumGapSeconds: .nan, plausibleMaximumBPM: 20, maximumRiseBPMPerSecond: 0
+        )
 
         #expect(clamped.sustainSeconds == 1)
         #expect(clamped.maximumGapSeconds == 15)
         #expect(clamped.plausibleMaximumBPM == 100)
+        #expect(clamped.maximumRiseBPMPerSecond == 1)
     }
 }

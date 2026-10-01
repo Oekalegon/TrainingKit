@@ -26,9 +26,12 @@ struct TrainingModelMaxHeartRateTests {
         return (store, TrainingModel(stores: stores, athlete: .fixture(maxHeartRateBPM: maxHeartRateBPM)))
     }
 
-    /// A 10-minute run that holds `peak` for its middle two minutes.
+    /// A run at 150 bpm that ramps up 10 bpm per 5 s sample (a real heart's pace, below the
+    /// detector's cadence-lock threshold) to hold `peak` for two minutes, then ramps back down.
     private func run(on start: Date, peak: Double) -> Activity {
-        let bpms = Array(repeating: 150.0, count: 48) + Array(repeating: peak, count: 24) + Array(repeating: 150.0, count: 48)
+        let ramp = stride(from: 150.0, to: peak, by: 10).dropFirst().map { $0 }
+        let bpms = Array(repeating: 150.0, count: 48) + ramp + Array(repeating: peak, count: 24)
+            + ramp.reversed() + Array(repeating: 150.0, count: 48)
         let samples = bpms.enumerated().map { index, bpm in
             HeartRateSample(time: start.addingTimeInterval(Double(index) * 5), bpm: bpm)
         }
@@ -55,6 +58,14 @@ struct TrainingModelMaxHeartRateTests {
         #expect(suggestion?.currentMaxBPM == 178)
         #expect(suggestion?.sport == .running)
         #expect(suggestion?.activityStart == day(2))
+    }
+
+    @Test("a peak must be at least 1 bpm above an unrounded current max")
+    func roundingNeedsWholeBeatAboveMax() {
+        let (_, model) = makeModel(maxHeartRateBPM: 178.4)
+
+        #expect(model.maxHeartRateSuggestion(among: [run(on: day(1), peak: 179)]) == nil)
+        #expect(model.maxHeartRateSuggestion(among: [run(on: day(1), peak: 180)])?.peakBPM == 180)
     }
 
     @Test("a single high sample doesn't produce a suggestion")

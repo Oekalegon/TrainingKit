@@ -15,8 +15,8 @@ extension TrainingModel {
     /// Compares against ``AthleteProfile/currentHeartRateZoneSettings`` rather than the settings in
     /// effect on each activity's date: max heart rate only rises through this flow, so an old
     /// activity that beat an old, lower max but not today's is no longer news. Peaks are found by
-    /// `detector` and rounded to a whole bpm before comparing, so a peak must exceed the current max
-    /// by at least 1 bpm. On equal peaks the most recent activity wins.
+    /// `detector` and rounded to a whole bpm, and must be at least 1 bpm above the current max. On
+    /// equal peaks the most recent activity wins.
     ///
     /// - Parameters:
     ///   - activities: The activities to consider, e.g. ``activities`` after an import.
@@ -32,7 +32,7 @@ extension TrainingModel {
         for activity in activities {
             guard let peak = detector.sustainedPeak(in: activity.heartRate) else { continue }
             let peakBPM = peak.bpm.rounded()
-            guard peakBPM > currentMax.rounded() else { continue }
+            guard peakBPM >= currentMax + 1 else { continue }
             let isBetter = best.map {
                 peakBPM > $0.peakBPM || (peakBPM == $0.peakBPM && activity.start > $0.activityStart)
             } ?? true
@@ -80,18 +80,26 @@ extension TrainingModel {
     /// the store in agreement. A no-op when the profile wouldn't change (for example the max was
     /// already raised past this peak).
     ///
+    /// Runs in the same queue as imports (see ``importActivities(from:asOf:)``), and computes the
+    /// raised profile from ``athlete`` as it is when its turn comes. Without that, a change to
+    /// ``athlete`` made while the save was in flight would be overwritten. A host app that updates
+    /// ``athlete`` itself (for example merging HealthKit biometrics) outside that queue can still
+    /// race with it.
+    ///
     /// - Parameters:
     ///   - suggestion: The confirmed suggestion.
     ///   - today: Passed through to ``recompute(asOf:)``.
     /// - Throws: Whatever ``AthleteStore/save(_:)`` throws; nothing is changed in that case.
     public func applyMaxHeartRate(_ suggestion: MaxHeartRateSuggestion, asOf today: Date = .now) async throws {
-        let updated = athlete.raisingMaxHeartRate(
-            to: suggestion.peakBPM, from: suggestion.activityStart,
-            source: .workout(activityID: suggestion.activityID)
-        )
-        guard updated != athlete else { return }
-        try await stores.athleteStore.save(updated)
-        athlete = updated
-        await recompute(asOf: today)
+        try await runQueued {
+            let updated = self.athlete.raisingMaxHeartRate(
+                to: suggestion.peakBPM, from: suggestion.activityStart,
+                source: .workout(activityID: suggestion.activityID)
+            )
+            guard updated != self.athlete else { return }
+            try await self.stores.athleteStore.save(updated)
+            self.athlete = updated
+            await self.recompute(asOf: today)
+        }
     }
 }

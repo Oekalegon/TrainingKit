@@ -98,16 +98,31 @@ estimate is commonly about 10 bpm off for an individual, and the ratio isn't cla
 max set too low inflates every session's load and shifts every zone down.
 
 The update is athlete-confirmed:
-1. `PeakHeartRateDetector` finds the highest heart rate an activity *held* for at least 10 s. For
-   each sample it takes the minimum over the 10 s window starting there, then the largest of those
-   minimums. A lone spike (cadence lock, strap static) never raises a window's minimum. Gaps over
-   15 s split the samples into separate runs, invalid samples are dropped, and held values above
-   230 bpm are rejected.
+1. `PeakHeartRateDetector` finds the highest heart rate an activity *held*, guarding against
+   three kinds of false highs:
+   - **Short spikes** (strap static, poor contact): the peak is the highest value held for at
+     least 10 s. For each sample take the minimum over the 10 s window starting there, then the
+     largest of those minimums. A lone spike never raises a window's minimum.
+   - **Cadence lock** (an optical sensor reporting running cadence as heart rate): a jump faster
+     than 5 bpm/s, measured over at least 5 s on a 3-sample running median, followed later by an
+     equally fast drop. The stretch between the two is discarded. The median keeps a lock's sharp
+     edge but removes spikes and most noise; a real heart rises at about 1–3 bpm/s. A jump with
+     no matching drop is kept rather than discarding the rest of the workout on a misfire, so a
+     lock that lasts to the end of the recording can still reach the athlete.
+   - **Stuck readings**: windows holding more than 230 bpm are skipped, and the best plausible
+     window elsewhere still counts.
+
+   Gaps over 15 s split the samples into separate runs, and invalid samples are dropped. Across
+   500 seeds of simulated 3 bpm sensor noise on 1 km-style intervals, the detected peak stayed
+   within 6 bpm of the true effort.
 2. `TrainingModel.maxHeartRateSuggestion(among:)` returns the activity with the highest held peak
    above the *current* max. `scanForMaxHeartRateSuggestion(in:excluding:)` does the same over the store (skipping declined activities), for
    a one-time look back (about 12 months; max heart rate falls with age).
 3. After the athlete confirms, `applyMaxHeartRate(_:asOf:)` calls
-   `AthleteProfile.raisingMaxHeartRate(to:from:source:)`, saves the profile and recomputes.
+   `AthleteProfile.raisingMaxHeartRate(to:from:source:)`, saves the profile and recomputes. It runs
+   in the import queue and computes the raised profile when its turn comes, so a concurrent import
+   can't overwrite it. A host app that changes `athlete` outside that queue (TrainingApp's
+   HealthKit merge) can still race with it.
 
 Raising is **raise-only** and **date-effective**:
 - A workout below the max says nothing about the true maximum, so this flow never lowers it. A

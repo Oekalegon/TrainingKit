@@ -104,8 +104,8 @@ public final class TrainingModel {
     public var intensityParameters: IntensityClassifierParameters
 
     public let stores: StoreSet
-    private let estimator: any PlannedLoadEstimator
-    private let calculators: [any LoadCalculator]
+    let estimator: any PlannedLoadEstimator
+    let calculators: [any LoadCalculator]
     var loadedRange: ClosedRange<Date>?
     /// Set by ``athlete``'s/``parameters``'s `didSet` when a ``StoreSet/fitnessMetricsCacheStore``
     /// is configured; consumed and cleared by ``recompute(asOf:)``, which is what every existing
@@ -385,7 +385,7 @@ public final class TrainingModel {
     /// `publishRange` extending further into the future than the last planned activity would
     /// otherwise leave those trailing days missing from `metrics` entirely rather than present with
     /// zero load. See ``paddedForward(_:through:calendar:)``.
-    private nonisolated static func buildMetricsWithoutCache(
+    nonisolated static func buildMetricsWithoutCache(
         activities: [Activity],
         plans: [PlannedActivity],
         publishRange: ClosedRange<Date>,

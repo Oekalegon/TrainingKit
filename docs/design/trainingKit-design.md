@@ -657,6 +657,51 @@ struct StatisticsCalculator: Sendable {
 
 ---
 
+### 9.4 Calendar export (MVP2-100)
+
+`TrainingModel.calendarExport(from:through:templates:asOf:)` returns a `CalendarExport`, a
+day-by-day view of any period, past or future, for use outside the app (a season plan in a
+spreadsheet, another analysis tool). `CalendarExport.jsonData()` writes it as pretty-printed JSON
+with sorted keys, ISO 8601 timestamps and `yyyy-MM-dd` day strings in the athlete's time zone.
+Missing values are written as `null` rather than left out, so every day and entry has the same keys.
+
+```json
+{
+  "schemaVersion": 1, "generatedAt": "…", "timeZone": "Europe/Amsterdam",
+  "firstDay": "2026-10-01", "lastDay": "2027-04-30",
+  "days": [
+    { "date": "2026-10-01",
+      "metrics": { "load": 85, "ctl": 52.1, "atl": 61.3, "tsb": -7.4, "monotony": 1.2, "strain": 410,
+                   "isProjected": false, "isWarmingUp": false },
+      "activities": [
+        { "status": "completed", "start": "…", "name": "Tempo 3 × 8 min", "sport": "running",
+          "template": "Tempo Run", "intensity": "medium", "trimp": 85, "trimpSource": "heartRate",
+          "durationSeconds": 3120, "distanceMeters": 9800,
+          "plan": { "name": "Tempo 3 × 8 min", "template": "Tempo Run", "trimp": 90,
+                    "trimpSource": "estimated", "durationSeconds": 3000, "distanceMeters": 9500 } } ] } ]
+}
+```
+
+What's included (`CalendarExportBuilder`, a pure function):
+- **Every calendar day** in the period, including empty ones.
+- **Completed activities**, with their measured or exertion-based TRIMP, duration, distance and
+  intensity. A recorded activity has no name of its own, so `name` is the name of the plan it
+  fulfilled, or `null`.
+- **A fulfilled plan** appears once, as `plan` on its activity (expected TRIMP, duration and
+  distance next to the actual ones), not as a second entry.
+- **Unfulfilled plans for today or later**, with expected TRIMP (the override, or the estimator),
+  projected duration and distance, and intended intensity. **Missed plans** (before today, never
+  performed) are left out, as on the week view: they never became load.
+- **"Workout type"** is three fields: `sport`, the `template` a planned workout was built from, and
+  the `intensity` category.
+- **Metrics** per day: load, CTL, ATL, TSB, monotony, strain (`null` when undefined, e.g. a flat
+  week), and the projected and warming-up flags.
+
+The export reads the stores directly, so the model's loaded `activities`, `plans` and `metrics`
+are untouched. It computes metrics fresh, starting `6 × ctlTimeConstantDays` (about eight months)
+before the period. That's enough warm-up for CTL and ATL to match the app's cache-seeded series
+to well within rounding, without reading the athlete's whole history.
+
 ## 10. Periodisation — macro, meso, micro cycles (Core, MVP 1)
 
 Cycles are the calendar structure that plans and statistics hang off, and they ship in MVP 1: the user creates them (by hand or from a template), plans activities inside them, and reads statistics per cycle. Nothing in the load model depends on them, but the evaluator does, and MVP 2's generator builds on the same `CycleLayoutBuilder` rather than introducing anything new.

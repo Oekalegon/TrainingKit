@@ -74,6 +74,10 @@ extension TrainingModel {
     /// Not `private`: also used by ``TrainingModel/deduplicateActivities(asOf:)`` (a plain store
     /// operation with no `ActivityImporting` dependency, hence its own file) to serialize against
     /// imports the same way two imports serialize against each other.
+    ///
+    /// Never call a queued public method (``importActivities(from:asOf:)``,
+    /// ``updateAthlete(asOf:_:)``, ``linkActivity(id:toPlan:asOf:)`` and the like) from inside
+    /// `operation`: it would wait for `operation` itself to finish, which never happens.
     func runQueued(_ operation: @escaping () async throws -> Void) async throws {
         let previous = pendingImport
         let task = Task {

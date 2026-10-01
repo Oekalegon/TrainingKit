@@ -80,26 +80,20 @@ extension TrainingModel {
     /// the store in agreement. A no-op when the profile wouldn't change (for example the max was
     /// already raised past this peak).
     ///
-    /// Runs in the same queue as imports (see ``importActivities(from:asOf:)``), and computes the
-    /// raised profile from ``athlete`` as it is when its turn comes. Without that, a change to
-    /// ``athlete`` made while the save was in flight would be overwritten. A host app that updates
-    /// ``athlete`` itself (for example merging HealthKit biometrics) outside that queue can still
-    /// race with it.
+    /// Goes through ``updateAthlete(asOf:_:)``, so it runs in the same queue as imports and other
+    /// athlete updates and raises whatever profile is current when its turn comes. A concurrent
+    /// update, such as a HealthKit refresh, can't overwrite it or be overwritten by it.
     ///
     /// - Parameters:
     ///   - suggestion: The confirmed suggestion.
     ///   - today: Passed through to ``recompute(asOf:)``.
     /// - Throws: Whatever ``AthleteStore/save(_:)`` throws; nothing is changed in that case.
     public func applyMaxHeartRate(_ suggestion: MaxHeartRateSuggestion, asOf today: Date = .now) async throws {
-        try await runQueued {
-            let updated = self.athlete.raisingMaxHeartRate(
+        try await updateAthlete(asOf: today) { athlete in
+            athlete.raisingMaxHeartRate(
                 to: suggestion.peakBPM, from: suggestion.activityStart,
                 source: .workout(activityID: suggestion.activityID)
             )
-            guard updated != self.athlete else { return }
-            try await self.stores.athleteStore.save(updated)
-            self.athlete = updated
-            await self.recompute(asOf: today)
         }
     }
 }

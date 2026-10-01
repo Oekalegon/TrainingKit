@@ -143,6 +143,40 @@ struct CalendarExportTests {
         #expect(metrics.strain == nil)
     }
 
+    @Test("days are calendar days in the athlete's time zone: a late-evening run stays on its own day")
+    func athleteTimeZoneDays() throws {
+        let amsterdam = AthleteProfile.fixture(restingHeartRateBPM: 50, maxHeartRateBPM: 190, timeZoneIdentifier: "Europe/Amsterdam")
+        // 2023-11-15 23:30 in Amsterdam is 22:30 UTC.
+        let lateRun = Activity(source: .healthKit(UUID()), sport: .running, start: Date(timeIntervalSince1970: 1_700_087_400), duration: 1200)
+
+        let export = CalendarExportBuilder().build(
+            from: lateRun.start.addingTimeInterval(-86400), through: lateRun.start.addingTimeInterval(86400),
+            activities: [lateRun], plans: [], workouts: [], templates: [], metrics: [],
+            athlete: amsterdam, today: lateRun.start, generatedAt: lateRun.start
+        )
+
+        #expect(export.timeZone == "Europe/Amsterdam")
+        #expect(export.days.map(\.date) == ["2023-11-14", "2023-11-15", "2023-11-16"])
+        #expect(export.days.map(\.activities.count) == [0, 1, 0])
+    }
+
+    @Test("an activity without heart rate is scored from perceived exertion, and says so")
+    func perceivedExertionSource() throws {
+        let start = day(1, hour: 7)
+        let noHeartRate = Activity(source: .healthKit(UUID()), sport: .running, start: start, duration: 2400, perceivedExertion: 6)
+
+        let entry = try #require(build(activities: [noHeartRate]).days[1].activities.first)
+
+        #expect(entry.trimpSource == .perceivedExertion)
+        #expect((entry.trimp ?? 0) > 0)
+    }
+
+    @Test("a manually entered load is labelled manual, not as a plan override")
+    func manualLoadLabel() {
+        #expect(CalendarExportBuilder.trimpSource(for: .manual) == .manual)
+        #expect(CalendarExportBuilder.trimpSource(for: .exponentialTRIMP) == .heartRate)
+    }
+
     @Test("JSON writes null for missing values, so every entry has the same keys, and decodes back")
     func jsonShape() throws {
         let easy = workout(name: "Easy")
@@ -211,6 +245,21 @@ struct TrainingModelCalendarExportTests {
         #expect(exported.ctl > 10)
         #expect(abs(exported.ctl - full.ctl) < 0.01)
         #expect(abs(exported.atl - full.atl) < 0.01)
+    }
+
+    @Test("a future period (the season plan) carries fitness forward from past training, then projects it")
+    func futurePeriodWarmsUpFromPast() async throws {
+        let (store, model) = makeModel()
+        try await store.upsert(stride(from: -60, to: 0, by: 2).map(run(on:)))
+
+        let export = try await model.calendarExport(from: day(10), through: day(20), asOf: day(0, hour: 12))
+
+        let ctl = export.days.compactMap { $0.metrics?.ctl }
+        #expect(ctl.count == 11)
+        #expect((ctl.first ?? 0) > 5)
+        #expect(zip(ctl, ctl.dropFirst()).allSatisfy { $0 >= $1 })
+        #expect(export.days.allSatisfy { $0.metrics?.isProjected == true })
+        #expect(export.days.allSatisfy { $0.activities.isEmpty })
     }
 
     private static var utc: Calendar {

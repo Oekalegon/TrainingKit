@@ -245,7 +245,7 @@ public struct CalendarExportBuilder: Sendable {
         case .exponentialTRIMP: .heartRate
         case .durationRPE: .perceivedExertion
         case .estimatedFromPlan: .estimated
-        case .manual: .override
+        case .manual: .manual
         }
     }
 }

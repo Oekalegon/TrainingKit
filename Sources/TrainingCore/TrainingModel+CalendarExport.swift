@@ -57,18 +57,28 @@ extension TrainingModel {
             today: today
         )
 
+        // The builder computes TRIMP, time in zone and intensity for every activity, walking all of
+        // their heart-rate samples: a season can take a few hundred milliseconds on a phone. It and
+        // its inputs are Sendable, so it runs off the main actor rather than freezing the UI.
         let period = periodStart...periodEnd
-        return CalendarExportBuilder(intensityParameters: intensityParameters).build(
-            from: periodStart,
-            through: periodEndDay,
-            activities: fetchedActivities.filter { period.contains($0.start) },
-            plans: fetchedPlans.filter { period.contains($0.date) },
-            workouts: fetchedWorkouts,
-            templates: templates,
-            metrics: metrics.filter { period.contains($0.day) },
-            athlete: athlete,
-            today: today,
-            generatedAt: today
-        )
+        let builder = CalendarExportBuilder(intensityParameters: intensityParameters)
+        let periodActivities = fetchedActivities.filter { period.contains($0.start) }
+        let periodPlans = fetchedPlans.filter { period.contains($0.date) }
+        let periodMetrics = metrics.filter { period.contains($0.day) }
+        let athlete = self.athlete
+        return await Task.detached(priority: .userInitiated) {
+            builder.build(
+                from: periodStart,
+                through: periodEndDay,
+                activities: periodActivities,
+                plans: periodPlans,
+                workouts: fetchedWorkouts,
+                templates: templates,
+                metrics: periodMetrics,
+                athlete: athlete,
+                today: today,
+                generatedAt: today
+            )
+        }.value
     }
 }

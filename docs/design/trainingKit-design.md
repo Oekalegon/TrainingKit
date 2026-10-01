@@ -684,13 +684,16 @@ Missing values are written as `null` rather than left out, so every day and entr
 
 What's included (`CalendarExportBuilder`, a pure function):
 - **Every calendar day** in the period, including empty ones.
-- **Completed activities**, with their measured or exertion-based TRIMP, duration, distance and
-  intensity. A recorded activity has no name of its own, so `name` is the name of the plan it
+- **Completed activities**, with their measured or exertion-based TRIMP, elapsed duration (pauses
+  included, not moving time), distance and intensity. A recorded activity has no name of its own, so `name` is the name of the plan it
   fulfilled, or `null`.
 - **A fulfilled plan** appears once, as `plan` on its activity (expected TRIMP, duration and
   distance next to the actual ones), not as a second entry.
 - **Unfulfilled plans for today or later**, with expected TRIMP (the override, or the estimator),
-  projected duration and distance, and intended intensity. **Missed plans** (before today, never
+  projected duration and distance, and intended intensity. A time-based workout's distance is
+  projected from the pace model, a figure the week view itself doesn't show yet (MVP2-35).
+  `trimpSource` says where each TRIMP came from: `heartRate`, `perceivedExertion`, `manual`,
+  `estimated` or `override`. **Missed plans** (before today, never
   performed) are left out, as on the week view: they never became load.
 - **"Workout type"** is three fields: `sport`, the `template` a planned workout was built from, and
   the `intensity` category.

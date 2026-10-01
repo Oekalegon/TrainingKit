@@ -81,6 +81,8 @@ public struct CalendarExport: Sendable, Codable, Hashable {
             case estimated
             /// The plan's own expected-load override.
             case override
+            /// Entered by hand for a completed activity.
+            case manual
         }
 
         /// Whether this was performed or is still planned.
@@ -105,10 +107,15 @@ public struct CalendarExport: Sendable, Codable, Hashable {
         public let trimp: Double?
         /// Where ``trimp`` came from.
         public let trimpSource: TRIMPSource?
-        /// Duration in seconds: recorded, or expected for a planned workout.
+        /// Duration in seconds. For a completed activity this is elapsed time, including pauses
+        /// (and, for a joined activity, the gap between its pieces), not moving time. For a planned
+        /// workout it's the expected duration; a distance-based step's time is projected from the
+        /// athlete's pace model.
         public let durationSeconds: Double
-        /// Distance in meters: recorded, or expected for a planned workout. `nil` when unknown,
-        /// e.g. a strength session, or a duration-based plan for an athlete without zone settings.
+        /// Distance in meters: recorded, or expected for a planned workout. For a time-based planned
+        /// workout this is projected from the athlete's pace model, the converted figure the week
+        /// view itself doesn't show yet (MVP2-35). `nil` when unknown, e.g. a strength session, or a
+        /// time-based plan for an athlete without zone settings.
         public let distanceMeters: Double?
         /// For a completed activity that fulfilled a plan, what that plan expected.
         public let plan: PlannedValues?
@@ -124,9 +131,10 @@ public struct CalendarExport: Sendable, Codable, Hashable {
         public let trimp: Double
         /// Whether ``trimp`` is the plan's override or an estimate.
         public let trimpSource: Entry.TRIMPSource
-        /// The expected duration, in seconds.
+        /// The expected duration, in seconds (projected from the pace model for distance-based steps).
         public let durationSeconds: Double
-        /// The expected distance, in meters, if it can be projected.
+        /// The expected distance, in meters (projected from the pace model for time-based steps),
+        /// if it can be projected.
         public let distanceMeters: Double?
     }
 

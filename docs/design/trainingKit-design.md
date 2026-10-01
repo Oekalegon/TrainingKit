@@ -86,6 +86,39 @@ struct AthleteProfile: Sendable, Codable {
 
 `HeartRateZoneModel` derives `deltaHRRatio(for bpm:)` from the profile and maps HR zones ↔ ratios so a workout step targeting "Zone 3" can be turned into a TRIMP intensity.
 
+#### Max heart rate from workouts (MVP2-56)
+
+Each `HeartRateZoneSettings` entry records where its max heart rate came from in
+`maxHeartRateSource`:
+- `.formula`: estimated from age (Tanaka); the default, and what older saved settings decode to;
+- `.workout(activityID:)`: reached in an ordinary workout.
+
+Max heart rate drives the Karvonen zones and the heart-rate-reserve ratio TRIMP is built on. An age
+estimate is commonly about 10 bpm off for an individual, and the ratio isn't clamped above 1, so a
+max set too low inflates every session's load and shifts every zone down.
+
+The update is athlete-confirmed:
+1. `PeakHeartRateDetector` finds the highest heart rate an activity *held* for at least 10 s. For
+   each sample it takes the minimum over the 10 s window starting there, then the largest of those
+   minimums. A lone spike (cadence lock, strap static) never raises a window's minimum. Gaps over
+   15 s split the samples into separate runs, invalid samples are dropped, and held values above
+   230 bpm are rejected.
+2. `TrainingModel.maxHeartRateSuggestion(among:)` returns the activity with the highest held peak
+   above the *current* max. `scanForMaxHeartRateSuggestion(in:)` does the same over the store, for
+   a one-time look back (about 12 months; max heart rate falls with age).
+3. After the athlete confirms, `applyMaxHeartRate(_:asOf:)` calls
+   `AthleteProfile.raisingMaxHeartRate(to:from:source:)`, saves the profile and recomputes.
+
+Raising is **raise-only** and **date-effective**:
+- A workout below the max says nothing about the true maximum, so this flow never lowers it. A
+  dedicated max-HR test (a separate MVP2 item) may.
+- The new value applies from the activity's start. Earlier entries keep their max, so past load is
+  unchanged; that activity and everything after it are rescored. Later entries below the new value
+  are raised too, so a later resting-HR update can't bring the old max back.
+
+A host app that merges in fresh formula estimates (TrainingApp's HealthKit merge) must not overwrite
+a `.workout` max with a lower estimate.
+
 #### Multiple athletes
 
 Every store protocol, `TrainingModel`, `PlanSandbox`, and tool context already assume "one instance
@@ -336,7 +369,7 @@ protocol ActivityImporting: Sendable {
 - `HKAnchoredObjectQuery` on `HKWorkoutType` → new/updated/deleted workouts since the last anchor. Anchor persisted via `AthleteStore`.
 - For each workout, a scoped `HKSampleQuery` on `heartRate` bounded to the workout's `startDate...endDate`, sorted, mapped to `[HeartRateSample]`.
 - `Activity.source = .healthKit(workout.uuid)`; the UUID is the dedupe key.
-- `HealthKitAthleteReader` supplies resting HR (median `restingHeartRate` sample over the trailing 1–2 weeks, via `RestingHeartRateSmoother`, to absorb day-to-day noise before it feeds zone settings) and `biologicalSex()` to pre-fill `AthleteProfile`. HRmax is never read from HealthKit; default to Tanaka (`208 − 0.7 × age`) from `dateOfBirth` and let the user override.
+- `HealthKitAthleteReader` supplies resting HR (median `restingHeartRate` sample over the trailing 1–2 weeks, via `RestingHeartRateSmoother`, to absorb day-to-day noise before it feeds zone settings) and `biologicalSex()` to pre-fill `AthleteProfile`. HRmax is never read from HealthKit; default to Tanaka (`208 − 0.7 × age`) from `dateOfBirth`, raised later from workouts that exceed it (§2.1, MVP2-56).
 
 Requested authorisations: read `workoutType`, `heartRate`, `restingHeartRate`, `dateOfBirth`, `biologicalSex`. No write scopes in MVP 1.
 

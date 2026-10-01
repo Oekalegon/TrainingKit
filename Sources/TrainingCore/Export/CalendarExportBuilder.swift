@@ -133,7 +133,7 @@ public struct CalendarExportBuilder: Sendable {
         } else {
             intensity = PerformedIntensityClassifier(parameters: intensityParameters).assess(activity, athlete: athlete)
         }
-        let plannedValues = plan.flatMap { plan in
+        let expected = plan.flatMap { plan in
             workout.map { plannedValues(plan, workout: $0, templateNames: templateNames, athlete: athlete) }
         }
         return CalendarExport.Entry(
@@ -147,7 +147,7 @@ public struct CalendarExportBuilder: Sendable {
             trimpSource: load.map { Self.trimpSource(for: $0.method) },
             durationSeconds: activity.duration,
             distanceMeters: activity.distanceMeters,
-            plan: plannedValues
+            plan: expected
         )
     }
 

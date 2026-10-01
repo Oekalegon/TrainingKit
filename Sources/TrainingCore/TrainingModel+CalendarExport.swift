@@ -65,7 +65,7 @@ extension TrainingModel {
         let periodActivities = fetchedActivities.filter { period.contains($0.start) }
         let periodPlans = fetchedPlans.filter { period.contains($0.date) }
         let periodMetrics = metrics.filter { period.contains($0.day) }
-        let athlete = self.athlete
+        let exportAthlete = athlete
         return await Task.detached(priority: .userInitiated) {
             builder.build(
                 from: periodStart,
@@ -75,7 +75,7 @@ extension TrainingModel {
                 workouts: fetchedWorkouts,
                 templates: templates,
                 metrics: periodMetrics,
-                athlete: athlete,
+                athlete: exportAthlete,
                 today: today,
                 generatedAt: today
             )

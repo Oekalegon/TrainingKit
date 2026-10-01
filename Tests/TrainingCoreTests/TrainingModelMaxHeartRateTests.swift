@@ -78,6 +78,18 @@ struct TrainingModelMaxHeartRateTests {
         #expect(suggestion?.activityID == old.id)
     }
 
+    @Test("the history scan skips excluded activities and suggests the next best")
+    func scanSkipsExcluded() async throws {
+        let (store, model) = makeModel()
+        let declined = run(on: day(-100), peak: 191)
+        let next = run(on: day(-50), peak: 185)
+        try await store.upsert([declined, next])
+
+        let suggestion = try await model.scanForMaxHeartRateSuggestion(in: day(-365)...day(0), excluding: [declined.id])
+
+        #expect(suggestion?.activityID == next.id)
+    }
+
     @Test("applying raises max from the activity's date, saves the profile, and lowers that activity's inflated load")
     func applyRaisesSavesAndRecomputes() async throws {
         let (store, model) = makeModel()

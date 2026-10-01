@@ -104,7 +104,7 @@ The update is athlete-confirmed:
    15 s split the samples into separate runs, invalid samples are dropped, and held values above
    230 bpm are rejected.
 2. `TrainingModel.maxHeartRateSuggestion(among:)` returns the activity with the highest held peak
-   above the *current* max. `scanForMaxHeartRateSuggestion(in:)` does the same over the store, for
+   above the *current* max. `scanForMaxHeartRateSuggestion(in:excluding:)` does the same over the store (skipping declined activities), for
    a one-time look back (about 12 months; max heart rate falls with age).
 3. After the athlete confirms, `applyMaxHeartRate(_:asOf:)` calls
    `AthleteProfile.raisingMaxHeartRate(to:from:source:)`, saves the profile and recomputes.

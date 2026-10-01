@@ -5,7 +5,7 @@ import Foundation
 ///
 /// The flow has two steps, so the athlete stays in control of a change that moves every zone and
 /// every TRIMP score from that day on:
-/// 1. ``maxHeartRateSuggestion(among:detector:)`` or ``scanForMaxHeartRateSuggestion(in:detector:)`` finds a workout
+/// 1. ``maxHeartRateSuggestion(among:detector:)`` or ``scanForMaxHeartRateSuggestion(in:excluding:detector:)`` finds a workout
 ///    whose held peak beats the current max.
 /// 2. After the athlete confirms, ``applyMaxHeartRate(_:asOf:)`` records it and recomputes.
 extension TrainingModel {
@@ -55,13 +55,16 @@ extension TrainingModel {
     ///
     /// - Parameters:
     ///   - range: The activity start dates to scan, inclusive on both ends.
+    ///   - excludedIDs: Activities to skip, e.g. ones the athlete already declined, so the next-best
+    ///     activity can still be suggested.
     ///   - detector: Finds each activity's held peak.
     /// - Returns: The best suggestion in `range`, or `nil`.
     /// - Throws: Whatever ``ActivityStore/activities(in:)`` throws.
     public func scanForMaxHeartRateSuggestion(
-        in range: ClosedRange<Date>, detector: PeakHeartRateDetector = PeakHeartRateDetector()
+        in range: ClosedRange<Date>, excluding excludedIDs: Set<UUID> = [],
+        detector: PeakHeartRateDetector = PeakHeartRateDetector()
     ) async throws -> MaxHeartRateSuggestion? {
-        let stored = try await stores.activityStore.activities(in: range)
+        let stored = try await stores.activityStore.activities(in: range).filter { !excludedIDs.contains($0.id) }
         return maxHeartRateSuggestion(among: stored, detector: detector)
     }
 

@@ -119,10 +119,8 @@ The update is athlete-confirmed:
    above the *current* max. `scanForMaxHeartRateSuggestion(in:excluding:)` does the same over the store (skipping declined activities), for
    a one-time look back (about 12 months; max heart rate falls with age).
 3. After the athlete confirms, `applyMaxHeartRate(_:asOf:)` calls
-   `AthleteProfile.raisingMaxHeartRate(to:from:source:)`, saves the profile and recomputes. It runs
-   in the import queue and computes the raised profile when its turn comes, so a concurrent import
-   can't overwrite it. A host app that changes `athlete` outside that queue (TrainingApp's
-   HealthKit merge) can still race with it.
+   `AthleteProfile.raisingMaxHeartRate(to:from:source:)`, saves the profile and recomputes, through
+   `TrainingModel.updateAthlete(asOf:_:)` (below).
 
 Raising is **raise-only** and **date-effective**:
 - A workout below the max says nothing about the true maximum, so this flow never lowers it. A
@@ -133,6 +131,16 @@ Raising is **raise-only** and **date-effective**:
 
 A host app that merges in fresh formula estimates (TrainingApp's HealthKit merge) must not overwrite
 a `.workout` max with a lower estimate.
+
+#### Updating the athlete (MVP2-101)
+
+Every change to `TrainingModel.athlete` goes through `updateAthlete(asOf:_:)`. It takes a
+`(AthleteProfile) -> AthleteProfile` transform and runs it in the same queue as imports, then saves,
+assigns and recomputes. Reading `athlete`, saving and assigning separately leaves a gap across the
+save's `await`: two updates started together both start from the same old profile, so the model
+keeps whichever assigns last and the store keeps whichever saves last. A max-HR update and a
+HealthKit resting-HR refresh racing like this used to lose the raised max. With the queue, each
+transform sees the profile the update before it left, so both changes survive.
 
 #### Multiple athletes
 

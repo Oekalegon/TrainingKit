@@ -47,8 +47,13 @@ public final class TrainingModel {
     /// athlete to confirm or correct (see ``PlanMatchAmbiguity``). Cleared for an activity once it's
     /// manually linked or unlinked. In-memory only: not persisted, so it starts empty after a relaunch.
     public internal(set) var planMatchAmbiguities: [PlanMatchAmbiguity] = []
-    /// The athlete this model reflects. A plain, caller-managed property — `TrainingModel` doesn't
-    /// automatically load or save it via `AthleteStore`.
+    /// The athlete this model reflects: the profile passed to `init`, then whatever
+    /// ``updateAthlete(asOf:_:)`` last saved.
+    ///
+    /// Change it only through ``updateAthlete(asOf:_:)``, which saves through `AthleteStore`, runs
+    /// in the same queue as imports, and recomputes. The setter is internal so a host app can't
+    /// assign it directly: that would skip the save and could overwrite a concurrent update (see
+    /// MVP2-101 in the design doc).
     ///
     /// When a ``StoreSet/fitnessMetricsCacheStore`` is configured, reassigning this marks the
     /// persisted cache dirty (see ``recompute(asOf:)``): a newly *added*
@@ -59,7 +64,7 @@ public final class TrainingModel {
     /// (same `effectiveDate`, different bpm values), removing one, or changing any other athlete
     /// field (`sex`, `paceModel`, `timeZone`, `weekStartsOn`) isn't date-scoped the same way, so it
     /// conservatively invalidates the entire cache instead.
-    public var athlete: AthleteProfile {
+    public internal(set) var athlete: AthleteProfile {
         didSet {
             guard athlete != oldValue else { return }
             let oldDates = Set(oldValue.heartRateZoneHistory.map(\.effectiveDate))

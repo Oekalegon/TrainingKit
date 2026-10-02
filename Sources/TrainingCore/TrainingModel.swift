@@ -128,6 +128,13 @@ public final class TrainingModel {
     /// import already calls `recompute(asOf:)` itself at its tail, and reusing `pendingImport` here
     /// would make that call wait on its own still-in-flight import task — a guaranteed deadlock.
     private var pendingRecompute: Task<Void, Never>?
+    /// Bumped by every ``markCacheDirty(from:)``. A recompute remembers the value it started
+    /// with and only clears the cache's dirty watermark when it is unchanged: an import (which runs
+    /// on its own queue, not ``pendingRecompute``'s) can mark the cache dirty at any point while a
+    /// recompute is mid-flight, and clearing the watermark afterwards would silently drop that
+    /// invalidation. Comparing watermark *values* wouldn't catch it either, since `markDirty` only
+    /// ever lowers the watermark and a later or equal day leaves it unchanged.
+    private var cacheInvalidationEpoch = 0
 
     /// Creates a training model.
     ///
@@ -350,17 +357,74 @@ public final class TrainingModel {
             pendingCacheInvalidation = nil
         }
 
-        metrics = await Self.buildMetricsWithCache(
-            cache: cache,
-            stores: stores,
-            publishRange: loadedRange ?? (today...today),
-            workouts: workouts,
-            estimator: estimator,
-            calculators: calculators,
-            athlete: athlete,
-            parameters: parameters,
-            today: today
-        )
+        func build() async -> [FitnessMetrics] {
+            let epoch = cacheInvalidationEpoch
+            return await Self.buildMetricsWithCache(
+                cache: cache,
+                stores: stores,
+                publishRange: loadedRange ?? (today...today),
+                workouts: workouts,
+                estimator: estimator,
+                calculators: calculators,
+                athlete: athlete,
+                parameters: parameters,
+                today: today,
+                mayClearWatermark: { @MainActor [weak self] in self?.cacheInvalidationEpoch == epoch }
+            )
+        }
+
+        var built = await build()
+        // Self-heal: a cached row that doesn't follow from the day before it (or a hole between two
+        // cached days) was written by an older, buggy recompute — or lost an invalidation — and
+        // would otherwise stay wrong for good, since cached days are never recomputed on their own.
+        // One repair pass, from the last day that still agrees with what precedes it.
+        if let broken = Self.firstInconsistentDay(in: built, parameters: parameters, timeZone: athlete.timeZone) {
+            await markCacheDirty(from: broken)
+            built = await build()
+        }
+        metrics = built
+    }
+
+    /// The first day from which the series stops following the CTL/ATL recurrence, if any: the
+    /// earlier day of the first pair of consecutive published days where the later one's CTL/ATL
+    /// isn't what the earlier one's plus the later one's own load gives, or the last day before a
+    /// hole in the series. `nil` for a consistent series.
+    ///
+    /// Published days come from cached rows (written once the day is final) followed by a freshly
+    /// computed tail seeded from the last cached row, so a consistent cache gives a series where
+    /// every day follows from the one before. Pairs spanning a warm-up restart can't occur here:
+    /// a restart only happens at the start of the whole series.
+    nonisolated static func firstInconsistentDay(
+        in metrics: [FitnessMetrics], parameters: LoadModelParameters, timeZone: TimeZone
+    ) -> Date? {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = timeZone
+        let ordered = metrics.sorted { $0.day < $1.day }
+        for (previous, next) in zip(ordered, ordered.dropFirst()) {
+            if previous.day == next.day { continue }
+            guard calendar.date(byAdding: .day, value: 1, to: previous.day) == next.day else {
+                return previous.day
+            }
+            let expectedCTL = previous.ctl + (next.load - previous.ctl) / parameters.ctlTimeConstantDays
+            let expectedATL = previous.atl + (next.load - previous.atl) / parameters.atlTimeConstantDays
+            let tolerance = 1e-6
+            if abs(next.ctl - expectedCTL) > tolerance * max(1, abs(expectedCTL))
+                || abs(next.atl - expectedATL) > tolerance * max(1, abs(expectedATL)) {
+                return previous.day
+            }
+        }
+        return nil
+    }
+
+
+    /// Marks the fitness-metrics cache dirty from `date` forward, if a cache is configured, and
+    /// notes the invalidation for any recompute that is already in flight (see
+    /// ``cacheInvalidationEpoch``). Every cache invalidation other than the `athlete`/`parameters`
+    /// stash goes through here.
+    func markCacheDirty(from date: Date) async {
+        guard let cache = stores.fitnessMetricsCacheStore else { return }
+        cacheInvalidationEpoch += 1
+        try? await cache.markDirty(from: date)
     }
 
     /// The smallest range covering every range in `ranges`, or `fallback...fallback` if `ranges`
@@ -445,7 +509,10 @@ public final class TrainingModel {
     /// `.distantPast` invalidation wipes the cache first, so a change that shifts every `day`
     /// boundary, like a timezone change, can't leave stale rows behind under old boundaries, then
     /// still only recomputes from the wiped cache's own former earliest day forward, not the
-    /// literal epoch), else the day after whatever's already cached (clamped to `today`, so an
+    /// literal epoch; any other watermark is lowered to the day after the newest cached row if it
+    /// lies beyond it, so the seed is always the day immediately before the recompute starts and
+    /// no uncached day is skipped, and an empty cache always bootstraps), else the day after
+    /// whatever's already cached (clamped to `today`, so an
     /// already-caught-up cache only ever recomputes the volatile today/future tail), else the Unix
     /// epoch if the cache is empty (the one true full-history bootstrap, which only ever happens
     /// once). Fetches activities/plans for that range directly from `stores` — never from
@@ -453,7 +520,7 @@ public final class TrainingModel {
     /// only be a UI-driven subset — seeds CTL/ATL and the monotony window from the cache, computes
     /// forward, persists whatever's newly final (`day < today`), and assembles the result for
     /// `publishRange` from cached rows plus the fresh tail.
-    private nonisolated static func buildMetricsWithCache(
+    nonisolated static func buildMetricsWithCache(
         cache: any FitnessMetricsCacheStore,
         stores: StoreSet,
         publishRange: ClosedRange<Date>,
@@ -462,7 +529,8 @@ public final class TrainingModel {
         calculators: [any LoadCalculator],
         athlete: AthleteProfile,
         parameters: LoadModelParameters,
-        today: Date
+        today: Date,
+        mayClearWatermark: @MainActor () -> Bool
     ) async -> [FitnessMetrics] {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = athlete.timeZone
@@ -495,13 +563,15 @@ public final class TrainingModel {
                 let earliestBeforeWipe = try? await cache.earliestCachedDay()
                 effectiveFetchFrom = earliestBeforeWipe ?? bootstrapSentinel
             } else if let latestCached = try? await cache.latestCachedDay() {
+                // (A failed read lands in the `else` below with an empty cache: a full rebuild is
+                // the correct answer when the cache's extent is unknown, if not the cheap one.)
                 // Never later than the day after the newest cached row: the seed below is the
                 // last cached row before `fetchFromStart`, so starting later (e.g. a background
                 // import of a day-N activity while the cache only reaches day N-3) would seed
                 // day N from day N-3's CTL/ATL and silently skip days N-2 and N-1 — their loads and
                 // their decay. Starting at the first uncached day recomputes the gap too.
                 let nextDay = calendar.date(byAdding: .day, value: 1, to: latestCached) ?? todayStart
-                effectiveFetchFrom = min(watermark, nextDay)
+                effectiveFetchFrom = min(watermark, nextDay, todayStart)
             } else {
                 // An empty cache has nothing to seed from, so the dirty day alone would start the
                 // series cold; rebuild from the beginning instead.
@@ -611,7 +681,11 @@ public final class TrainingModel {
             if !toCache.isEmpty {
                 try? await cache.upsert(toCache)
             }
-            try? await cache.clearDirtyWatermark()
+            // Skipped if an import (or any other invalidation) landed while this ran: it may be for
+            // an activity this recompute's fetch never saw, so the next recompute must still see it.
+            if await mayClearWatermark() {
+                try? await cache.clearDirtyWatermark()
+            }
         }
         if fetchedPlans == nil {
             Logging.series.warning(

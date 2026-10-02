@@ -120,9 +120,7 @@ extension TrainingModel {
     }
 
     private func reloadAfterJoinChange(from day: Date, asOf today: Date) async throws {
-        if let cache = stores.fitnessMetricsCacheStore {
-            try? await cache.markDirty(from: day)
-        }
+        await markCacheDirty(from: day)
         let range = loadedRange ?? (today...today)
         activities = try await stores.activityStore.activities(in: range)
         plans = try await stores.planStore.plans(in: range)

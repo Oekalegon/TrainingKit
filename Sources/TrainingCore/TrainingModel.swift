@@ -494,8 +494,18 @@ public final class TrainingModel {
                 // the old cache did.
                 let earliestBeforeWipe = try? await cache.earliestCachedDay()
                 effectiveFetchFrom = earliestBeforeWipe ?? bootstrapSentinel
+            } else if let latestCached = try? await cache.latestCachedDay() {
+                // Never later than the day after the newest cached row: the seed below is the
+                // last cached row before `fetchFromStart`, so starting later (e.g. a background
+                // import of a day-N activity while the cache only reaches day N-3) would seed
+                // day N from day N-3's CTL/ATL and silently skip days N-2 and N-1 — their loads and
+                // their decay. Starting at the first uncached day recomputes the gap too.
+                let nextDay = calendar.date(byAdding: .day, value: 1, to: latestCached) ?? todayStart
+                effectiveFetchFrom = min(watermark, nextDay)
             } else {
-                effectiveFetchFrom = watermark
+                // An empty cache has nothing to seed from, so the dirty day alone would start the
+                // series cold; rebuild from the beginning instead.
+                effectiveFetchFrom = bootstrapSentinel
             }
         } else if let latestCached = try? await cache.latestCachedDay() {
             let nextDay = calendar.date(byAdding: .day, value: 1, to: latestCached) ?? todayStart

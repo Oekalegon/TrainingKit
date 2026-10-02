@@ -37,7 +37,8 @@ struct TrainingModelCacheDifferentialTests {
             raceStore: stores.raceStore, athleteStore: stores.athleteStore
         )
         let reference = TrainingModel(stores: uncachedStores, athlete: model.athlete)
-        try await reference.load(in: range, asOf: today)
+        // The whole history, not just `range`: the reference has to be warm where `range` starts.
+        try await reference.load(in: day(-30)...range.upperBound, asOf: today)
         let expected = reference.metrics
         for want in expected where range.contains(want.day) {
             let rows = model.metrics.filter { $0.day == want.day }

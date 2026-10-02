@@ -195,6 +195,64 @@ struct CalendarExportTests {
         decoder.dateDecodingStrategy = .iso8601
         #expect(try decoder.decode(CalendarExport.self, from: data).days.count == export.days.count)
     }
+
+    @Test("a day-light-saving change doesn't shift or repeat days, and activities stay on their local day")
+    func daylightSavingChange() {
+        let amsterdam = AthleteProfile.fixture(restingHeartRateBPM: 50, maxHeartRateBPM: 190, timeZoneIdentifier: "Europe/Amsterdam")
+        // Clocks go back on 2023-10-29, a 25-hour day. 22:30 UTC is 23:30 that evening in
+        // Amsterdam; an hour later it's 00:30 on the 30th.
+        let lateOn29 = Activity(source: .healthKit(UUID()), sport: .running, start: Date(timeIntervalSince1970: 1_698_618_600), duration: 1200)
+        let earlyOn30 = Activity(source: .healthKit(UUID()), sport: .running, start: Date(timeIntervalSince1970: 1_698_622_200), duration: 1200)
+
+        let export = CalendarExportBuilder().build(
+            from: Date(timeIntervalSince1970: 1_698_447_600), through: Date(timeIntervalSince1970: 1_698_624_000),
+            activities: [lateOn29, earlyOn30], plans: [], workouts: [], templates: [], metrics: [],
+            athlete: amsterdam, today: earlyOn30.start, generatedAt: earlyOn30.start
+        )
+
+        #expect(export.days.map(\.date) == ["2023-10-28", "2023-10-29", "2023-10-30"])
+        #expect(export.days.map(\.activities.count) == [0, 1, 1])
+    }
+
+    @Test("a completed activity that fulfilled a plan missing from the library keeps its entry, without plan details")
+    func fulfilledPlanWithoutWorkout() throws {
+        let activity = run(on: 1)
+        let plan = PlannedActivity(workoutID: UUID(), date: day(1), completedActivityID: activity.id)
+
+        let entries = build(activities: [activity], plans: [plan]).days[1].activities
+
+        #expect(entries.count == 1)
+        let entry = try #require(entries.first)
+        #expect(entry.status == .completed)
+        #expect(entry.name == nil)
+        #expect(entry.template == nil)
+        #expect(entry.plan == nil)
+    }
+
+    @Test("a plan fulfilled by an activity outside the period is left out as missed, not listed as planned")
+    func planFulfilledJustOutsidePeriod() {
+        let afterMidnight = run(on: 7, hour: 0.5)
+        let plan = PlannedActivity(workoutID: workout().id, date: day(6), completedActivityID: afterMidnight.id)
+
+        let export = build(plans: [plan], workouts: [workout()], from: 0, through: 6, today: 10)
+
+        #expect(export.days[6].activities.isEmpty)
+    }
+
+    @Test("a heart-rate recording that gives exactly zero load has no TRIMP, rather than a zero labelled heartRate")
+    func zeroHeartRateLoadIsNil() throws {
+        // Two samples an hour apart: the gap is a pause, so there is no segment to integrate.
+        let start = day(1, hour: 7)
+        let sparse = Activity(
+            source: .healthKit(UUID()), sport: .running, start: start, duration: 3600,
+            heartRate: [HeartRateSample(time: start, bpm: 150), HeartRateSample(time: start.addingTimeInterval(3600), bpm: 150)]
+        )
+
+        let entry = try #require(build(activities: [sparse]).days[1].activities.first)
+
+        #expect(entry.trimp == nil)
+        #expect(entry.trimpSource == nil)
+    }
 }
 
 @MainActor
@@ -204,10 +262,10 @@ struct TrainingModelCalendarExportTests {
         Date(timeIntervalSince1970: 1_699_920_000 + Double(offset) * 86400 + hour * 3600)
     }
 
-    private func run(on dayOffset: Int) -> Activity {
-        let start = day(dayOffset, hour: 7)
+    private func run(on dayOffset: Int, hour: Double = 7, distance: Double = 6000) -> Activity {
+        let start = day(dayOffset, hour: hour)
         let samples = (0..<360).map { HeartRateSample(time: start.addingTimeInterval(Double($0) * 5), bpm: 150) }
-        return Activity(source: .healthKit(UUID()), sport: .running, start: start, duration: 1800, heartRate: samples)
+        return Activity(source: .healthKit(UUID()), sport: .running, start: start, duration: 1800, distanceMeters: distance, heartRate: samples)
     }
 
     private func makeModel() -> (InMemoryStore, TrainingModel) {
@@ -235,7 +293,7 @@ struct TrainingModelCalendarExportTests {
     func warmedUpMetrics() async throws {
         let (store, model) = makeModel()
         // Three months of runs every other day before the period, and one inside it.
-        try await store.upsert(stride(from: -90, to: 0, by: 2).map(run(on:)) + [run(on: 2)])
+        try await store.upsert(stride(from: -90, to: 0, by: 2).map { run(on: $0) } + [run(on: 2)])
 
         let export = try await model.calendarExport(from: day(0), through: day(6), asOf: day(6))
         try await model.load(in: day(-120)...day(6), asOf: day(6))
@@ -250,7 +308,7 @@ struct TrainingModelCalendarExportTests {
     @Test("a future period (the season plan) carries fitness forward from past training, then projects it")
     func futurePeriodWarmsUpFromPast() async throws {
         let (store, model) = makeModel()
-        try await store.upsert(stride(from: -60, to: 0, by: 2).map(run(on:)))
+        try await store.upsert(stride(from: -60, to: 0, by: 2).map { run(on: $0) })
 
         let export = try await model.calendarExport(from: day(10), through: day(20), asOf: day(0, hour: 12))
 
@@ -260,6 +318,32 @@ struct TrainingModelCalendarExportTests {
         #expect(zip(ctl, ctl.dropFirst()).allSatisfy { $0 >= $1 })
         #expect(export.days.allSatisfy { $0.metrics?.isProjected == true })
         #expect(export.days.allSatisfy { $0.activities.isEmpty })
+    }
+
+    @Test("a joined activity is exported once, with its pieces' combined distance")
+    func joinedActivityExportedOnce() async throws {
+        let (store, model) = makeModel()
+        let first = run(on: 2, hour: 7, distance: 700)
+        let second = run(on: 2, hour: 7.6, distance: 5200)
+        try await store.upsert([first, second])
+        try await model.load(in: day(0)...day(6), asOf: day(6))
+        try await model.joinActivities(first.id, second.id, asOf: day(6))
+
+        let export = try await model.calendarExport(from: day(0), through: day(6), asOf: day(6))
+
+        #expect(export.days[2].activities.count == 1)
+        #expect(export.days[2].activities.first?.distanceMeters == 5900)
+    }
+
+    @Test("cancelling the calling task cancels the export")
+    func cancellationStopsExport() async throws {
+        let (store, model) = makeModel()
+        try await store.upsert([run(on: 2)])
+
+        let task = Task { try await model.calendarExport(from: day(0), through: day(6), asOf: day(6)) }
+        task.cancel()
+
+        await #expect(throws: CancellationError.self) { try await task.value }
     }
 
     private static var utc: Calendar {

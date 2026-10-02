@@ -11,7 +11,11 @@ import Foundation
 ///   ``CalendarExport/Entry/plan`` and the plan gets no entry of its own.
 /// - An unfulfilled plan is included only if it's for today or later. One from before today is
 ///   missed and left out, like the week view's missed-plan outline, which carries no load.
-/// - A plan whose workout isn't in `workouts` can't be described and is left out.
+/// - A plan whose workout isn't in `workouts` can't be described and is left out. A completed
+///   activity that fulfilled such a plan is still included, just without `name`, `template` or `plan`.
+/// - Only activities in `activities` can fulfil a plan: one just outside the period (e.g. a run
+///   after midnight that fulfilled the last day's plan) doesn't, so that plan is treated as
+///   unfulfilled, and left out as missed if it's before today.
 /// - Load uses the same calculators as the app: ``StatisticsCalculator/summary(for:athlete:)`` for
 ///   completed activities, and the plan's override or the estimator for planned ones. Duration and
 ///   distance of planned workouts come from ``StatisticsCalculator/projection(for:athlete:)``.
@@ -82,6 +86,8 @@ public struct CalendarExportBuilder: Sendable {
         var days: [CalendarExport.Day] = []
         var day = firstStart
         while day <= lastStart {
+            // Cancelled mid-build: stop early. The caller discards the partial result.
+            if Task.isCancelled { break }
             let completed = (activitiesByDay[day] ?? [])
                 .sorted { $0.start < $1.start }
                 .map { activity -> CalendarExport.Entry in
@@ -125,7 +131,11 @@ public struct CalendarExportBuilder: Sendable {
         templateNames: [UUID: String], athlete: AthleteProfile
     ) -> CalendarExport.Entry {
         let summary = statisticsCalculator.summary(for: activity, athlete: athlete)
-        let load = summary.load.confidence > 0 ? summary.load : nil
+        // No load when no calculator could score it, and when a heart-rate recording produced
+        // exactly zero: that is a recording with no usable segments (sparse samples, or no zone
+        // settings in effect yet), not a measured nothing, so it isn't labelled `heartRate`.
+        let scored = summary.load.confidence > 0 ? summary.load : nil
+        let load = scored.flatMap { $0.method == .exponentialTRIMP && $0.value == 0 ? nil : $0 }
         let intensity: IntensityAssessment?
         if let workout {
             intensity = PlanGuidedIntensityClassifier(parameters: intensityParameters)

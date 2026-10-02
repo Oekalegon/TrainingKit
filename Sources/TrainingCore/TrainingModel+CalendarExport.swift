@@ -16,6 +16,10 @@ extension TrainingModel {
     /// start cold at the period's first day. Days after the last activity or plan get zero-load
     /// projected metrics, as in the app's charts.
     ///
+    /// The warm-up means about eight months of activities, with their heart-rate samples, are read
+    /// and scored on every call, however short the period: the price of metrics that don't depend
+    /// on the app's cache. A season can take a few hundred milliseconds on a phone.
+    ///
     /// See ``CalendarExportBuilder`` for which activities and plans are included.
     ///
     /// - Parameters:
@@ -25,13 +29,18 @@ extension TrainingModel {
     ///     library.
     ///   - today: Separates actual from expected load, and missed plans from upcoming ones.
     /// - Returns: The export, ready to encode with ``CalendarExport/jsonData()``.
-    /// - Throws: Whatever the stores throw.
+    /// - Throws: Whatever the stores throw, or `CancellationError` if the calling task is cancelled.
     public func calendarExport(
         from firstDay: Date,
         through lastDay: Date,
         templates: [WorkoutTemplate] = BuiltInWorkoutTemplates.all,
         asOf today: Date = .now
     ) async throws -> CalendarExport {
+        // Read once: the stores are awaited below, and an athlete or parameter change landing in
+        // between must not leave the metrics and the builder working from different ones.
+        let athlete = self.athlete
+        let parameters = self.parameters
+        try Task.checkCancellation()
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = athlete.timeZone
         let periodStart = calendar.startOfDay(for: min(firstDay, lastDay))
@@ -65,8 +74,9 @@ extension TrainingModel {
         let periodActivities = fetchedActivities.filter { period.contains($0.start) }
         let periodPlans = fetchedPlans.filter { period.contains($0.date) }
         let periodMetrics = metrics.filter { period.contains($0.day) }
-        let exportAthlete = athlete
-        return await Task.detached(priority: .userInitiated) {
+        // `Task.detached` doesn't inherit the caller's cancellation, so forward it: dismissing the
+        // share sheet mid-export stops the build instead of finishing a result nobody will read.
+        let build = Task.detached(priority: .userInitiated) {
             builder.build(
                 from: periodStart,
                 through: periodEndDay,
@@ -75,10 +85,13 @@ extension TrainingModel {
                 workouts: fetchedWorkouts,
                 templates: templates,
                 metrics: periodMetrics,
-                athlete: exportAthlete,
+                athlete: athlete,
                 today: today,
                 generatedAt: today
             )
-        }.value
+        }
+        let export = await withTaskCancellationHandler { await build.value } onCancel: { build.cancel() }
+        try Task.checkCancellation()
+        return export
     }
 }

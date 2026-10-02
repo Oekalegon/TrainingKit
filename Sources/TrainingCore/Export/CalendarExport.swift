@@ -103,7 +103,8 @@ public struct CalendarExport: Sendable, Codable, Hashable {
         /// completed activity, what's intended for a planned one.
         public let intensity: String?
         /// Training load in TRIMP: actual for a completed activity, expected for a planned one.
-        /// `nil` when it couldn't be computed.
+        /// `nil` when it couldn't be computed, including a heart-rate recording that yielded no
+        /// load at all (too few samples, or no heart-rate zones in effect on that date).
         public let trimp: Double?
         /// Where ``trimp`` came from.
         public let trimpSource: TRIMPSource?

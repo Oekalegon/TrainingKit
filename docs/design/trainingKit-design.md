@@ -682,6 +682,9 @@ Missing values are written as `null` rather than left out, so every day and entr
 }
 ```
 
+`tsb` is the previous day's CTL minus the previous day's ATL (the form the athlete starts the day
+with), so it isn't `ctl − atl` of the same row.
+
 What's included (`CalendarExportBuilder`, a pure function):
 - **Every calendar day** in the period, including empty ones.
 - **Completed activities**, with their measured or exertion-based TRIMP, elapsed duration (pauses
@@ -694,7 +697,12 @@ What's included (`CalendarExportBuilder`, a pure function):
   projected from the pace model, a figure the week view itself doesn't show yet (MVP2-35).
   `trimpSource` says where each TRIMP came from: `heartRate`, `perceivedExertion`, `manual`,
   `estimated` or `override`. **Missed plans** (before today, never
-  performed) are left out, as on the week view: they never became load.
+  performed) are left out, as on the week view: they never became load. Only activities inside the
+  period can fulfil a plan: a run just after the period's end that fulfilled the last day's plan
+  doesn't, so that plan is left out as missed (or listed as planned, if it's today or later).
+- **A completed activity with no usable load** (no calculator could score it, or a heart-rate
+  recording that gave exactly zero, from too few samples or no zone settings in effect on that
+  date) has `trimp` and `trimpSource` `null`, not a zero labelled `heartRate`.
 - **"Workout type"** is three fields: `sport`, the `template` a planned workout was built from, and
   the `intensity` category.
 - **Metrics** per day: load, CTL, ATL, TSB, monotony, strain (`null` when undefined, e.g. a flat
@@ -703,7 +711,11 @@ What's included (`CalendarExportBuilder`, a pure function):
 The export reads the stores directly, so the model's loaded `activities`, `plans` and `metrics`
 are untouched. It computes metrics fresh, starting `6 × ctlTimeConstantDays` (about eight months)
 before the period. That's enough warm-up for CTL and ATL to match the app's cache-seeded series
-to well within rounding, without reading the athlete's whole history.
+to well within rounding, without reading the athlete's whole history. The cost is that about eight
+months of activities, with their heart-rate samples, are read and scored on every export however
+short the period. Not using the cache is deliberate: the export is then an independent
+recomputation, which is how a cache seeding bug was found. The work runs off the main actor and
+stops if the calling task is cancelled.
 
 ## 10. Periodisation — macro, meso, micro cycles (Core, MVP 1)
 

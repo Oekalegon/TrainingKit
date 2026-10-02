@@ -128,8 +128,8 @@ extension TrainingModel {
     }
 
     private func reloadAfterLinkChange(from day: Date?, asOf today: Date) async throws {
-        if let day, let cache = stores.fitnessMetricsCacheStore {
-            try? await cache.markDirty(from: day)
+        if let day {
+            await markCacheDirty(from: day)
         }
         let range = loadedRange ?? (today...today)
         try await reloadActivitiesAndPlans(in: range, bestEffortPlans: false)

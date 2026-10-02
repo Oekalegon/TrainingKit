@@ -154,8 +154,8 @@ extension TrainingModel {
         }
 
         let affectedDates = toUpsert.map(\.start) + deletedStarts + refreshedJoinDays
-        if let cache = stores.fitnessMetricsCacheStore, let earliest = affectedDates.min() {
-            try? await cache.markDirty(from: earliest)
+        if let earliest = affectedDates.min() {
+            await markCacheDirty(from: earliest)
         }
         // `||=`, not an overwrite: a conformer without incremental-import support is allowed to
         // return a `nil` anchor even on a successful run, and a completed import shouldn't read

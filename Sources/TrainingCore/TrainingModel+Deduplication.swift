@@ -29,9 +29,7 @@ extension TrainingModel {
         let removed = try await stores.activityStore.deduplicateActivities()
         guard let earliest = removed.map(\.start).min() else { return }
 
-        if let cache = stores.fitnessMetricsCacheStore {
-            try? await cache.markDirty(from: earliest)
-        }
+        await markCacheDirty(from: earliest)
 
         let range = loadedRange ?? (today...today)
         activities = try await stores.activityStore.activities(in: range)

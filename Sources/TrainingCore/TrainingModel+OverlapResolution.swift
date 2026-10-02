@@ -39,9 +39,7 @@ extension TrainingModel {
         try await releasePlans(heldBy: removedIDs)
         try await stores.activityStore.deleteActivity(id: id)
 
-        if let cache = stores.fitnessMetricsCacheStore {
-            try? await cache.markDirty(from: removedDay)
-        }
+        await markCacheDirty(from: removedDay)
 
         let range = loadedRange ?? (today...today)
         activities = try await stores.activityStore.activities(in: range)

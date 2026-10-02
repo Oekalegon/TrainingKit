@@ -122,6 +122,11 @@ See `docs/design/trainingKit-design.md` in the package repository for the full m
 - ``ImportResult``
 - ``ActivityImporting``
 
+### Export
+
+- ``CalendarExport``
+- ``CalendarExportBuilder``
+
 ### Facade
 
 - ``TrainingModel``

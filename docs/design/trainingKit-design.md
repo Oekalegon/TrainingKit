@@ -711,7 +711,8 @@ What's included (`CalendarExportBuilder`, a pure function):
   its steps with block repetitions expanded (6 × 400 m is twelve work and recovery steps), each
   with `kind` (`warmup`, `work`, `recovery`, `cooldown`), `block` (from 0), `repetition` (from 1),
   `goal` (`time`, `distance`, `open`), `durationSeconds`, `distanceMeters` (the goal, or projected
-  from the pace model) and its `target`. A completed activity carries the steps of the plan it
+  from the pace model; `null` for a non-distance step when the athlete has no heart-rate zone
+  settings) and its `target`. A completed activity carries the steps of the plan it
   fulfilled, i.e. what was intended; without a plan it's empty, as activities record no laps.
 - **"Workout type"** is three fields: `sport`, the `template` a planned workout was built from, and
   the `intensity` category.

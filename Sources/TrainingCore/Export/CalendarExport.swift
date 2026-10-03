@@ -138,7 +138,8 @@ public struct CalendarExport: Sendable, Codable, Hashable {
         /// What ends the step: `time`, `distance` or `open`.
         public let goal: String
         /// The step's duration in seconds: the goal for a `time` step, otherwise projected from
-        /// the athlete's pace model (or the default for an `open` step).
+        /// the athlete's pace model (or the default for an `open` step). `0` if the projection
+        /// isn't a finite number.
         public let durationSeconds: Double
         /// The step's distance in meters: the goal for a `distance` step, otherwise projected from
         /// the pace model. `nil` when it can't be projected (no zone settings).
@@ -155,7 +156,8 @@ public struct CalendarExport: Sendable, Codable, Hashable {
         public let zone: Int?
         /// The perceived exertion, for `rpe`.
         public let rpe: Int?
-        /// The lower bound of a range: bpm, pace or watts as the ``IntensityTarget`` holds them.
+        /// The lower bound of a range: bpm for `heartRateRange`, watts for `power`, and for `pace` the
+        /// unit the workout was authored in (``IntensityTarget`` doesn't fix one).
         public let min: Double?
         /// The upper bound of a range.
         public let max: Double?

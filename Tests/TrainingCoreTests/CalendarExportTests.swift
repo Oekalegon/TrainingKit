@@ -177,6 +177,55 @@ struct CalendarExportTests {
         #expect(CalendarExportBuilder.trimpSource(for: .exponentialTRIMP) == .heartRate)
     }
 
+    private func intervals() -> StructuredWorkout {
+        StructuredWorkout(name: "4 × 400 m", sport: .running, blocks: [
+            WorkoutBlock(steps: [WorkoutStep(kind: .warmup, goal: .time(600), target: .heartRateZone(2))]),
+            WorkoutBlock(steps: [
+                WorkoutStep(kind: .work, goal: .distance(400), target: .heartRateZone(5)),
+                WorkoutStep(kind: .recovery, goal: .time(90))
+            ], repetitions: 4),
+            WorkoutBlock(steps: [WorkoutStep(kind: .cooldown, goal: .open, target: .rpe(2))])
+        ])
+    }
+
+    @Test("a planned workout lists its steps with repetitions expanded, durations, distances and targets")
+    func plannedSteps() throws {
+        let workout = intervals()
+        let export = build(plans: [PlannedActivity(workoutID: workout.id, date: day(4))], workouts: [workout])
+
+        let steps = try #require(export.days[4].activities.first).steps
+        #expect(steps.count == 1 + 4 * 2 + 1)
+        #expect(steps.map(\.kind) == ["warmup"] + Array(repeating: ["work", "recovery"], count: 4).flatMap { $0 } + ["cooldown"])
+        #expect(steps[1].block == 1 && steps[1].repetition == 1)
+        #expect(steps[7].block == 1 && steps[7].repetition == 4)
+        #expect(steps[0].goal == "time" && steps[0].durationSeconds == 600)
+        #expect(steps[1].goal == "distance" && steps[1].distanceMeters == 400)
+        #expect(steps[1].durationSeconds > 0)
+        #expect(steps[1].target == CalendarExport.Target(type: "heartRateZone", zone: 5, rpe: nil, min: nil, max: nil))
+        #expect(steps[2].target == nil)
+        #expect(steps[2].distanceMeters != nil)
+        #expect(steps[9].goal == "open" && steps[9].target?.rpe == 2)
+    }
+
+    @Test("a completed activity carries its fulfilled plan's steps, and none without a plan")
+    func completedSteps() throws {
+        let workout = intervals()
+        let linked = run(on: 1)
+        var plan = PlannedActivity(workoutID: workout.id, date: day(1))
+        plan.completedActivityID = linked.id
+
+        let export = build(activities: [linked, run(on: 2)], plans: [plan], workouts: [workout])
+
+        #expect(try #require(export.days[1].activities.first).steps.count == 10)
+        #expect(try #require(export.days[2].activities.first).steps.isEmpty)
+    }
+
+    @Test("steps are always written to the JSON, as an empty array when there are none")
+    func stepsInJSON() throws {
+        let json = try #require(String(data: build(activities: [run(on: 1)]).jsonData(), encoding: .utf8))
+        #expect(json.contains("\"steps\" : ["))
+    }
+
     @Test("JSON writes null for missing values, so every entry has the same keys, and decodes back")
     func jsonShape() throws {
         let easy = workout(name: "Easy")

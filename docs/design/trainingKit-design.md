@@ -678,7 +678,11 @@ Missing values are written as `null` rather than left out, so every day and entr
           "template": "Tempo Run", "intensity": "medium", "trimp": 85, "trimpSource": "heartRate",
           "durationSeconds": 3120, "distanceMeters": 9800,
           "plan": { "name": "Tempo 3 × 8 min", "template": "Tempo Run", "trimp": 90,
-                    "trimpSource": "estimated", "durationSeconds": 3000, "distanceMeters": 9500 } } ] } ]
+                    "trimpSource": "estimated", "durationSeconds": 3000, "distanceMeters": 9500 },
+          "steps": [
+            { "kind": "warmup", "block": 0, "repetition": 1, "goal": "time", "durationSeconds": 600,
+              "distanceMeters": 1700,
+              "target": { "type": "heartRateZone", "zone": 2, "rpe": null, "min": null, "max": null } } ] } ] } ]
 }
 ```
 
@@ -703,6 +707,12 @@ What's included (`CalendarExportBuilder`, a pure function):
 - **A completed activity with no usable load** (no calculator could score it, or a heart-rate
   recording that gave exactly zero, from too few samples or no zone settings in effect on that
   date) has `trimp` and `trimpSource` `null`, not a zero labelled `heartRate`.
+- **Steps** (MVP2-102): every entry has a `steps` array, always present. A planned workout lists
+  its steps with block repetitions expanded (6 × 400 m is twelve work and recovery steps), each
+  with `kind` (`warmup`, `work`, `recovery`, `cooldown`), `block` (from 0), `repetition` (from 1),
+  `goal` (`time`, `distance`, `open`), `durationSeconds`, `distanceMeters` (the goal, or projected
+  from the pace model) and its `target`. A completed activity carries the steps of the plan it
+  fulfilled, i.e. what was intended; without a plan it's empty, as activities record no laps.
 - **"Workout type"** is three fields: `sport`, the `template` a planned workout was built from, and
   the `intensity` category.
 - **Metrics** per day: load, CTL, ATL, TSB, monotony, strain (`null` when undefined, e.g. a flat

@@ -19,6 +19,50 @@ struct PlannedWorkoutProjector: Sendable {
         let timeInZone: TimeInZone
     }
 
+    /// One step of a workout, with its projected duration and distance.
+    struct StepProjection: Sendable {
+        /// Index of the step's block in the workout.
+        let block: Int
+        /// Which repetition of the block this is, from 1.
+        let repetition: Int
+        let step: WorkoutStep
+        let duration: TimeInterval
+        /// `nil` when a time-based step can't be converted (no heart-rate zone settings).
+        let distanceMeters: Double?
+    }
+
+    /// Every step of `workout` with its block repetitions expanded, each with its projected
+    /// duration and distance, converted the same way ``project(workout:athlete:)`` does.
+    func stepProjections(workout: StructuredWorkout, athlete: AthleteProfile) -> [StepProjection] {
+        let zoneModel = athlete.currentHeartRateZoneSettings.map { HeartRateZoneModel(settings: $0) }
+        let boundaries = zoneModel.flatMap { TimeInZoneBuilder.zoneBoundaries($0) }
+        var projections: [StepProjection] = []
+        for (blockIndex, block) in workout.blocks.enumerated() {
+            for repetition in 1...max(block.repetitions, 1) where block.repetitions > 0 {
+                for step in block.steps {
+                    let duration = durationEstimator.duration(for: step, athlete: athlete)
+                    let distance: Double?
+                    switch step.goal {
+                    case .distance(let meters):
+                        distance = meters
+                    case .time, .open:
+                        if let zoneModel {
+                            let ratio = zoneModel.intensityRatio(for: step.target)
+                            let zone = boundaries.map { TimeInZoneBuilder.zone(for: ratio, boundaries: $0) } ?? 3
+                            distance = duration / athlete.paceModel.secondsPerMeter(atZone: max(zone, 1))
+                        } else {
+                            distance = nil
+                        }
+                    }
+                    projections.append(StepProjection(
+                        block: blockIndex, repetition: repetition, step: step, duration: duration, distanceMeters: distance
+                    ))
+                }
+            }
+        }
+        return projections
+    }
+
     /// Projects `workout` using the athlete's current heart-rate zone settings — planning is
     /// always about who the athlete is now, matching ``TRIMPPlanEstimator``.
     func project(workout: StructuredWorkout, athlete: AthleteProfile) -> Projection {

@@ -120,6 +120,45 @@ public struct CalendarExport: Sendable, Codable, Hashable {
         public let distanceMeters: Double?
         /// For a completed activity that fulfilled a plan, what that plan expected.
         public let plan: PlannedValues?
+        /// The workout's steps (intervals, warm-up, ...) with block repetitions expanded, in order:
+        /// the planned workout's, or for a completed activity the steps of the plan it fulfilled,
+        /// which are what was intended, not what was recorded. Empty for a completed activity with
+        /// no linked plan, since recorded activities carry no laps or steps.
+        public let steps: [Step]
+    }
+
+    /// One step of a planned workout.
+    public struct Step: Sendable, Codable, Hashable {
+        /// The step's role, with the same names as ``StepKind``: `warmup`, `work`, `recovery` or `cooldown`.
+        public let kind: String
+        /// Index of the step's block in the workout, from 0.
+        public let block: Int
+        /// Which repetition of the block this step belongs to, from 1.
+        public let repetition: Int
+        /// What ends the step: `time`, `distance` or `open`.
+        public let goal: String
+        /// The step's duration in seconds: the goal for a `time` step, otherwise projected from
+        /// the athlete's pace model (or the default for an `open` step).
+        public let durationSeconds: Double
+        /// The step's distance in meters: the goal for a `distance` step, otherwise projected from
+        /// the pace model. `nil` when it can't be projected (no zone settings).
+        public let distanceMeters: Double?
+        /// The intensity the step targets, if any.
+        public let target: Target?
+    }
+
+    /// The intensity a ``Step`` targets.
+    public struct Target: Sendable, Codable, Hashable {
+        /// `heartRateZone`, `heartRateRange`, `pace`, `power` or `rpe`.
+        public let type: String
+        /// The zone, for `heartRateZone`.
+        public let zone: Int?
+        /// The perceived exertion, for `rpe`.
+        public let rpe: Int?
+        /// The lower bound of a range: bpm, pace or watts as the ``IntensityTarget`` holds them.
+        public let min: Double?
+        /// The upper bound of a range.
+        public let max: Double?
     }
 
     /// What a plan expected, attached to the completed activity that fulfilled it.
@@ -190,7 +229,7 @@ extension CalendarExport.Metrics {
 extension CalendarExport.Entry {
     private enum CodingKeys: String, CodingKey {
         case status, start, name, sport, template, intensity, trimp, trimpSource
-        case durationSeconds, distanceMeters, plan
+        case durationSeconds, distanceMeters, plan, steps
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -206,6 +245,7 @@ extension CalendarExport.Entry {
         try container.encode(durationSeconds, forKey: .durationSeconds)
         try container.encode(distanceMeters, forKey: .distanceMeters)
         try container.encode(plan, forKey: .plan)
+        try container.encode(steps, forKey: .steps)
     }
 }
 
@@ -222,5 +262,33 @@ extension CalendarExport.PlannedValues {
         try container.encode(trimpSource, forKey: .trimpSource)
         try container.encode(durationSeconds, forKey: .durationSeconds)
         try container.encode(distanceMeters, forKey: .distanceMeters)
+    }
+}
+
+extension CalendarExport.Step {
+    private enum CodingKeys: String, CodingKey { case kind, block, repetition, goal, durationSeconds, distanceMeters, target }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(block, forKey: .block)
+        try container.encode(repetition, forKey: .repetition)
+        try container.encode(goal, forKey: .goal)
+        try container.encode(durationSeconds, forKey: .durationSeconds)
+        try container.encode(distanceMeters, forKey: .distanceMeters)
+        try container.encode(target, forKey: .target)
+    }
+}
+
+extension CalendarExport.Target {
+    private enum CodingKeys: String, CodingKey { case type, zone, rpe, min, max }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(type, forKey: .type)
+        try container.encode(zone, forKey: .zone)
+        try container.encode(rpe, forKey: .rpe)
+        try container.encode(min, forKey: .min)
+        try container.encode(max, forKey: .max)
     }
 }

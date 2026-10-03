@@ -207,6 +207,22 @@ struct CalendarExportTests {
         #expect(steps[9].goal == "open" && steps[9].target?.rpe == 2)
     }
 
+    @Test("without heart-rate zone settings a time step has no projected distance, a distance step keeps its goal")
+    func stepsWithoutZoneSettings() throws {
+        var bare = athlete
+        bare.heartRateZoneHistory = []
+        let workout = intervals()
+        let export = CalendarExportBuilder().build(
+            from: day(0), through: day(6, hour: 12), activities: [],
+            plans: [PlannedActivity(workoutID: workout.id, date: day(4))], workouts: [workout], templates: [],
+            metrics: [], athlete: bare, today: day(3, hour: 9), generatedAt: day(3, hour: 9)
+        )
+
+        let steps = try #require(export.days[4].activities.first).steps
+        #expect(steps[0].distanceMeters == nil)
+        #expect(steps[1].distanceMeters == 400)
+    }
+
     @Test("a completed activity carries its fulfilled plan's steps, and none without a plan")
     func completedSteps() throws {
         let workout = intervals()

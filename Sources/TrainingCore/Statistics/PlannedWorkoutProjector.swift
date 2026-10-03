@@ -27,7 +27,9 @@ struct PlannedWorkoutProjector: Sendable {
         let repetition: Int
         let step: WorkoutStep
         let duration: TimeInterval
-        /// `nil` when a time-based step can't be converted (no heart-rate zone settings).
+        /// A `distance` step's goal; otherwise projected from the pace model, or `nil` when there are
+    /// no heart-rate zone settings to pick a pace by. (``project(workout:athlete:)`` then leaves the
+    /// workout's total distance `nil` as a whole.)
         let distanceMeters: Double?
     }
 
@@ -38,7 +40,8 @@ struct PlannedWorkoutProjector: Sendable {
         let boundaries = zoneModel.flatMap { TimeInZoneBuilder.zoneBoundaries($0) }
         var projections: [StepProjection] = []
         for (blockIndex, block) in workout.blocks.enumerated() {
-            for repetition in 1...max(block.repetitions, 1) where block.repetitions > 0 {
+            guard block.repetitions > 0 else { continue }
+            for repetition in 1...block.repetitions {
                 for step in block.steps {
                     let duration = durationEstimator.duration(for: step, athlete: athlete)
                     let distance: Double?

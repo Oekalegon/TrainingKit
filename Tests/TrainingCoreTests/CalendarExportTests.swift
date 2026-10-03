@@ -177,6 +177,110 @@ struct CalendarExportTests {
         #expect(CalendarExportBuilder.trimpSource(for: .exponentialTRIMP) == .heartRate)
     }
 
+    private func intervals() -> StructuredWorkout {
+        StructuredWorkout(name: "4 × 400 m", sport: .running, blocks: [
+            WorkoutBlock(steps: [WorkoutStep(kind: .warmup, goal: .time(600), target: .heartRateZone(2))]),
+            WorkoutBlock(steps: [
+                WorkoutStep(kind: .work, goal: .distance(400), target: .heartRateZone(5)),
+                WorkoutStep(kind: .recovery, goal: .time(90))
+            ], repetitions: 4),
+            WorkoutBlock(steps: [WorkoutStep(kind: .cooldown, goal: .open, target: .rpe(2))])
+        ])
+    }
+
+    @Test("a planned workout lists its steps with repetitions expanded, durations, distances and targets")
+    func plannedSteps() throws {
+        let workout = intervals()
+        let export = build(plans: [PlannedActivity(workoutID: workout.id, date: day(4))], workouts: [workout])
+
+        let steps = try #require(export.days[4].activities.first).steps
+        #expect(steps.count == 1 + 4 * 2 + 1)
+        let repeated: [String] = Array(repeating: ["work", "recovery"], count: 4).flatMap { $0 }
+        let expectedKinds: [String] = ["warmup"] + repeated + ["cooldown"]
+        #expect(steps.map(\.kind) == expectedKinds)
+        #expect(steps[1].block == 1 && steps[1].repetition == 1)
+        #expect(steps[7].block == 1 && steps[7].repetition == 4)
+        #expect(steps[0].goal == "time" && steps[0].durationSeconds == 600)
+        #expect(steps[1].goal == "distance" && steps[1].distanceMeters == 400)
+        #expect(steps[1].durationSeconds > 0)
+        #expect(steps[1].target == CalendarExport.Target(type: "heartRateZone", zone: 5, rpe: nil, min: nil, max: nil))
+        #expect(steps[2].target == nil)
+        #expect(steps[2].distanceMeters != nil)
+        #expect(steps[9].goal == "open" && steps[9].target?.rpe == 2)
+    }
+
+    @Test("step durations and distances add up to the entry's totals")
+    func stepTotals() throws {
+        let workout = intervals()
+        let export = build(plans: [PlannedActivity(workoutID: workout.id, date: day(4))], workouts: [workout])
+        let entry = try #require(export.days[4].activities.first)
+        let duration = try #require(entry.durationSeconds)
+        let distance = try #require(entry.distanceMeters)
+        #expect(abs(entry.steps.map(\.durationSeconds).reduce(0, +) - duration) < 0.001)
+        #expect(abs(entry.steps.compactMap(\.distanceMeters).reduce(0, +) - distance) < 0.001)
+    }
+
+    @Test("range targets and zero-repetition blocks")
+    func targetsAndEmptyBlocks() throws {
+        let workout = StructuredWorkout(name: "Targets", sport: .running, blocks: [
+            WorkoutBlock(steps: [WorkoutStep(kind: .work, goal: .time(60), target: .heartRateRange(140, 150))]),
+            WorkoutBlock(steps: [WorkoutStep(kind: .work, goal: .time(60), target: .pace(3.5...4.0))]),
+            WorkoutBlock(steps: [WorkoutStep(kind: .work, goal: .time(60), target: .power(200...220))]),
+            WorkoutBlock(steps: [WorkoutStep(kind: .work, goal: .time(60))], repetitions: 0)
+        ])
+        let export = build(plans: [PlannedActivity(workoutID: workout.id, date: day(4))], workouts: [workout])
+        let steps = try #require(export.days[4].activities.first).steps
+        #expect(steps.count == 3)
+        #expect(steps[0].target == CalendarExport.Target(type: "heartRateRange", zone: nil, rpe: nil, min: 140, max: 150))
+        #expect(steps[1].target == CalendarExport.Target(type: "pace", zone: nil, rpe: nil, min: 3.5, max: 4.0))
+        #expect(steps[2].target == CalendarExport.Target(type: "power", zone: nil, rpe: nil, min: 200, max: 220))
+    }
+
+    @Test("steps survive a JSON round trip")
+    func stepsRoundTrip() throws {
+        let workout = intervals()
+        let export = build(plans: [PlannedActivity(workoutID: workout.id, date: day(4))], workouts: [workout])
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let decoded = try decoder.decode(CalendarExport.self, from: export.jsonData())
+        #expect(decoded.days[4].activities.first?.steps == export.days[4].activities.first?.steps)
+    }
+
+    @Test("without heart-rate zone settings a time step has no projected distance, a distance step keeps its goal")
+    func stepsWithoutZoneSettings() throws {
+        var bare = athlete
+        bare.heartRateZoneHistory = []
+        let workout = intervals()
+        let export = CalendarExportBuilder().build(
+            from: day(0), through: day(6, hour: 12), activities: [],
+            plans: [PlannedActivity(workoutID: workout.id, date: day(4))], workouts: [workout], templates: [],
+            metrics: [], athlete: bare, today: day(3, hour: 9), generatedAt: day(3, hour: 9)
+        )
+
+        let steps = try #require(export.days[4].activities.first).steps
+        #expect(steps[0].distanceMeters == nil)
+        #expect(steps[1].distanceMeters == 400)
+    }
+
+    @Test("a completed activity carries its fulfilled plan's steps, and none without a plan")
+    func completedSteps() throws {
+        let workout = intervals()
+        let linked = run(on: 1)
+        var plan = PlannedActivity(workoutID: workout.id, date: day(1))
+        plan.completedActivityID = linked.id
+
+        let export = build(activities: [linked, run(on: 2)], plans: [plan], workouts: [workout])
+
+        #expect(try #require(export.days[1].activities.first).steps.count == 10)
+        #expect(try #require(export.days[2].activities.first).steps.isEmpty)
+    }
+
+    @Test("steps are always written to the JSON, as an empty array when there are none")
+    func stepsInJSON() throws {
+        let json = try #require(String(data: build(activities: [run(on: 1)]).jsonData(), encoding: .utf8))
+        #expect(json.contains("\"steps\" : ["))
+    }
+
     @Test("JSON writes null for missing values, so every entry has the same keys, and decodes back")
     func jsonShape() throws {
         let easy = workout(name: "Easy")

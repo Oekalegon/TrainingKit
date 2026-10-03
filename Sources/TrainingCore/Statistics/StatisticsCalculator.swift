@@ -404,6 +404,12 @@ public struct StatisticsCalculator: Sendable {
         return WorkoutProjection(distanceMeters: projected.distanceMeters, duration: projected.duration)
     }
 
+    /// The projected duration and distance of each step of a planned workout, with block
+    /// repetitions expanded.
+    func stepProjections(for workout: StructuredWorkout, athlete: AthleteProfile) -> [PlannedWorkoutProjector.StepProjection] {
+        PlannedWorkoutProjector(durationEstimator: durationEstimator).stepProjections(workout: workout, athlete: athlete)
+    }
+
     /// The projected distance/duration/time-in-zone for a planned workout, via
     /// ``PlannedWorkoutProjector``.
     private func project(workout: StructuredWorkout, athlete: AthleteProfile) -> PlannedWorkoutProjector.Projection {

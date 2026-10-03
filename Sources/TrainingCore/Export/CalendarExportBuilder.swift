@@ -157,7 +157,8 @@ public struct CalendarExportBuilder: Sendable {
             trimpSource: load.map { Self.trimpSource(for: $0.method) },
             durationSeconds: activity.duration,
             distanceMeters: activity.distanceMeters,
-            plan: expected
+            plan: expected,
+            steps: workout.map { steps(of: $0, athlete: athlete) } ?? []
         )
     }
 
@@ -177,8 +178,53 @@ public struct CalendarExportBuilder: Sendable {
             trimpSource: expected.trimpSource,
             durationSeconds: expected.durationSeconds,
             distanceMeters: expected.distanceMeters,
-            plan: nil
+            plan: nil,
+            steps: steps(of: workout, athlete: athlete)
         )
+    }
+
+    private func steps(of workout: StructuredWorkout, athlete: AthleteProfile) -> [CalendarExport.Step] {
+        statisticsCalculator.stepProjections(for: workout, athlete: athlete).map { projection in
+            let goal: String
+            switch projection.step.goal {
+            case .time: goal = "time"
+            case .distance: goal = "distance"
+            case .open: goal = "open"
+            }
+            return CalendarExport.Step(
+                kind: Self.stepKindIdentifier(projection.step.kind),
+                block: projection.block,
+                repetition: projection.repetition,
+                goal: goal,
+                durationSeconds: Self.finite(projection.duration) ?? 0,
+                distanceMeters: projection.distanceMeters.flatMap(Self.finite),
+                target: projection.step.target.map(Self.target)
+            )
+        }
+    }
+
+    private static func stepKindIdentifier(_ kind: StepKind) -> String {
+        switch kind {
+        case .warmup: "warmup"
+        case .work: "work"
+        case .recovery: "recovery"
+        case .cooldown: "cooldown"
+        }
+    }
+
+    private static func target(_ target: IntensityTarget) -> CalendarExport.Target {
+        switch target {
+        case .heartRateZone(let zone):
+            CalendarExport.Target(type: "heartRateZone", zone: zone, rpe: nil, min: nil, max: nil)
+        case .heartRateRange(let low, let high):
+            CalendarExport.Target(type: "heartRateRange", zone: nil, rpe: nil, min: finite(low), max: finite(high))
+        case .pace(let range):
+            CalendarExport.Target(type: "pace", zone: nil, rpe: nil, min: finite(range.lowerBound), max: finite(range.upperBound))
+        case .power(let range):
+            CalendarExport.Target(type: "power", zone: nil, rpe: nil, min: finite(range.lowerBound), max: finite(range.upperBound))
+        case .rpe(let value):
+            CalendarExport.Target(type: "rpe", zone: nil, rpe: value, min: nil, max: nil)
+        }
     }
 
     private func plannedValues(

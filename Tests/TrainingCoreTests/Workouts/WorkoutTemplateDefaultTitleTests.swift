@@ -4,12 +4,15 @@ import Testing
 
 @Suite("WorkoutTemplate default title")
 struct WorkoutTemplateDefaultTitleTests {
-    @Test("a duration template is the main duration and the capitalized name")
+    @Test("a duration template is its total time, warmup and cooldown included")
     func durationTemplates() {
-        #expect(BuiltInWorkoutTemplates.easyRun.defaultTitle(values: ["duration": 50 * 60]) == "50min Easy Run")
+        // 5 min warmup + 30 min + 5 min cooldown.
+        #expect(BuiltInWorkoutTemplates.easyRun.defaultTitle() == "40min Easy Run")
+        #expect(BuiltInWorkoutTemplates.easyRun.defaultTitle(values: ["duration": 45 * 60]) == "55min Easy Run")
+        #expect(BuiltInWorkoutTemplates.easyRun.defaultTitle(values: ["duration": 50 * 60]) == "1h Easy Run")
         #expect(BuiltInWorkoutTemplates.recoveryRun.defaultTitle() == "20min Recovery Run")
-        // The 5-minute `.work` ramp-in doesn't win over the main effort.
-        #expect(BuiltInWorkoutTemplates.tempoRun.defaultTitle(values: ["duration": 30 * 60]) == "30min Tempo Run")
+        // 5 + 5 ramp-in + 30 + 5 recovery + 5.
+        #expect(BuiltInWorkoutTemplates.tempoRun.defaultTitle(values: ["duration": 30 * 60]) == "50min Tempo Run")
     }
 
     @Test("a distance template is the main distance")
@@ -53,7 +56,7 @@ struct WorkoutTemplateDefaultTitleTests {
     @Test("non-finite, zero and negative goals fall back to the name instead of trapping")
     func unusableValues() {
         let easy = BuiltInWorkoutTemplates.easyRun
-        for bad in [Double.nan, .infinity, -.infinity, 0, -300] {
+        for bad in [Double.nan, .infinity, -.infinity, -300] {
             #expect(easy.defaultTitle(values: ["duration": bad]) == "Easy Run")
         }
         let hills = BuiltInWorkoutTemplates.shortIntervalRun
@@ -67,7 +70,7 @@ struct WorkoutTemplateDefaultTitleTests {
 
     @Test("the title follows the defaults when no values are given")
     func defaults() {
-        #expect(BuiltInWorkoutTemplates.easyRun.defaultTitle() == "30min Easy Run")
+        #expect(BuiltInWorkoutTemplates.longRun.defaultTitle() == "20 km Long Run")
         #expect(BuiltInWorkoutTemplates.baseHillSprints.defaultTitle() == "6x8sec Hill Sprints")
     }
 

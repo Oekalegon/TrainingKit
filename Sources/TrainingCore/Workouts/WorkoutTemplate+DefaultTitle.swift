@@ -1,25 +1,33 @@
 import Foundation
 
 extension WorkoutTemplate {
-    /// A short title describing this template at the given parameter values, e.g. "50min Easy Run",
+    /// A short title describing this template at the given parameter values, e.g. "40min Easy Run",
     /// "23 km Long Run" or "10x8sec Hill Sprints".
     ///
     /// The title is derived from the instantiated workout's structure, not from a per-template
     /// rule, so a new template gets a sensible title without changes here:
     /// - A block repeated more than once is an interval set: "reps x work", where the work is the
     ///   first `.work` step's time or distance ("8x60sec", "8x400 m").
-    /// - Otherwise it is the longest `.work` step among the single-repetition blocks, so a warmup
-    ///   and cooldown never count ("50min", "23 km"). The longest, not the first, because a
-    ///   template may open with a short `.work` ramp-in ahead of its main effort.
-    /// - A workout with neither (all steps open-ended) is just the name.
+    /// - Otherwise, if a `.work` step is a distance, the longest such distance ("23 km"). Warmup
+    ///   and cooldown are left out: they are timed, and a time can't be added to a distance.
+    /// - Otherwise the workout's total time, every timed step counted, warmup and cooldown
+    ///   included ("40min" for an easy run whose main step is 30 minutes between two 5-minute
+    ///   steps), so the title says how long the session takes, not just its main block.
+    ///   Open-ended steps add nothing: their length isn't known, and a title that guessed would
+    ///   disagree with the athlete's own run. An interval set doesn't need them either, since it is
+    ///   named by its repetitions and effort.
+    /// - A workout with none of these (all steps open-ended) is just the name.
+    ///
+    /// A zero-length step adds nothing to a total; an interval set whose effort is zero is just the
+    /// name.
     ///
     /// The name is ``titleName`` if set, otherwise ``name`` with each word capitalized.
     ///
     /// - Parameters:
     ///   - values: Parameter key to value, as passed to ``instantiate(name:values:)``.
     ///   - distanceSystem: How distances are written; durations are always "h", "min" and "sec".
-    /// - Returns: The title; the name alone if the template has no work step with a usable goal
-    ///   (open-ended, or not a positive finite number), or if a block references an undeclared
+    /// - Returns: The title; the name alone if the template has no usable goal (all open-ended, or
+    ///   a time or distance that is negative or not finite), or if a block references an undeclared
     ///   parameter. For that last case, ``instantiate(name:values:)`` throws the actual error; a
     ///   display string deliberately doesn't.
     public func defaultTitle(values: [String: Double] = [:], distanceSystem: DistanceSystem = .metric) -> String {
@@ -34,27 +42,21 @@ extension WorkoutTemplate {
             return "\(set.repetitions)x\(effort) \(label)"
         }
 
-        let main = workout.blocks
-            .filter { $0.repetitions == 1 }
-            .flatMap(\.steps)
-            .filter { $0.kind == .work }
-            .max { Self.magnitude($0.goal) < Self.magnitude($1.goal) }
-        if let main, let amount = Self.describe(main.goal, distanceSystem: distanceSystem) {
-            return "\(amount) \(label)"
+        let steps = workout.blocks.flatMap(\.steps)
+        let distances = steps.filter { $0.kind == .work }.compactMap { step -> Double? in
+            if case .distance(let meters) = step.goal { meters } else { nil }
         }
-        return label
-    }
+        if !distances.isEmpty {
+            guard let longest = distances.filter({ $0.isFinite && $0 > 0 }).max() else { return label }
+            return "\(Self.distance(longest, in: distanceSystem)) \(label)"
+        }
 
-    /// A step goal's size for picking the longest: seconds for a time, meters for a distance. The
-    /// two aren't comparable, but no built-in template mixes them in its main steps. A
-    /// non-finite size counts as 0, so it can't win.
-    private static func magnitude(_ goal: StepGoal) -> Double {
-        let size: Double = switch goal {
-        case .time(let seconds): seconds
-        case .distance(let meters): meters
-        case .open: 0
+        let times = steps.compactMap { step -> TimeInterval? in
+            if case .time(let seconds) = step.goal { seconds } else { nil }
         }
-        return size.isFinite ? size : 0
+        // One bad time makes the total meaningless, so it isn't skipped.
+        guard times.allSatisfy({ $0.isFinite && $0 >= 0 }), times.reduce(0, +) > 0 else { return label }
+        return "\(Self.duration(times.reduce(0, +))) \(label)"
     }
 
     private static func describe(_ goal: StepGoal, distanceSystem: DistanceSystem) -> String? {

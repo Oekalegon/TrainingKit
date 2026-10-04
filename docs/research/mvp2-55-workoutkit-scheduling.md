@@ -71,10 +71,10 @@ schedule again. Implications:
 - A "reset Watch schedule" action (`removeAllWorkouts()` then a full re-sync) is cheap to add and
   is the one step Apple suggested.
 
-## 2. What the current bridge gets wrong for a scheduler
+## 2. What the MVP2-39 bridge got wrong for a scheduler
 
-`WorkoutKitBridge.schedule` gives the `WorkoutPlan` the id `workout.workoutKitID ?? UUID()`, and
-`unschedule` matches entries on that id plus the day. That breaks down once something schedules
+Fixed on this branch; see §5, item 4. As MVP2-39 shipped it, `WorkoutKitBridge.schedule` gave the `WorkoutPlan` the id `workout.workoutKitID ?? UUID()`, and
+`unschedule` matched entries on that id plus the day. That breaks down once something schedules
 for real:
 
 1. **Nothing ever sets `StructuredWorkout.workoutKitID`.** `sync(_:)` returns an id but nothing
@@ -198,13 +198,26 @@ Decided:
 3. **Opt-in.** Sending planned workouts to the Watch is on by default once WorkoutKit permission
    is granted. The settings switch can still turn it off.
 4. **Per-plan ids (§2).** Done: `WorkoutKitBridge.workoutPlan(for:workout:)` gives each entry its
-   plan's id, `schedule` replaces the plan's existing entry (so a move or edit is one call), and
-   `unschedule(_:)` takes only the plan. Callers of MVP2-39's
-   `unschedule(_:workout:calendar:)` need updating.
+   plan's id, `schedule` replaces the plan's existing entry (so a move or edit is one call) but
+   keeps an identical or completed entry on the plan's day, and `unschedule(_:)` takes only the
+   plan. `unscheduleAll(except:)` clears entries scheduled under the old ids. Scheduling goes
+   through an internal `WorkoutScheduling` seam, so it's tested against a fake.
 
 Open:
 5. **Where the app code lives.** `TrainingApp` isn't in this repository. The planner and sync
    layer can be built and tested here; the triggers and UI go in the app.
+
+## 6. TrainingApp follow-up
+
+The per-plan id change breaks the app's calls and needs app work of its own:
+- `unschedule(_:workout:calendar:)` is now `unschedule(_:)`. Drop the extra arguments.
+- Moving a plan or editing its workout needs only `schedule`. The `unschedule` call before it is
+  now a wasted round-trip.
+- Once, after upgrading: call `unscheduleAll(except:)` with the ids of every plan in the store,
+  so entries scheduled under the old ids leave the Watch. The scheduler's regular pass can do
+  this every run instead.
+- `sync(_:)` is deprecated; validate with `customWorkout(from:)` instead.
+- Then the MVP2-55 app work proper: the triggers in §3, the permission request and UI in §4.3.
 
 ## Sources
 

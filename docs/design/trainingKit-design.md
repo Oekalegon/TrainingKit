@@ -410,13 +410,16 @@ struct WorkoutKitBridge {
     func workoutPlan(for plan: PlannedActivity, workout: StructuredWorkout) throws -> WorkoutPlan  // id == plan.id
     func schedule(_ plan: PlannedActivity, workout: StructuredWorkout) async throws  // replaces the plan's entry
     func unschedule(_ plan: PlannedActivity) async   // removes the plan's entry, whatever its date
+    func unscheduleAll(except planIDs: Set<UUID>) async -> Int   // clears entries no plan names
 }
 ```
 
 - Mapping is mechanical: `WorkoutBlock` ↔ `IntervalBlock`, `WorkoutStep` ↔ `IntervalStep`, `StepGoal` ↔ `WorkoutGoal`, `IntensityTarget` ↔ `WorkoutAlert`.
 - Sync is one-directional: library → WorkoutKit. A scheduled entry's `WorkoutPlan` id is its `PlannedActivity`'s id (MVP2-55), so each entry belongs to exactly one plan: a workout planned on several days, or twice on one day, gets a distinct entry each time, and a completed entry (or an `HKWorkout` started from one) names the plan it fulfilled. `StructuredWorkout.workoutKitID` isn't used for scheduling; it only records the plan a workout was recovered from.
 - Scheduling a `PlannedActivity` uses `WorkoutPlan`'s schedule API; WorkoutKit only shows ±7 days on the Watch, so scheduling is done lazily for plans within that window rather than for the whole season.
-- `schedule` first removes any entry with the plan's id, whatever its date, so moving a plan or editing its workout needs only another `schedule` call. An identical entry on the same day is left alone (keeping its completion flag), so repeating the call is a no-op.
+- `schedule` first removes any entry with the plan's id, whatever its date, so moving a plan or editing its workout needs only another `schedule` call. An entry on the plan's own day is left alone when it's identical or already completed, so repeating the call is a no-op and never resets the Watch's completion flag. A completed entry is kept even if the workout was edited since: the athlete already did the version it holds.
+- `unscheduleAll(except:)` removes entries whose id isn't a plan id: entries scheduled before MVP2-55 (random or library-workout ids, which nothing can match any more) and any a failed `unschedule` left behind. The caller passes the ids of every plan in the store, not just the loaded window.
+- Calls go through `WorkoutScheduling`, an internal struct of closures over `WorkoutScheduler.shared` (which crashes outside an app bundle), so tests run the scheduling logic against an in-memory fake.
 - Deleting a plan calls `unschedule`, which finds the entry among `WorkoutScheduler`'s own scheduled workouts by the plan's id and removes that, rather than rebuilding a `WorkoutPlan` — so a workout edited since scheduling still matches.
 - Completed scheduled workouts can be queried back from WorkoutKit (date + completed flag, no health data). That's a cheap first signal for reconciliation before the HealthKit import lands.
 

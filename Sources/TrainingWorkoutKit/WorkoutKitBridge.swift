@@ -22,23 +22,25 @@ import WorkoutKit
 /// falls back to `IntervalStep.Purpose.work` — that enum only distinguishes work from recovery.
 ///
 /// Sync is one-directional: library → WorkoutKit. A scheduled entry's `WorkoutPlan` id is the
-/// ``PlannedActivity``'s id (see ``workoutPlan(for:workout:)``), so each entry belongs to one plan
+/// `PlannedActivity`'s id (see ``workoutPlan(for:workout:)``), so each entry belongs to one plan
 /// and can be found again without storing anything.
 public struct WorkoutKitBridge: Sendable {
     private let support: WorkoutKitSupportChecking
+    private let scheduler: WorkoutScheduling
 
-    /// Creates a WorkoutKit bridge. `WorkoutScheduler` has no public initializer, so scheduling
-    /// always goes through `.shared`, WorkoutKit's only instance, rather than a stored dependency
-    /// this type could inject a fake for in tests.
+    /// Creates a WorkoutKit bridge that schedules through `WorkoutScheduler.shared`, WorkoutKit's
+    /// only instance.
     public init() {
-        self.support = .live
+        self.init(support: .live, scheduler: .live)
     }
 
     /// Internal seam for tests: substitutes a fake ``WorkoutKitSupportChecking`` so
     /// `unsupportedActivity`/`unsupportedGoalForActivity`/`unsupportedAlertForActivity` can be
-    /// exercised deterministically, without depending on WorkoutKit's undocumented support tables.
-    init(support: WorkoutKitSupportChecking) {
+    /// exercised deterministically, without depending on WorkoutKit's undocumented support tables,
+    /// and a fake ``WorkoutScheduling`` so scheduling runs without an app bundle.
+    init(support: WorkoutKitSupportChecking = .live, scheduler: WorkoutScheduling = .live) {
         self.support = support
+        self.scheduler = scheduler
     }
 
     /// Maps a library workout onto a `CustomWorkout`, validating every step's goal and alert
@@ -95,6 +97,9 @@ public struct WorkoutKitBridge: Sendable {
     /// Maps a `WorkoutPlan` back onto a `StructuredWorkout`, tagged with the plan's id as
     /// `workoutKitID`.
     ///
+    /// For an entry this bridge scheduled, that id is a `PlannedActivity`'s id (see
+    /// ``workoutPlan(for:workout:)``), not a library workout's.
+    ///
     /// - Parameter plan: The plan to recover a `StructuredWorkout` from.
     /// - Returns: The recovered `StructuredWorkout`, with `workoutKitID` set to `plan.id`.
     /// - Throws: ``WorkoutKitMappingError/unsupportedWorkoutKind(_:)`` if `plan.workout` isn't
@@ -143,6 +148,7 @@ public struct WorkoutKitBridge: Sendable {
     /// - Parameter workout: The workout to validate and mint/reuse a WorkoutKit plan id for.
     /// - Returns: `workout.workoutKitID` if already set, otherwise a freshly minted `UUID`.
     /// - Throws: Whatever ``customWorkout(from:)`` throws for `workout`.
+    @available(*, deprecated, message: "Scheduling no longer uses workoutKitID; validate with customWorkout(from:).")
     public func sync(_ workout: StructuredWorkout) async throws(WorkoutKitMappingError) -> UUID {
         _ = try customWorkout(from: workout)
         return workout.workoutKitID ?? UUID()
@@ -150,7 +156,7 @@ public struct WorkoutKitBridge: Sendable {
 
     /// Builds the `WorkoutPlan` that puts `workout` on the Watch for `plan`, with `plan.id` as its id.
     ///
-    /// The id is the ``PlannedActivity``'s, not the library workout's, so each scheduled entry
+    /// The id is the `PlannedActivity`'s, not the library workout's, so each scheduled entry
     /// belongs to exactly one plan (MVP2-55). A workout planned on several days, or twice on one day,
     /// gets a distinct entry each time, and a completed entry, or a recorded `HKWorkout` started from
     /// one, names the plan it fulfilled. `plan.id` is stable, so nothing extra needs storing to find
@@ -168,11 +174,12 @@ public struct WorkoutKitBridge: Sendable {
     /// Puts `workout` on the Watch for `plan.date` via `WorkoutScheduler`, replacing whatever was
     /// scheduled for `plan` before.
     ///
-    /// The entry's id is `plan.id` (see ``workoutPlan(for:workout:)``). Any existing entry with that
-    /// id is removed first, whatever its date, so a moved plan leaves nothing on its old day and an
-    /// edited workout replaces the stale version. An entry that's already identical, same workout
-    /// on the same day, is left alone, which keeps its completion flag and makes calling this
-    /// again a no-op.
+    /// The entry's id is `plan.id` (see ``workoutPlan(for:workout:)``). Existing entries with that
+    /// id are removed, whatever their date, so a moved plan leaves nothing on its old day and an
+    /// edited workout replaces the stale version. The one exception is an entry on the plan's own
+    /// day that's identical or already completed; it's kept instead of scheduling a new one: that keeps the Watch's completion flag, which a
+    /// replacement would reset, and makes calling this again a no-op. A completed entry is kept even
+    /// if the workout has been edited since, since the athlete already did the version it holds.
     ///
     /// WorkoutKit only shows ±7 days on the Watch and caps how many entries an app holds
     /// (`WorkoutScheduler.maxAllowedScheduledWorkoutCount`), so the caller is expected to call this
@@ -190,16 +197,20 @@ public struct WorkoutKitBridge: Sendable {
     public func schedule(_ plan: PlannedActivity, workout: StructuredWorkout, calendar: Calendar = .current) async throws(WorkoutKitMappingError) {
         let desired = try workoutPlan(for: plan, workout: workout)
         let day = calendar.dateComponents([.year, .month, .day], from: plan.date)
-        var alreadyScheduled = false
-        for entry in await WorkoutScheduler.shared.scheduledWorkouts where entry.plan.id == plan.id {
-            if !alreadyScheduled, entry.plan == desired, Self.isSameDay(entry.date, day) {
-                alreadyScheduled = true
+        // A completed entry wins over an identical one, so its flag is the one kept.
+        let entries = await scheduler.scheduledWorkouts()
+            .filter { $0.plan.id == plan.id }
+            .sorted { $0.complete && !$1.complete }
+        var kept = false
+        for entry in entries {
+            if !kept, Self.isSameDay(entry.date, day), entry.complete || entry.plan == desired {
+                kept = true
                 continue
             }
-            await WorkoutScheduler.shared.remove(entry.plan, at: entry.date)
+            await scheduler.remove(entry.plan, entry.date)
         }
-        if !alreadyScheduled {
-            await WorkoutScheduler.shared.schedule(desired, at: day)
+        if !kept {
+            await scheduler.schedule(desired, day)
         }
     }
 
@@ -216,9 +227,31 @@ public struct WorkoutKitBridge: Sendable {
     ///
     /// - Parameter plan: The plan whose entry to remove.
     public func unschedule(_ plan: PlannedActivity) async {
-        for entry in await WorkoutScheduler.shared.scheduledWorkouts where entry.plan.id == plan.id {
-            await WorkoutScheduler.shared.remove(entry.plan, at: entry.date)
+        for entry in await scheduler.scheduledWorkouts() where entry.plan.id == plan.id {
+            await scheduler.remove(entry.plan, entry.date)
         }
+    }
+
+    /// Removes every scheduled entry whose id isn't one of `planIDs`, and returns how many it removed.
+    ///
+    /// Clears entries no plan can reach any more: ones scheduled before MVP2-55, whose id was a
+    /// random one or a library workout's, and ones left behind by a plan deleted while its entry
+    /// couldn't be removed. Both would otherwise stay on the Watch and use up slots of
+    /// `WorkoutScheduler.maxAllowedScheduledWorkoutCount`.
+    ///
+    /// Pass the ids of *every* plan in the store, not just the loaded window: an entry for a plan
+    /// outside it would be removed too.
+    ///
+    /// - Parameter planIDs: The ids of all existing `PlannedActivity`s.
+    /// - Returns: The number of entries removed.
+    @discardableResult
+    public func unscheduleAll(except planIDs: Set<UUID>) async -> Int {
+        var removed = 0
+        for entry in await scheduler.scheduledWorkouts() where !planIDs.contains(entry.plan.id) {
+            await scheduler.remove(entry.plan, entry.date)
+            removed += 1
+        }
+        return removed
     }
 
     /// Whether two `DateComponents` name the same calendar day — compares year/month/day only, since

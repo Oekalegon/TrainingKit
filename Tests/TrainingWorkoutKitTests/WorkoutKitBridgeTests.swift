@@ -24,7 +24,6 @@ struct WorkoutKitBridgeTests {
         let workoutPlan = try bridge.workoutPlan(for: plan, workout: workout)
 
         #expect(workoutPlan.id == plan.id)
-        #expect(workoutPlan.id != workout.workoutKitID)
     }
 
     @Test("workoutPlan(for:workout:) gives two plans of the same workout on one day distinct ids")
@@ -224,6 +223,7 @@ struct WorkoutKitBridgeTests {
 
     // MARK: - sync(_:)
 
+    @available(*, deprecated)
     @Test("sync(_:) returns the workout's existing workoutKitID when it has one, rather than a new id")
     func syncReusesExistingWorkoutKitID() async throws {
         let existingID = UUID()
@@ -239,6 +239,7 @@ struct WorkoutKitBridgeTests {
         #expect(returnedID == existingID)
     }
 
+    @available(*, deprecated)
     @Test("sync(_:) mints a fresh id when the workout hasn't been synced before")
     func syncMintsFreshIDWhenUnsynced() async throws {
         let workout = StructuredWorkout(

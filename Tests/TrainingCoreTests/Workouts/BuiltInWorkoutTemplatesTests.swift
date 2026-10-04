@@ -48,7 +48,7 @@ struct BuiltInWorkoutTemplatesTests {
         ])
     }
 
-    @Test("base hill sprints: warmup, open Zone 2 run, N × (8 s all-out, Zone 1 rest), open Zone 2 run, cooldown")
+    @Test("base full-out hill sprints: warmup, open Zone 2 run, N × (8 s all-out, Zone 1 rest), open Zone 2 run, cooldown")
     func baseHillSprintsInstantiates() throws {
         let workout = try BuiltInWorkoutTemplates.baseHillSprints.instantiate(values: ["reps": 8, "rest": 4 * 60.0])
 
@@ -67,7 +67,7 @@ struct BuiltInWorkoutTemplatesTests {
         ])
     }
 
-    @Test("base hill sprints default to 6 sprints with 5 minutes' rest, and offer 3–12 sprints and 3–15 minutes' rest")
+    @Test("base full-out hill sprints default to 6 sprints with 5 minutes' rest, and offer 3–12 sprints and 3–15 minutes' rest")
     func baseHillSprintsDefaultsAndRanges() throws {
         let template = BuiltInWorkoutTemplates.baseHillSprints
         let workout = try template.instantiate()

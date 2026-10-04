@@ -149,11 +149,15 @@ struct BuiltInWorkoutTemplatesTests {
 
         let hills = try BuiltInWorkoutTemplates.baseHillSprints.instantiate()
         // 5 min warmup + open run + 6 × (8 s sprint + 5 min rest) + open run + 5 min cooldown.
-        #expect(estimator.duration(for: hills, athlete: athlete) == 300 + 600 + 6 * (8 + 300) + 600 + 300)
+        let hillRepetition: TimeInterval = 8 + 300
+        let expectedHills: TimeInterval = 300 + 600 + 6 * hillRepetition + 600 + 300
+        #expect(estimator.duration(for: hills, athlete: athlete) == expectedHills)
 
         let short = try BuiltInWorkoutTemplates.shortIntervalRun.instantiate()
         // 5 + 5 min, 8 × (60 s + 90 s), 5 min cooldown.
-        #expect(estimator.duration(for: short, athlete: athlete) == 300 + 300 + 8 * (60 + 90) + 300)
+        let shortRepetition: TimeInterval = 60 + 90
+        let expectedShort: TimeInterval = 300 + 300 + 8 * shortRepetition + 300
+        #expect(estimator.duration(for: short, athlete: athlete) == expectedShort)
     }
 
     @Test("every built-in template has a positive estimated load with its default parameters")

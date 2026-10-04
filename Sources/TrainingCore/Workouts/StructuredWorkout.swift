@@ -10,7 +10,8 @@ public struct StructuredWorkout: Identifiable, Sendable, Codable, Hashable {
     public var sport: Sport
     /// The ordered blocks making up this workout.
     public var blocks: [WorkoutBlock]
-    /// Identity of the synced WorkoutKit plan; `nil` if this workout hasn't been synced yet.
+    /// Identity of a WorkoutKit plan this workout was recovered from; `nil` if none. Scheduling
+    /// doesn't use it: a scheduled entry's id is its ``PlannedActivity``'s id (MVP2-55).
     public var workoutKitID: UUID?
     /// The ``WorkoutTemplate`` this workout was instantiated from, or `nil` for one built by hand or
     /// created before this field existed. Together with ``parameterValues`` it's what lets an app

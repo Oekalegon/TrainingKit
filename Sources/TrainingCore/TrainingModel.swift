@@ -233,7 +233,7 @@ public final class TrainingModel {
     /// reload and recompute, if `id` doesn't exist in the store.
     ///
     /// Nothing is removed from WorkoutKit from here — that's the caller's job
-    /// (`TrainingWorkoutKit`'s `WorkoutKitBridge.unschedule`), since Core has no WorkoutKit dependency.
+    /// (`TrainingWorkoutKit`'s `WorkoutKitBridge.unschedule(_:)`), since Core has no WorkoutKit dependency.
     /// Lives in this file rather than an extension because ``plans``' setter is `private`.
     ///
     /// - Parameters:

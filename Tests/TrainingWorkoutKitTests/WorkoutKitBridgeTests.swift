@@ -10,18 +10,50 @@ import TrainingCore
 struct WorkoutKitBridgeTests {
     private let bridge = WorkoutKitBridge()
 
-    // MARK: - Unscheduling
+    // MARK: - Scheduled entry ids
 
-    @Test("unschedule is a no-op for a workout that was never synced (no workoutKitID), without touching WorkoutKit")
-    func unscheduleNoOpsWithoutWorkoutKitID() async {
+    @Test("workoutPlan(for:workout:) gives the entry its PlannedActivity's id, not the workout's")
+    func workoutPlanUsesPlanID() throws {
+        let workout = StructuredWorkout(
+            name: "Easy run", sport: .running,
+            blocks: [WorkoutBlock(steps: [WorkoutStep(kind: .work, goal: .time(1800))])],
+            workoutKitID: UUID()
+        )
+        let plan = PlannedActivity(workoutID: workout.id, date: Date())
+
+        let workoutPlan = try bridge.workoutPlan(for: plan, workout: workout)
+
+        #expect(workoutPlan.id == plan.id)
+    }
+
+    @Test("workoutPlan(for:workout:) gives two plans of the same workout on one day distinct ids")
+    func workoutPlanDistinguishesPlansOfOneWorkout() throws {
         let workout = StructuredWorkout(
             name: "Easy run", sport: .running,
             blocks: [WorkoutBlock(steps: [WorkoutStep(kind: .work, goal: .time(1800))])]
         )
-        #expect(workout.workoutKitID == nil)
+        let day = Date()
+        let first = try bridge.workoutPlan(for: PlannedActivity(workoutID: workout.id, date: day), workout: workout)
+        let second = try bridge.workoutPlan(for: PlannedActivity(workoutID: workout.id, date: day), workout: workout)
 
-        // Returns before ever reaching `WorkoutScheduler`, which crashes outside an app bundle.
-        await bridge.unschedule(PlannedActivity(workoutID: workout.id, date: Date()), workout: workout)
+        #expect(first.id != second.id)
+    }
+
+    @Test("workoutPlan(for:workout:) throws what customWorkout(from:) throws")
+    func workoutPlanPropagatesMappingErrors() {
+        let bridge = WorkoutKitBridge(support: WorkoutKitSupportChecking(
+            supportsActivity: { _ in false },
+            supportsGoal: { _, _ in true },
+            supportsAlert: { _, _ in true }
+        ))
+        let workout = StructuredWorkout(
+            name: "Easy run", sport: .running,
+            blocks: [WorkoutBlock(steps: [WorkoutStep(kind: .work, goal: .time(1800))])]
+        )
+
+        #expect(throws: WorkoutKitMappingError.unsupportedActivity(.running)) {
+            try bridge.workoutPlan(for: PlannedActivity(workoutID: workout.id, date: Date()), workout: workout)
+        }
     }
 
     @Test("isSameDay compares year/month/day only, ignoring time-of-day fields")
@@ -191,6 +223,7 @@ struct WorkoutKitBridgeTests {
 
     // MARK: - sync(_:)
 
+    @available(*, deprecated)
     @Test("sync(_:) returns the workout's existing workoutKitID when it has one, rather than a new id")
     func syncReusesExistingWorkoutKitID() async throws {
         let existingID = UUID()
@@ -206,6 +239,7 @@ struct WorkoutKitBridgeTests {
         #expect(returnedID == existingID)
     }
 
+    @available(*, deprecated)
     @Test("sync(_:) mints a fresh id when the workout hasn't been synced before")
     func syncMintsFreshIDWhenUnsynced() async throws {
         let workout = StructuredWorkout(

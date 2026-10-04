@@ -728,6 +728,46 @@ short the period. Not using the cache is deliberate: the export is then an indep
 recomputation, which is how a cache seeding bug was found. The work runs off the main actor and
 stops if the calling task is cancelled.
 
+### 9.5 Calendar import (MVP2-103)
+
+`CalendarExport.decode(from:)` reads an export file back, and `TrainingModel.importCalendar(_:asOf:)`
+adds its planned workouts as plans. `calendarImportPreview(_:)` reports what an import would do
+without changing anything. The pure `CalendarImportPlanner` decides, so it is tested without stores.
+
+What is imported:
+- **Planned entries only.** Each becomes a `PlannedActivity` on its day, read in the athlete's own
+  time zone so the day lands where it does in the app. The workout is rebuilt from the entry's
+  `steps`: steps of one `block` form a block, repeated as often as the block's highest `repetition`.
+  The template link isn't restored, so such a workout can't be re-opened with its template's
+  parameters. A step kind or goal this version doesn't know rejects the entry.
+- **Entries before today are skipped and counted.** Such a plan would only show as missed and never
+  counts as load; the export leaves missed plans out for the same reason.
+- **Completed activities are skipped and counted.** They come from HealthKit, and the file holds no
+  heart-rate data. Importing them needs the model to hold an imported load for an activity without
+  heart-rate samples: `LoadMethod.manual` exists, but `Activity` has no field for it. Left for later.
+- **Daily metrics are never imported.** The model recomputes CTL, ATL, TSB, monotony and strain from
+  the plans and activities.
+- **Expected TRIMP** becomes the plan's load override when the entry's `trimpSource` is `override`,
+  or when the TRIMP differs from the estimator's value for the rebuilt steps by more than 0.5, so a
+  load edited outside the app survives. An untouched estimate is left to be recomputed.
+
+Duplicates: a plan is skipped when the app already has one on the same day for an equal workout
+(name, sport and blocks), so importing a file twice adds nothing. The same workout twice on one day
+is allowed: only the occurrences beyond those already stored are added. A new workout equal to one in
+the library isn't repeated; the plan refers to the existing one.
+
+An entry without `steps` (a file written before MVP2-102) is rejected, since no workout can be
+rebuilt. A file with a newer `schemaVersion` than the app understands, or one that isn't an export,
+is refused with a `CalendarImportError`. The result is a `CalendarImportReport`: added, skipped as
+duplicates, skipped as past, completed skipped, and rejected entries with a reason.
+
+New workouts are saved before the plans that use them, so a failure partway leaves at worst unused
+workouts. Afterwards the model reloads its loaded range and reconciles the plans with the activities
+loaded. The file's days are loaded only when nothing was loaded yet: widening the range for a long
+file would load and recompute a whole season of activities, and the week view loads other weeks
+when they are shown. The plans aren't scheduled in WorkoutKit: that stays
+with the app's scheduler (MVP2-55).
+
 ## 10. Periodisation — macro, meso, micro cycles (Core, MVP 1)
 
 Cycles are the calendar structure that plans and statistics hang off, and they ship in MVP 1: the user creates them (by hand or from a template), plans activities inside them, and reads statistics per cycle. Nothing in the load model depends on them, but the evaluator does, and MVP 2's generator builds on the same `CycleLayoutBuilder` rather than introducing anything new.

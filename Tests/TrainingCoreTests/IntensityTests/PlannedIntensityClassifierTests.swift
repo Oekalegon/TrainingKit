@@ -207,5 +207,6 @@ struct PlannedIntensityClassifierTests {
         #expect(try category(BuiltInWorkoutTemplates.tempoRun) == .medium)
         // 6 × 8 s of sprinting is far below the hard-time floor, so the session stays easy.
         #expect(try category(BuiltInWorkoutTemplates.baseHillSprints) == .low)
+        #expect(try category(BuiltInWorkoutTemplates.shortIntervalRun) == .high)
     }
 }

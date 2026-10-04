@@ -80,6 +80,37 @@ struct BuiltInWorkoutTemplatesTests {
         #expect(rest.range == 180...900)
     }
 
+    @Test("short interval run: warmup, Zone 2 ramp-in, N × (Zone 5 effort, Zone 1 recovery), cooldown")
+    func shortIntervalRunInstantiates() throws {
+        let workout = try BuiltInWorkoutTemplates.shortIntervalRun.instantiate(values: ["reps": 10, "work": 45, "rest": 120])
+
+        #expect(workout.blocks == [
+            WorkoutBlock(steps: [WorkoutStep(kind: .warmup, goal: .time(5 * 60), target: .heartRateZone(1))]),
+            WorkoutBlock(steps: [WorkoutStep(kind: .work, goal: .time(5 * 60), target: .heartRateZone(2))]),
+            WorkoutBlock(
+                steps: [
+                    WorkoutStep(kind: .work, goal: .time(45), target: .heartRateZone(5)),
+                    WorkoutStep(kind: .recovery, goal: .time(120), target: .heartRateZone(1)),
+                ],
+                repetitions: 10
+            ),
+            WorkoutBlock(steps: [WorkoutStep(kind: .cooldown, goal: .time(5 * 60), target: .heartRateZone(1))]),
+        ])
+    }
+
+    @Test("short interval run defaults to 8 × 1 min with 90 s recovery, and offers 6–12 reps, 30–120 s efforts, 60–180 s recoveries")
+    func shortIntervalRunDefaultsAndRanges() throws {
+        let template = BuiltInWorkoutTemplates.shortIntervalRun
+        let workout = try template.instantiate()
+
+        #expect(workout.blocks[2].repetitions == 8)
+        #expect(workout.blocks[2].steps.map(\.goal) == [.time(60), .time(90)])
+        func range(_ key: String) throws -> ClosedRange<Double>? { try #require(template.parameters.first { $0.key == key }).range }
+        #expect(try range("reps") == 6...12)
+        #expect(try range("work") == 30...120)
+        #expect(try range("rest") == 60...180)
+    }
+
     @Test("built-in templates have distinct, stable ids")
     func builtInsHaveDistinctIDs() {
         let ids = Set(BuiltInWorkoutTemplates.all.map(\.id))

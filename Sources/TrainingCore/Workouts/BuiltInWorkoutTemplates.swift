@@ -156,6 +156,43 @@ public enum BuiltInWorkoutTemplates {
         ]
     )
 
+    /// Short interval run (MVP2-105): Zone 5 efforts of 30 seconds to 2 minutes with short Zone 1
+    /// recoveries.
+    ///
+    /// A fixed 5-minute Zone 1 warmup and 5-minute Zone 2 ramp-in, then `reps` (6-12) times a Zone 5
+    /// effort of `work` seconds (30-120) and a Zone 1 recovery of `rest` seconds (60-180), then a
+    /// fixed 5-minute Zone 1 cooldown. The last repetition keeps its recovery before the cooldown.
+    /// As in ``tempoRun``, only the edge blocks are `.warmup`/`.cooldown`, so the Zone 2 ramp-in is
+    /// `.work`, matching what ``WorkoutKitBridge`` sends to the Watch.
+    public static let shortIntervalRun = WorkoutTemplate(
+        id: UUID(uuidString: "8F5D6E4E-6E0E-4B8B-9C1A-9E6F9F1C1A06")!,
+        name: "Short interval run",
+        sport: .running,
+        parameters: [
+            WorkoutTemplateParameter(key: "reps", name: "Repetitions", unit: .count, defaultValue: 8, range: 6...12),
+            WorkoutTemplateParameter(key: "work", name: "Effort", unit: .minutes, defaultValue: 60, range: 30...120),
+            WorkoutTemplateParameter(key: "rest", name: "Recovery", unit: .minutes, defaultValue: 90, range: 60...180),
+        ],
+        blocks: [
+            TemplateBlock(steps: [
+                TemplateStep(kind: .warmup, goal: .time(.fixed(5 * 60)), target: .heartRateZone(1)),
+            ]),
+            TemplateBlock(steps: [
+                TemplateStep(kind: .work, goal: .time(.fixed(5 * 60)), target: .heartRateZone(2)),
+            ]),
+            TemplateBlock(
+                steps: [
+                    TemplateStep(kind: .work, goal: .time(.parameter("work")), target: .heartRateZone(5)),
+                    TemplateStep(kind: .recovery, goal: .time(.parameter("rest")), target: .heartRateZone(1)),
+                ],
+                repetitions: .parameter("reps")
+            ),
+            TemplateBlock(steps: [
+                TemplateStep(kind: .cooldown, goal: .time(.fixed(5 * 60)), target: .heartRateZone(1)),
+            ]),
+        ]
+    )
+
     /// Every built-in template, in the order they should appear in a library UI.
-    public static let all: [WorkoutTemplate] = [recoveryRun, easyRun, longRun, tempoRun, baseHillSprints]
+    public static let all: [WorkoutTemplate] = [recoveryRun, easyRun, longRun, tempoRun, baseHillSprints, shortIntervalRun]
 }

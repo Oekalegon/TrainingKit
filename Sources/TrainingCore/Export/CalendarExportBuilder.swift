@@ -287,6 +287,23 @@ public struct CalendarExportBuilder: Sendable {
         }
     }
 
+    /// The sport written as `identifier` by ``sportIdentifier(_:)``; an unknown one is its own label.
+    static func sport(identifier: String) -> Sport {
+        switch identifier {
+        case "running": .running
+        case "indoorRunning": .indoorRunning
+        case "outdoorRunning": .outdoorRunning
+        case "cycling": .cycling
+        case "swimming": .swimming
+        case "strength": .strength
+        case "coreStrengthTraining": .coreStrengthTraining
+        case "walking": .walking
+        case "rowing": .rowing
+        case "hiking": .hiking
+        default: .other(identifier)
+        }
+    }
+
     static func intensityIdentifier(_ category: IntensityCategory) -> String {
         switch category {
         case .veryLow: "veryLow"

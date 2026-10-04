@@ -180,6 +180,28 @@ public struct CalendarExport: Sendable, Codable, Hashable {
         public let distanceMeters: Double?
     }
 
+    /// Reads an export written by ``jsonData()``.
+    ///
+    /// - Parameter data: The file's contents.
+    /// - Returns: The export.
+    /// - Throws: ``CalendarImportError/unreadable`` if `data` isn't an export, or
+    ///   ``CalendarImportError/unsupportedSchemaVersion(found:supported:)`` if it was written with a
+    ///   newer format than ``currentSchemaVersion``.
+    public static func decode(from data: Data) throws(CalendarImportError) -> CalendarExport {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let export: CalendarExport
+        do {
+            export = try decoder.decode(CalendarExport.self, from: data)
+        } catch {
+            throw .unreadable
+        }
+        guard export.schemaVersion <= currentSchemaVersion else {
+            throw .unsupportedSchemaVersion(found: export.schemaVersion, supported: currentSchemaVersion)
+        }
+        return export
+    }
+
     /// The export as pretty-printed JSON with sorted keys and ISO 8601 dates.
     ///
     /// `nil` values are written as `null` rather than left out, so every day and entry has the
@@ -232,6 +254,24 @@ extension CalendarExport.Entry {
     private enum CodingKeys: String, CodingKey {
         case status, start, name, sport, template, intensity, trimp, trimpSource
         case durationSeconds, distanceMeters, plan, steps
+    }
+
+    /// Decodes an entry, reading a missing `steps` as empty so files written before steps were
+    /// added (MVP2-102) still load.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        status = try container.decode(CalendarExport.Entry.Status.self, forKey: .status)
+        start = try container.decodeIfPresent(Date.self, forKey: .start)
+        name = try container.decodeIfPresent(String.self, forKey: .name)
+        sport = try container.decode(String.self, forKey: .sport)
+        template = try container.decodeIfPresent(String.self, forKey: .template)
+        intensity = try container.decodeIfPresent(String.self, forKey: .intensity)
+        trimp = try container.decodeIfPresent(Double.self, forKey: .trimp)
+        trimpSource = try container.decodeIfPresent(CalendarExport.Entry.TRIMPSource.self, forKey: .trimpSource)
+        durationSeconds = try container.decode(Double.self, forKey: .durationSeconds)
+        distanceMeters = try container.decodeIfPresent(Double.self, forKey: .distanceMeters)
+        plan = try container.decodeIfPresent(CalendarExport.PlannedValues.self, forKey: .plan)
+        steps = try container.decodeIfPresent([CalendarExport.Step].self, forKey: .steps) ?? []
     }
 
     public func encode(to encoder: Encoder) throws {

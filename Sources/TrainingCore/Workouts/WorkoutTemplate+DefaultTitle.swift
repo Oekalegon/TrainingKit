@@ -1,7 +1,7 @@
 import Foundation
 
 extension WorkoutTemplate {
-    /// A short title describing this template at the given parameter values, e.g. "50min Easy Run",
+    /// A short title describing this template at the given parameter values, e.g. "40min Easy Run",
     /// "23 km Long Run" or "10x8sec Hill Sprints".
     ///
     /// The title is derived from the instantiated workout's structure, not from a per-template
@@ -13,7 +13,13 @@ extension WorkoutTemplate {
     /// - Otherwise the workout's total time, every timed step counted, warmup and cooldown
     ///   included ("40min" for an easy run whose main step is 30 minutes between two 5-minute
     ///   steps), so the title says how long the session takes, not just its main block.
+    ///   Open-ended steps add nothing: their length isn't known, and a title that guessed would
+    ///   disagree with the athlete's own run. An interval set doesn't need them either, since it is
+    ///   named by its repetitions and effort.
     /// - A workout with none of these (all steps open-ended) is just the name.
+    ///
+    /// A zero-length step adds nothing to a total; an interval set whose effort is zero is just the
+    /// name.
     ///
     /// The name is ``titleName`` if set, otherwise ``name`` with each word capitalized.
     ///

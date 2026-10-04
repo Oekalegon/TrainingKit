@@ -53,7 +53,7 @@ struct WorkoutTemplateDefaultTitleTests {
         #expect(track.defaultTitle(values: ["reps": 8, "distance": 999.4]) == "8x999 m Short Interval Run (Track)")
     }
 
-    @Test("non-finite, zero and negative goals fall back to the name instead of trapping")
+    @Test("non-finite and negative goals fall back to the name instead of trapping")
     func unusableValues() {
         let easy = BuiltInWorkoutTemplates.easyRun
         for bad in [Double.nan, .infinity, -.infinity, -300] {
@@ -61,6 +61,25 @@ struct WorkoutTemplateDefaultTitleTests {
         }
         let hills = BuiltInWorkoutTemplates.shortIntervalRun
         #expect(hills.defaultTitle(values: ["work": .nan]) == "Short Interval Run")
+    }
+
+    @Test("open-ended steps add nothing to a steady workout's total")
+    func openStepsAreIgnored() {
+        let template = WorkoutTemplate(
+            name: "run to the hill", sport: .running, parameters: [],
+            blocks: [TemplateBlock(steps: [
+                TemplateStep(kind: .warmup, goal: .time(.fixed(300)), target: .heartRateZone(1)),
+                TemplateStep(kind: .work, goal: .open, target: .heartRateZone(2)),
+                TemplateStep(kind: .cooldown, goal: .time(.fixed(300)), target: .heartRateZone(1)),
+            ])]
+        )
+        #expect(template.defaultTitle() == "10min Run To The Hill")
+    }
+
+    @Test("a zero main step adds nothing, but a zero interval effort is just the name")
+    func zeroGoals() {
+        #expect(BuiltInWorkoutTemplates.easyRun.defaultTitle(values: ["duration": 0]) == "10min Easy Run")
+        #expect(BuiltInWorkoutTemplates.shortIntervalRun.defaultTitle(values: ["work": 0]) == "Short Interval Run")
     }
 
     @Test("a fractional repetition count rounds the way instantiate does")

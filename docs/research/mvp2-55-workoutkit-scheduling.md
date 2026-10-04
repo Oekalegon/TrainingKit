@@ -31,7 +31,9 @@ How the Watch shows it (WWDC23 session 10016):
 - Sync to the Watch is handled locally by the system. The app gets no callback or delivery
   confirmation.
 - A scheduled entry carries no health data: only the workout, the date, and whether it was
-  completed. Health data comes from HealthKit as before.
+  completed. The workout itself is recorded normally: starting a scheduled entry on the Watch
+  saves an `HKWorkout` with heart rate, distance and energy, which `HealthKitActivityImporter`
+  imports like any other activity.
 - WorkoutKit adds an extension on `HKWorkout` that returns the `WorkoutPlan` a recorded workout
   was started from, when there is one. That's an exact link from an imported activity to the plan
   it fulfilled (see §4.4). Check this on a device: it isn't in the online docs index.
@@ -187,15 +189,18 @@ Item 1 touches `TrainingHealthKit` (the importer would need to read the plan id 
 - `WorkoutScheduler` itself needs a real iPhone and Watch. A short manual checklist (schedule,
   move, delete, edit, complete on the Watch, read back) belongs in the harness app or the PR.
 
-## 5. Open questions
+## 5. Decisions and open questions
 
-1. **Ticket scope.** Is MVP2-55 only the rolling-window scheduler (§4.1–4.3), or does it include
-   the `HKWorkout` plan-id reconciliation (§4.4, item 1)? I'd suggest a separate ticket for the
-   latter.
-2. **Per-plan ids (§2).** This changes the public `schedule`/`unschedule` API from MVP2-39. OK
+Decided:
+1. **Ticket scope.** MVP2-55 includes the `HKWorkout` plan-id reconciliation (§4.4, item 1), not
+   just the rolling-window scheduler.
+2. **Horizon.** Fixed at 7 days (today plus 6), matching what the Watch shows. Not configurable.
+3. **Opt-in.** Sending planned workouts to the Watch is on by default once WorkoutKit permission
+   is granted. The settings switch can still turn it off.
+
+Open:
+4. **Per-plan ids (§2).** This changes the public `schedule`/`unschedule` API from MVP2-39. OK
    to change it?
-3. **Horizon.** Keep it at 7 days (what the Watch shows), or make it configurable?
-4. **Opt-in.** Turned on by default once permission is granted, or an explicit switch?
 5. **Where the app code lives.** `TrainingApp` isn't in this repository. The planner and sync
    layer can be built and tested here; the triggers and UI go in the app.
 

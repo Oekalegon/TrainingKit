@@ -37,6 +37,9 @@ public struct CalendarImportReport: Sendable, Hashable {
     /// Planned entries skipped because the app already has a plan for the same workout on that
     /// day, so importing the same file twice adds nothing the second time.
     public let skippedDuplicates: Int
+    /// Planned entries skipped because their day is before today. Such a plan would only show as
+    /// missed and never counts as load, and the export leaves missed plans out for the same reason.
+    public let skippedPast: Int
     /// Completed activities in the file, which aren't imported: they come from HealthKit, and the
     /// model can't yet hold an imported load for one without heart-rate data.
     public let skippedCompleted: Int

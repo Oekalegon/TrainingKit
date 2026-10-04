@@ -740,6 +740,8 @@ What is imported:
   `steps`: steps of one `block` form a block, repeated as often as the block's highest `repetition`.
   The template link isn't restored, so such a workout can't be re-opened with its template's
   parameters. A step kind or goal this version doesn't know rejects the entry.
+- **Entries before today are skipped and counted.** Such a plan would only show as missed and never
+  counts as load; the export leaves missed plans out for the same reason.
 - **Completed activities are skipped and counted.** They come from HealthKit, and the file holds no
   heart-rate data. Importing them needs the model to hold an imported load for an activity without
   heart-rate samples: `LoadMethod.manual` exists, but `Activity` has no field for it. Left for later.
@@ -757,11 +759,13 @@ the library isn't repeated; the plan refers to the existing one.
 An entry without `steps` (a file written before MVP2-102) is rejected, since no workout can be
 rebuilt. A file with a newer `schemaVersion` than the app understands, or one that isn't an export,
 is refused with a `CalendarImportError`. The result is a `CalendarImportReport`: added, skipped as
-duplicates, completed skipped, and rejected entries with a reason.
+duplicates, skipped as past, completed skipped, and rejected entries with a reason.
 
 New workouts are saved before the plans that use them, so a failure partway leaves at worst unused
-workouts. Afterwards the model reloads its range (widened to the file's days) and reconciles the
-plans with activities already on those days. The plans aren't scheduled in WorkoutKit: that stays
+workouts. Afterwards the model reloads its loaded range and reconciles the plans with the activities
+loaded. The file's days are loaded only when nothing was loaded yet: widening the range for a long
+file would load and recompute a whole season of activities, and the week view loads other weeks
+when they are shown. The plans aren't scheduled in WorkoutKit: that stays
 with the app's scheduler (MVP2-55).
 
 ## 10. Periodisation — macro, meso, micro cycles (Core, MVP 1)

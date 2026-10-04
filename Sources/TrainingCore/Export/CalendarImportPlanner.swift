@@ -26,6 +26,9 @@ public struct CalendarImportPlan: Sendable, Hashable {
 /// block's repetitions are its highest `repetition`. The template link isn't restored, so a
 /// workout imported this way can't be re-opened with its template's parameters.
 ///
+/// Entries before today are skipped: such a plan would only show as missed, and the export leaves
+/// missed plans out for the same reason.
+///
 /// A plan counts as a duplicate when the app already has one on the same day for an equal workout
 /// (name, sport and blocks). A day can hold the same workout twice: only the occurrences beyond
 /// the ones already stored are added.
@@ -51,15 +54,18 @@ public struct CalendarImportPlanner: Sendable {
     ///   - existingWorkouts: The workout library.
     ///   - athlete: Supplies the time zone the file's days are read in (the app's own days) and the
     ///     zones the estimator uses.
+    ///   - today: Plans on days before this one are skipped.
     /// - Returns: The workouts and plans to add, and the report.
     public func plan(
         for export: CalendarExport,
         existingPlans: [PlannedActivity],
         existingWorkouts: [StructuredWorkout],
-        athlete: AthleteProfile
+        athlete: AthleteProfile,
+        today: Date
     ) -> CalendarImportPlan {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = athlete.timeZone
+        let todayStart = calendar.startOfDay(for: today)
 
         var workoutIDsByKey: [WorkoutKey: UUID] = [:]
         for workout in existingWorkouts {
@@ -77,6 +83,7 @@ public struct CalendarImportPlanner: Sendable {
         var rejected: [CalendarImportReport.Rejection] = []
         var duplicates = 0
         var completed = 0
+        var past = 0
 
         for day in export.days {
             for entry in day.activities {
@@ -89,6 +96,10 @@ public struct CalendarImportPlanner: Sendable {
                 }
                 guard let date = Self.date(fromDay: day.date, calendar: calendar) else {
                     reject(.invalidDate)
+                    continue
+                }
+                guard date >= todayStart else {
+                    past += 1
                     continue
                 }
                 guard !entry.steps.isEmpty else {
@@ -126,7 +137,8 @@ public struct CalendarImportPlanner: Sendable {
             workouts: newWorkouts,
             plans: newPlans,
             report: CalendarImportReport(
-                added: newPlans.count, skippedDuplicates: duplicates, skippedCompleted: completed, rejected: rejected
+                added: newPlans.count, skippedDuplicates: duplicates, skippedPast: past, skippedCompleted: completed,
+                rejected: rejected
             )
         )
     }

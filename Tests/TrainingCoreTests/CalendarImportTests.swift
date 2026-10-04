@@ -24,8 +24,12 @@ struct CalendarImportTests {
         )
     }
 
-    private func plan(_ export: CalendarExport, plans: [PlannedActivity] = [], workouts: [StructuredWorkout] = []) -> CalendarImportPlan {
-        CalendarImportPlanner().plan(for: export, existingPlans: plans, existingWorkouts: workouts, athlete: athlete)
+    private func plan(
+        _ export: CalendarExport, plans: [PlannedActivity] = [], workouts: [StructuredWorkout] = [], today: Date? = nil
+    ) -> CalendarImportPlan {
+        CalendarImportPlanner().plan(
+            for: export, existingPlans: plans, existingWorkouts: workouts, athlete: athlete, today: today ?? day(0)
+        )
     }
 
     @Test("a planned workout round-trips through the export: its blocks, repetitions, goals and targets are rebuilt")
@@ -41,7 +45,7 @@ struct CalendarImportTests {
         #expect(rebuilt.sport == .running)
         #expect(result.plans.map(\.date) == [day(4)])
         #expect(result.plans.first?.workoutID == rebuilt.id)
-        #expect(result.report == CalendarImportReport(added: 1, skippedDuplicates: 0, skippedCompleted: 0, rejected: []))
+        #expect(result.report == CalendarImportReport(added: 1, skippedDuplicates: 0, skippedPast: 0, skippedCompleted: 0, rejected: []))
     }
 
     @Test("completed activities are skipped and counted; daily metrics aren't imported")
@@ -148,6 +152,21 @@ struct CalendarImportTests {
         #expect(result.report.rejected.map(\.reason) == [.invalidStep])
     }
 
+    @Test("planned entries before today are skipped and counted, not imported as missed plans")
+    func pastEntriesSkipped() throws {
+        let workout = try hillSprints()
+        let file = export(
+            plans: [PlannedActivity(workoutID: workout.id, date: day(4)), PlannedActivity(workoutID: workout.id, date: day(6))],
+            workouts: [workout]
+        )
+
+        let result = plan(file, today: day(5, hour: 9))
+
+        #expect(result.plans.map(\.date) == [day(6)])
+        #expect(result.report.skippedPast == 1)
+        #expect(result.report.added == 1)
+    }
+
     @Test("a file written before steps existed has no steps, so its planned entries are rejected as such")
     func oldFileWithoutSteps() throws {
         let workout = try hillSprints()
@@ -206,7 +225,7 @@ struct TrainingModelCalendarImportTests {
     func importsOnce() async throws {
         let file = try await makeExport()
         let (store, model) = makeModel()
-        try await model.load(in: day(0)...day(2), asOf: day(3, hour: 9))
+        try await model.load(in: day(0)...day(6), asOf: day(3, hour: 9))
 
         let first = try await model.importCalendar(file, asOf: day(3, hour: 9))
         let second = try await model.importCalendar(file, asOf: day(3, hour: 9))
@@ -215,7 +234,7 @@ struct TrainingModelCalendarImportTests {
         #expect(second.added == 0 && second.skippedDuplicates == 2)
         #expect(try await store.plans(in: day(0)...day(6)).count == 2)
         #expect(try await store.workouts().count == 1)
-        #expect(model.plans.count == 2, "the loaded range widened to cover the imported days")
+        #expect(model.plans.count == 2, "the already loaded range is reloaded, so the plans show")
     }
 
     @Test("a preview reports what would happen and changes nothing")
@@ -223,7 +242,7 @@ struct TrainingModelCalendarImportTests {
         let file = try await makeExport()
         let (store, model) = makeModel()
 
-        let report = try await model.calendarImportPreview(file)
+        let report = try await model.calendarImportPreview(file, asOf: day(3, hour: 9))
 
         #expect(report.added == 2)
         #expect(try await store.plans(in: day(0)...day(6)).isEmpty)

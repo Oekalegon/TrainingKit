@@ -7,6 +7,9 @@ public struct WorkoutTemplate: Identifiable, Sendable, Codable, Hashable {
     public let id: UUID
     /// The template's display name.
     public var name: String
+    /// A shorter name for a generated title (``defaultTitle(values:distanceSystem:)``), e.g.
+    /// "Hill Sprints" for "Base Full-out hill sprints". `nil` uses `name`.
+    public var titleName: String?
     /// The kind of activity this template is for.
     public var sport: Sport
     /// The parameters this template's blocks may reference. Keys must be unique within a
@@ -20,18 +23,21 @@ public struct WorkoutTemplate: Identifiable, Sendable, Codable, Hashable {
     /// - Parameters:
     ///   - id: A stable identifier; defaults to a new random `UUID`.
     ///   - name: The template's display name.
+    ///   - titleName: A shorter name for generated titles; defaults to `nil`, which uses `name`.
     ///   - sport: The kind of activity this template is for.
     ///   - parameters: The parameters this template's blocks may reference.
     ///   - blocks: The ordered blocks making up this template.
     public init(
         id: UUID = UUID(),
         name: String,
+        titleName: String? = nil,
         sport: Sport,
         parameters: [WorkoutTemplateParameter],
         blocks: [TemplateBlock]
     ) {
         self.id = id
         self.name = name
+        self.titleName = titleName
         self.sport = sport
         self.parameters = parameters
         self.blocks = blocks

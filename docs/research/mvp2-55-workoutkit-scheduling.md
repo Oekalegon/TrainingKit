@@ -197,10 +197,12 @@ Decided:
 2. **Horizon.** Fixed at 7 days (today plus 6), matching what the Watch shows. Not configurable.
 3. **Opt-in.** Sending planned workouts to the Watch is on by default once WorkoutKit permission
    is granted. The settings switch can still turn it off.
+4. **Per-plan ids (§2).** Done: `WorkoutKitBridge.workoutPlan(for:workout:)` gives each entry its
+   plan's id, `schedule` replaces the plan's existing entry (so a move or edit is one call), and
+   `unschedule(_:)` takes only the plan. Callers of MVP2-39's
+   `unschedule(_:workout:calendar:)` need updating.
 
 Open:
-4. **Per-plan ids (§2).** This changes the public `schedule`/`unschedule` API from MVP2-39. OK
-   to change it?
 5. **Where the app code lives.** `TrainingApp` isn't in this repository. The planner and sync
    layer can be built and tested here; the triggers and UI go in the app.
 

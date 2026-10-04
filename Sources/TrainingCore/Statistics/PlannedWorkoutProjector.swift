@@ -8,6 +8,10 @@ import Foundation
 /// ``AthleteProfile/paceModel`` at the step's target zone, using
 /// ``HeartRateZoneModel/intensityRatio(for:)`` so the assumed intensity always matches the one
 /// `TRIMPPlanEstimator` used to estimate the same workout's load.
+///
+/// Given a non-empty ``PaceHistory``, the steps' paces (and `.open` steps' durations) are forecast
+/// from the athlete's earlier, similar workouts by ``HistoricalPaceEstimator`` instead (MVP2-35,
+/// MVP2-111); each step keeps the zone above either way, so time in zone is unaffected.
 struct PlannedWorkoutProjector: Sendable {
     /// Turns a workout step's `StepGoal` into a duration.
     var durationEstimator: WorkoutDurationEstimator
@@ -17,6 +21,8 @@ struct PlannedWorkoutProjector: Sendable {
         let distanceMeters: Double?
         let duration: TimeInterval
         let timeInZone: TimeInZone
+        /// How many earlier activities the paces were forecast from; 0 for the pace model alone.
+        var matchedActivityCount = 0
     }
 
     /// One step of a workout, with its projected duration and distance.
@@ -36,8 +42,38 @@ struct PlannedWorkoutProjector: Sendable {
     }
 
     /// Every step of `workout` with its block repetitions expanded, each with its projected
-    /// duration, zone and distance. ``project(workout:athlete:)`` sums these.
-    func stepProjections(workout: StructuredWorkout, athlete: AthleteProfile) -> [StepProjection] {
+    /// duration, zone and distance. ``project(workout:athlete:history:before:excluding:)`` sums these.
+    ///
+    /// - Parameters:
+    ///   - workout: The planned workout.
+    ///   - athlete: Supplies the zone settings and pace model.
+    ///   - history: Earlier activities to forecast paces from; empty for the pace model alone.
+    ///   - cutoff: Only activities in `history` that started before this are used.
+    ///   - excludedActivityID: An activity in `history` to leave out, e.g. the plan's own.
+    func stepProjections(
+        workout: StructuredWorkout, athlete: AthleteProfile, history: PaceHistory = .empty,
+        before cutoff: Date = .distantFuture, excluding excludedActivityID: UUID? = nil
+    ) -> [StepProjection] {
+        forecast(workout: workout, athlete: athlete, history: history, before: cutoff, excluding: excludedActivityID).steps
+    }
+
+    /// ``HistoricalPaceEstimator``'s forecast when `history` has something to say about `workout`,
+    /// else the pace model's projection.
+    private func forecast(
+        workout: StructuredWorkout, athlete: AthleteProfile, history: PaceHistory,
+        before cutoff: Date, excluding excludedActivityID: UUID?
+    ) -> (steps: [StepProjection], matchedActivityCount: Int) {
+        if !history.observations.isEmpty,
+           let historical = HistoricalPaceEstimator(durationEstimator: durationEstimator).forecast(
+               for: workout, athlete: athlete, history: history, before: cutoff, excluding: excludedActivityID
+           ) {
+            return (historical.steps, historical.matchedActivityCount)
+        }
+        return (paceModelStepProjections(workout: workout, athlete: athlete), 0)
+    }
+
+    /// The steps projected at ``AthleteProfile/paceModel``'s paces.
+    private func paceModelStepProjections(workout: StructuredWorkout, athlete: AthleteProfile) -> [StepProjection] {
         let zoneModel = athlete.currentHeartRateZoneSettings.map { HeartRateZoneModel(settings: $0) }
         let boundaries = zoneModel.flatMap { TimeInZoneBuilder.zoneBoundaries($0) }
         var projections: [StepProjection] = []
@@ -69,18 +105,27 @@ struct PlannedWorkoutProjector: Sendable {
 
     /// Projects `workout` using the athlete's current heart-rate zone settings — planning is
     /// always about who the athlete is now, matching ``TRIMPPlanEstimator``.
-    func project(workout: StructuredWorkout, athlete: AthleteProfile) -> Projection {
+    ///
+    /// - Parameters: As ``stepProjections(workout:athlete:history:before:excluding:)``.
+    func project(
+        workout: StructuredWorkout, athlete: AthleteProfile, history: PaceHistory = .empty,
+        before cutoff: Date = .distantFuture, excluding excludedActivityID: UUID? = nil
+    ) -> Projection {
         guard athlete.currentHeartRateZoneSettings != nil else {
             return Projection(distanceMeters: nil, duration: durationEstimator.duration(for: workout, athlete: athlete), timeInZone: TimeInZone())
         }
         var totalDuration: TimeInterval = 0
         var totalDistance: Double = 0
         var seconds: [Int: TimeInterval] = [:]
-        for projection in stepProjections(workout: workout, athlete: athlete) {
+        let stepForecast = forecast(workout: workout, athlete: athlete, history: history, before: cutoff, excluding: excludedActivityID)
+        for projection in stepForecast.steps {
             totalDuration += projection.duration
             totalDistance += projection.distanceMeters ?? 0
             seconds[projection.zone ?? 3, default: 0] += projection.duration
         }
-        return Projection(distanceMeters: totalDistance, duration: totalDuration, timeInZone: TimeInZone(seconds: seconds))
+        return Projection(
+            distanceMeters: totalDistance, duration: totalDuration, timeInZone: TimeInZone(seconds: seconds),
+            matchedActivityCount: stepForecast.matchedActivityCount
+        )
     }
 }

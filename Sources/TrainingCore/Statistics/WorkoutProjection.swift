@@ -8,14 +8,19 @@ public struct WorkoutProjection: Sendable, Hashable {
     public let distanceMeters: Double?
     /// The expected duration in seconds.
     public let duration: TimeInterval
+    /// How many earlier activities the paces were forecast from (see ``PaceHistory``); `0` when
+    /// the projection rests on ``AthleteProfile/paceModel`` alone.
+    public let matchedActivityCount: Int
 
     /// Creates a workout projection.
     ///
     /// - Parameters:
     ///   - distanceMeters: The expected distance, if it could be derived.
     ///   - duration: The expected duration in seconds.
-    public init(distanceMeters: Double?, duration: TimeInterval) {
+    ///   - matchedActivityCount: How many earlier activities the paces were forecast from.
+    public init(distanceMeters: Double?, duration: TimeInterval, matchedActivityCount: Int = 0) {
         self.distanceMeters = distanceMeters
         self.duration = duration
+        self.matchedActivityCount = matchedActivityCount
     }
 }

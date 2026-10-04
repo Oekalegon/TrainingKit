@@ -126,6 +126,7 @@ public enum BuiltInWorkoutTemplates {
     public static let baseHillSprints = WorkoutTemplate(
         id: UUID(uuidString: "8F5D6E4E-6E0E-4B8B-9C1A-9E6F9F1C1A05")!,
         name: "Base Full-out hill sprints",
+        titleName: "Hill Sprints",
         sport: .running,
         parameters: [
             WorkoutTemplateParameter(key: "reps", name: "Sprints", unit: .count, defaultValue: 6, range: 3...12),

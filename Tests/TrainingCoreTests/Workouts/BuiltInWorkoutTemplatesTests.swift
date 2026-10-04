@@ -142,6 +142,30 @@ struct BuiltInWorkoutTemplatesTests {
         #expect(try range("rest") == 60...180)
     }
 
+    @Test("the interval templates plan a duration from their steps, counting each open step as 10 minutes")
+    func intervalTemplatesPlannedDuration() throws {
+        let athlete = AthleteProfile.fixture()
+        let estimator = WorkoutDurationEstimator()
+
+        let hills = try BuiltInWorkoutTemplates.baseHillSprints.instantiate()
+        // 5 min warmup + open run + 6 × (8 s sprint + 5 min rest) + open run + 5 min cooldown.
+        #expect(estimator.duration(for: hills, athlete: athlete) == 300 + 600 + 6 * (8 + 300) + 600 + 300)
+
+        let short = try BuiltInWorkoutTemplates.shortIntervalRun.instantiate()
+        // 5 + 5 min, 8 × (60 s + 90 s), 5 min cooldown.
+        #expect(estimator.duration(for: short, athlete: athlete) == 300 + 300 + 8 * (60 + 90) + 300)
+    }
+
+    @Test("every built-in template has a positive estimated load with its default parameters")
+    func builtInsHavePositiveLoad() throws {
+        let athlete = AthleteProfile.fixture()
+
+        for template in BuiltInWorkoutTemplates.all {
+            let load = try template.expectedLoad(estimator: TRIMPPlanEstimator(), athlete: athlete)
+            #expect(load.value > 0, "\(template.name)")
+        }
+    }
+
     @Test("built-in templates have distinct, stable ids")
     func builtInsHaveDistinctIDs() {
         let ids = Set(BuiltInWorkoutTemplates.all.map(\.id))

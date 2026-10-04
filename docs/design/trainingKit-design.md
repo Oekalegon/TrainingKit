@@ -246,6 +246,10 @@ struct PlannedActivity: Identifiable, Sendable, Codable {
 
 A plan is just workout + date; everything else is derived. Keeping it minimal is what lets MVP 2 generate plans as plain data.
 
+#### Default titles (MVP2-110)
+
+`WorkoutTemplate.defaultTitle(values:distanceSystem:)` names a planned workout from its parameters: "50min Easy Run", "23 km Long Run", "10x8sec Hill Sprints". It reads the instantiated workout's structure rather than a per-template rule, so a new template needs no changes: a block repeated more than once is an interval set ("reps x first work step"), otherwise the longest single-repetition `.work` step (so warmup, cooldown and a short ramp-in don't count). The name is `titleName` when set (a shorter name, e.g. "Hill Sprints"), otherwise `name` with each word capitalized. Durations are written "8sec", "90sec", "2min", "1h30min"; distances as "400 m" / "23 km", or "440 yd" / "13.1 mi" for `DistanceSystem.imperial`. A workout with no usable work goal (open-ended, or a non-positive or non-finite value) is titled with the name alone. The strings are English and not localized.
+
 ### 2.6 Expected load estimation
 
 ```swift

@@ -31,7 +31,38 @@ struct WorkoutTemplateDefaultTitleTests {
         #expect(BuiltInWorkoutTemplates.shortIntervalRun.defaultTitle(values: ["reps": 8, "work": 120]) == "8x2min Short Interval Run")
         #expect(BuiltInWorkoutTemplates.shortIntervalRunTrack.defaultTitle(values: ["reps": 6, "distance": 400])
                 == "6x400 m Short Interval Run (Track)")
-        #expect(BuiltInWorkoutTemplates.shortIntervalRunTrack.defaultTitle(values: ["distance": 1200]).contains("1.2 km"))
+        #expect(BuiltInWorkoutTemplates.shortIntervalRunTrack.defaultTitle(values: ["distance": 1200]) == "8x1.2 km Short Interval Run (Track)")
+    }
+
+    @Test("short imperial efforts are in yards, never 0 mi")
+    func imperialYards() {
+        let track = BuiltInWorkoutTemplates.shortIntervalRunTrack
+        #expect(track.defaultTitle(values: ["reps": 8, "distance": 400], distanceSystem: .imperial) == "8x440 yd Short Interval Run (Track)")
+        #expect(track.defaultTitle(values: ["reps": 8, "distance": 50], distanceSystem: .imperial) == "8x50 yd Short Interval Run (Track)")
+        #expect(track.defaultTitle(values: ["reps": 8, "distance": 800], distanceSystem: .imperial) == "8x870 yd Short Interval Run (Track)")
+        #expect(track.defaultTitle(values: ["reps": 8, "distance": 1609.344], distanceSystem: .imperial) == "8x1 mi Short Interval Run (Track)")
+    }
+
+    @Test("the metric unit is chosen after rounding")
+    func metricBoundary() {
+        let track = BuiltInWorkoutTemplates.shortIntervalRunTrack
+        #expect(track.defaultTitle(values: ["reps": 8, "distance": 999.6]) == "8x1 km Short Interval Run (Track)")
+        #expect(track.defaultTitle(values: ["reps": 8, "distance": 999.4]) == "8x999 m Short Interval Run (Track)")
+    }
+
+    @Test("non-finite, zero and negative goals fall back to the name instead of trapping")
+    func unusableValues() {
+        let easy = BuiltInWorkoutTemplates.easyRun
+        for bad in [Double.nan, .infinity, -.infinity, 0, -300] {
+            #expect(easy.defaultTitle(values: ["duration": bad]) == "Easy Run")
+        }
+        let hills = BuiltInWorkoutTemplates.shortIntervalRun
+        #expect(hills.defaultTitle(values: ["work": .nan]) == "Short Interval Run")
+    }
+
+    @Test("a fractional repetition count rounds the way instantiate does")
+    func fractionalReps() {
+        #expect(BuiltInWorkoutTemplates.baseHillSprints.defaultTitle(values: ["reps": 7.9]) == "8x8sec Hill Sprints")
     }
 
     @Test("the title follows the defaults when no values are given")

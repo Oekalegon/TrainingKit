@@ -51,6 +51,10 @@ public final class TrainingModel {
     /// MVP2-111); pass it to ``StatisticsCalculator``'s projections and period statistics. Empty
     /// until ``refreshPaceHistory(in:gapThresholdSeconds:)`` has read the store.
     public internal(set) var paceHistory: PaceHistory = .empty
+    /// Counts ``refreshPaceHistory(in:gapThresholdSeconds:)`` calls, so a refresh that finishes
+    /// after a newer one started doesn't overwrite the newer result.
+    @ObservationIgnored
+    var paceHistoryRefreshCount = 0
     /// The athlete this model reflects: the profile passed to `init`, then whatever
     /// ``updateAthlete(asOf:_:)`` last saved.
     ///

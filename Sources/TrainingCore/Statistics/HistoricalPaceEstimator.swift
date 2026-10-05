@@ -33,7 +33,7 @@ struct HistoricalPaceEstimator: Sendable {
     var durationEstimator: WorkoutDurationEstimator
     /// Seconds of evidence the prior pace counts as; more observed time than this outweighs it.
     var priorSeconds: Double = 300
-    /// After this many days an activity counts half as much as one on the cutoff day.
+    /// After this many days an activity counts half as much as the newest one used.
     var recencyHalfLifeDays: Double = 60
     /// How many similar activities are used.
     var maximumMatches = 12
@@ -43,7 +43,9 @@ struct HistoricalPaceEstimator: Sendable {
     /// The forecast for every step of a workout.
     struct Forecast: Sendable {
         let steps: [PlannedWorkoutProjector.StepProjection]
-        /// How many earlier activities the paces were learned from.
+        /// How many earlier activities the forecast came from: the matches the paces were learned
+        /// from, plus any earlier runs of the workout or its template that only gave an `.open` step's
+        /// duration.
         let matchedActivityCount: Int
     }
 
@@ -106,9 +108,14 @@ struct HistoricalPaceEstimator: Sendable {
         let candidates = history.observations.filter {
             $0.start < cutoff && $0.activityID != excludedActivityID && $0.sport.isSameFamily(as: workout.sport)
         }
-        let matches = self.matches(for: workout, planned: planned, among: candidates, asOf: cutoff)
-        let openDurations = self.openStepDurations(for: workout, among: candidates)
-        guard !matches.isEmpty || !openDurations.isEmpty else { return nil }
+        // Ages count from the newest usable activity, not the cutoff: for a plan weeks ahead the
+        // cutoff is its date, and measuring from there would weaken all the evidence alike, so the
+        // further ahead a workout is planned the more its forecast would fall back to the pace model.
+        guard let newest = candidates.map(\.start).max() else { return nil }
+        let matches = self.matches(for: workout, planned: planned, among: candidates, asOf: newest)
+        let open = self.openStepDurations(for: workout, among: candidates)
+        guard !matches.isEmpty || !open.durations.isEmpty else { return nil }
+        let contributors = Set(matches.map(\.observation.activityID)).union(open.activityIDs)
 
         let zoneSpeeds = self.zoneSpeeds(matches: matches, zonePriors: zonePriors)
         let steps = planned.map { plannedStep -> PlannedWorkoutProjector.StepProjection in
@@ -128,7 +135,7 @@ struct HistoricalPaceEstimator: Sendable {
                 duration = meters / speed
                 distance = meters
             case .open:
-                duration = openDurations[plannedStep.expanded.position] ?? plannedStep.priorSeconds
+                duration = open.durations[plannedStep.expanded.position] ?? plannedStep.priorSeconds
                 distance = duration * speed
             }
             return PlannedWorkoutProjector.StepProjection(
@@ -136,7 +143,7 @@ struct HistoricalPaceEstimator: Sendable {
                 step: step, duration: duration, zone: plannedStep.zone, distanceMeters: distance
             )
         }
-        return Forecast(steps: steps, matchedActivityCount: matches.count)
+        return Forecast(steps: steps, matchedActivityCount: contributors.count)
     }
 
     // MARK: - Matching
@@ -221,7 +228,8 @@ struct HistoricalPaceEstimator: Sendable {
     }
 
     /// Speed (m/s) for one planned step: earlier steps of the same kind and zone, weighted by their
-    /// activity's match weight and by how close their length is, shrunk towards `target`.
+    /// activity's match weight and by how close their length is, shrunk towards `target`. Paces are
+    /// moving paces, like the zone paces: time stopped within a step doesn't count.
     private func stepSpeed(for planned: PlannedStep, matches: [Match], target: Double) -> Double {
         var evidence = PaceHistory.Sample()
         for (observation, weight) in matches {
@@ -231,7 +239,7 @@ struct HistoricalPaceEstimator: Sendable {
                 if case .distance(let meters) = planned.expanded.step.goal {
                     lengthSimilarity = Self.similarity(meters, step.sample.meters)
                 } else {
-                    lengthSimilarity = Self.similarity(planned.priorSeconds, step.sample.seconds)
+                    lengthSimilarity = Self.similarity(planned.priorSeconds, step.elapsedSeconds)
                 }
                 let stepWeight = weight * lengthSimilarity
                 evidence += PaceHistory.Sample(seconds: step.sample.seconds * stepWeight, meters: step.sample.meters * stepWeight)
@@ -243,11 +251,12 @@ struct HistoricalPaceEstimator: Sendable {
     }
 
     /// The median observed duration of each `.open` step of `workout`, from earlier runs of the same
-    /// workout or, failing that, of workouts made from the same template.
+    /// workout or, failing that, of workouts made from the same template, and the activities those
+    /// durations came from. A duration is elapsed time, stops included: it's how long the step took.
     private func openStepDurations(
         for workout: StructuredWorkout, among candidates: [PaceHistory.Observation]
-    ) -> [PaceHistory.StepPosition: Double] {
-        guard workout.blocks.contains(where: { block in block.steps.contains { $0.goal == .open } }) else { return [:] }
+    ) -> (durations: [PaceHistory.StepPosition: Double], activityIDs: Set<UUID>) {
+        guard workout.blocks.contains(where: { block in block.steps.contains { $0.goal == .open } }) else { return ([:], []) }
         let sameWorkout = candidates.filter { $0.workoutID == workout.id }
         let sameTemplate = workout.templateID.map { templateID in
             candidates.filter { $0.templateID == templateID }
@@ -255,12 +264,14 @@ struct HistoricalPaceEstimator: Sendable {
         let source = sameWorkout.contains { $0.steps.contains(where: \.isOpen) } ? sameWorkout : sameTemplate
 
         var observed: [PaceHistory.StepPosition: [Double]] = [:]
+        var activityIDs: Set<UUID> = []
         for observation in source {
             for step in observation.steps where step.isOpen {
-                observed[step.position, default: []].append(step.sample.seconds)
+                observed[step.position, default: []].append(step.elapsedSeconds)
+                activityIDs.insert(observation.activityID)
             }
         }
-        return observed.compactMapValues(Self.median)
+        return (observed.compactMapValues(Self.median), activityIDs)
     }
 
     /// The median of `values`, averaging the middle two of an even count; `nil` when empty.

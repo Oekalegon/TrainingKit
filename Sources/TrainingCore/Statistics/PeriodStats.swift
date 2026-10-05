@@ -1,7 +1,7 @@
 import Foundation
 
 /// Descriptive totals over an arbitrary calendar-day range, computed by
-/// ``StatisticsCalculator/periodStats(activities:plans:workouts:athlete:range:asOf:previous:)``.
+/// ``StatisticsCalculator/periodStats(activities:plans:workouts:athlete:range:asOf:previous:paceHistory:)``.
 ///
 /// ``WeeklyStats`` is the calendar-week special case of this same computation.
 public struct PeriodStats: Sendable, Hashable {

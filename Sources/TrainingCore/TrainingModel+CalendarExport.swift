@@ -20,6 +20,9 @@ extension TrainingModel {
     /// and scored on every call, however short the period: the price of metrics that don't depend
     /// on the app's cache. A season can take a few hundred milliseconds on a phone.
     ///
+    /// Planned durations and distances are forecast from ``paceHistory`` as last refreshed (see
+    /// ``refreshPaceHistory(in:gapThresholdSeconds:)``), so they match the app's cards.
+    ///
     /// See ``CalendarExportBuilder`` for which activities and plans are included.
     ///
     /// - Parameters:
@@ -70,7 +73,7 @@ extension TrainingModel {
         // their heart-rate samples: a season can take a few hundred milliseconds on a phone. It and
         // its inputs are Sendable, so it runs off the main actor rather than freezing the UI.
         let period = periodStart...periodEnd
-        let builder = CalendarExportBuilder(intensityParameters: intensityParameters)
+        let builder = CalendarExportBuilder(intensityParameters: intensityParameters, paceHistory: paceHistory)
         let periodActivities = fetchedActivities.filter { period.contains($0.start) }
         let periodPlans = fetchedPlans.filter { period.contains($0.date) }
         let periodMetrics = metrics.filter { period.contains($0.day) }

@@ -18,25 +18,33 @@ import Foundation
 ///   unfulfilled, and left out as missed if it's before today.
 /// - Load uses the same calculators as the app: ``StatisticsCalculator/summary(for:athlete:)`` for
 ///   completed activities, and the plan's override or the estimator for planned ones. Duration and
-///   distance of planned workouts come from ``StatisticsCalculator/projection(for:athlete:)``.
+///   distance of planned workouts come from
+///   ``StatisticsCalculator/projection(for:athlete:paceHistory:before:excluding:)`` with
+///   ``paceHistory``, so they match what the app shows (MVP2-35).
 /// - Intensity uses the same classifiers as ``TrainingModel/intensity(of:)-(Activity)``.
 public struct CalendarExportBuilder: Sendable {
     /// Computes loads and projections.
     public let statisticsCalculator: StatisticsCalculator
     /// The intensity classifiers' thresholds.
     public let intensityParameters: IntensityClassifierParameters
+    /// Earlier activities planned workouts' duration and distance are forecast from; empty for
+    /// the pace model alone.
+    public let paceHistory: PaceHistory
 
     /// Creates a builder.
     ///
     /// - Parameters:
     ///   - statisticsCalculator: Computes loads and projections; defaults to the standard one.
     ///   - intensityParameters: The intensity classifiers' thresholds; defaults to the standard ones.
+    ///   - paceHistory: Earlier activities to forecast planned workouts from; defaults to none.
     public init(
         statisticsCalculator: StatisticsCalculator = StatisticsCalculator(),
-        intensityParameters: IntensityClassifierParameters = IntensityClassifierParameters()
+        intensityParameters: IntensityClassifierParameters = IntensityClassifierParameters(),
+        paceHistory: PaceHistory = .empty
     ) {
         self.statisticsCalculator = statisticsCalculator
         self.intensityParameters = intensityParameters
+        self.paceHistory = paceHistory
     }
 
     /// Builds the export for every calendar day from `firstDay` through `lastDay`.
@@ -144,7 +152,12 @@ public struct CalendarExportBuilder: Sendable {
             intensity = PerformedIntensityClassifier(parameters: intensityParameters).assess(activity, athlete: athlete)
         }
         let expected = plan.flatMap { plan in
-            workout.map { plannedValues(plan, workout: $0, templateNames: templateNames, athlete: athlete) }
+            workout.map {
+                plannedValues(
+                    plan, workout: $0, templateNames: templateNames, athlete: athlete,
+                    before: activity.start, excluding: activity.id
+                )
+            }
         }
         return CalendarExport.Entry(
             status: .completed,
@@ -158,14 +171,16 @@ public struct CalendarExportBuilder: Sendable {
             durationSeconds: activity.duration,
             distanceMeters: activity.distanceMeters,
             plan: expected,
-            steps: workout.map { steps(of: $0, athlete: athlete) } ?? []
+            steps: workout.map { steps(of: $0, athlete: athlete, before: activity.start, excluding: activity.id) } ?? []
         )
     }
 
     private func plannedEntry(
         _ plan: PlannedActivity, workout: StructuredWorkout, templateNames: [UUID: String], athlete: AthleteProfile
     ) -> CalendarExport.Entry {
-        let expected = plannedValues(plan, workout: workout, templateNames: templateNames, athlete: athlete)
+        let expected = plannedValues(
+            plan, workout: workout, templateNames: templateNames, athlete: athlete, before: plan.date, excluding: nil
+        )
         let intensity = PlannedIntensityClassifier(parameters: intensityParameters).assess(workout, athlete: athlete)
         return CalendarExport.Entry(
             status: .planned,
@@ -179,12 +194,18 @@ public struct CalendarExportBuilder: Sendable {
             durationSeconds: expected.durationSeconds,
             distanceMeters: expected.distanceMeters,
             plan: nil,
-            steps: steps(of: workout, athlete: athlete)
+            steps: steps(of: workout, athlete: athlete, before: plan.date, excluding: nil)
         )
     }
 
-    private func steps(of workout: StructuredWorkout, athlete: AthleteProfile) -> [CalendarExport.Step] {
-        statisticsCalculator.stepProjections(for: workout, athlete: athlete).map { projection in
+    /// `workout`'s steps as forecast from ``paceHistory``, using only activities before `cutoff` and
+    /// never `excludedActivityID` (the plan's own activity).
+    private func steps(
+        of workout: StructuredWorkout, athlete: AthleteProfile, before cutoff: Date, excluding excludedActivityID: UUID?
+    ) -> [CalendarExport.Step] {
+        statisticsCalculator.stepProjections(
+            for: workout, athlete: athlete, paceHistory: paceHistory, before: cutoff, excluding: excludedActivityID
+        ).map { projection in
             let goal: String
             switch projection.step.goal {
             case .time: goal = "time"
@@ -228,9 +249,12 @@ public struct CalendarExportBuilder: Sendable {
     }
 
     private func plannedValues(
-        _ plan: PlannedActivity, workout: StructuredWorkout, templateNames: [UUID: String], athlete: AthleteProfile
+        _ plan: PlannedActivity, workout: StructuredWorkout, templateNames: [UUID: String], athlete: AthleteProfile,
+        before cutoff: Date, excluding excludedActivityID: UUID?
     ) -> CalendarExport.PlannedValues {
-        let projection = statisticsCalculator.projection(for: workout, athlete: athlete)
+        let projection = statisticsCalculator.projection(
+            for: workout, athlete: athlete, paceHistory: paceHistory, before: cutoff, excluding: excludedActivityID
+        )
         let trimp: Double
         let source: CalendarExport.Entry.TRIMPSource
         if let override = plan.expectedLoadOverride {

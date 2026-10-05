@@ -273,6 +273,178 @@ struct HistoricalPaceEstimatorTests {
         #expect(withoutHistory.duration == 1320 + 600)
     }
 
+    // MARK: - Review follow-ups
+
+    @Test("distance steps take the time earlier reps of that distance took")
+    func distanceStepsFromHistory() {
+        let templateID = UUID()
+        func repeats() -> StructuredWorkout {
+            StructuredWorkout(
+                name: "1 km repeats", sport: .running,
+                blocks: [
+                    WorkoutBlock(steps: [WorkoutStep(kind: .warmup, goal: .time(600), target: .heartRateZone(2))]),
+                    WorkoutBlock(steps: [
+                        WorkoutStep(kind: .work, goal: .distance(1000), target: .heartRateZone(4)),
+                        WorkoutStep(kind: .recovery, goal: .time(120), target: .heartRateZone(2))
+                    ], repetitions: 5)
+                ],
+                templateID: templateID
+            )
+        }
+        let earlierWorkout = repeats()
+        let earlierPlan = PlannedActivity(workoutID: earlierWorkout.id, date: day(3))
+        // Each 1 km rep took 250 s (4.0 m/s), faster than the pace model's 300 s.
+        var phases: [(seconds: Double, metersPerSecond: Double, bpm: Double)] = [(600, 2.8, 141)]
+        for _ in 0..<5 {
+            phases.append((250, 4.0, 169))
+            phases.append((120, 2.2, 145))
+        }
+        let earlier = activity(start: day(3), linkedPlanID: earlierPlan.id, phases: phases)
+
+        let withHistory = forecast(
+            for: repeats(), history: history([earlier], plans: [earlierPlan], workouts: [earlierWorkout]), before: day(10)
+        )
+        let paceModel = forecast(for: repeats(), history: .empty, before: day(10))
+
+        let actualSeconds = 600.0 + 5 * (250 + 120)
+        #expect(abs(paceModel.duration - (600 + 5 * (300 + 120))) < 1e-6)
+        #expect(abs(withHistory.duration - actualSeconds) / actualSeconds < 0.03)
+        #expect(withHistory.distanceMeters.map { $0 > 5000 } == true)
+    }
+
+    @Test("an activity is binned under the zones in force on its date, not today's")
+    func dateEffectiveZones() throws {
+        // Max 180 until day 5, then 200: 150 bpm is zone 3 under the old settings, zone 2 under the new.
+        let changingAthlete = AthleteProfile(
+            sex: .male, paceModel: PaceModel(thresholdPaceSecondsPerKilometer: 300),
+            timeZone: TimeZone(identifier: "UTC")!,
+            heartRateZoneHistory: [
+                HeartRateZoneSettings(effectiveDate: .distantPast, restingHeartRateBPM: 50, maxHeartRateBPM: 180),
+                HeartRateZoneSettings(effectiveDate: day(5), restingHeartRateBPM: 50, maxHeartRateBPM: 200)
+            ]
+        )
+        let before = activity(start: day(3), phases: [(1200, 3.0, 150)])
+        let after = activity(start: day(6), phases: [(1200, 3.0, 150)])
+
+        let paceHistory = PaceHistory(
+            activities: [before, after], plans: [], workouts: [], athlete: changingAthlete, gapThresholdSeconds: gap
+        )
+
+        let zones = paceHistory.observations.map { Set($0.zones.keys) }
+        #expect(zones == [[3], [2]])
+    }
+
+    @Test("heart rate is interpolated between nearby samples and missing across a gap")
+    func heartRateInterpolation() {
+        let start = day(0)
+        let close = [HeartRateSample(time: start, bpm: 100), HeartRateSample(time: start.addingTimeInterval(10), bpm: 120)]
+        let apart = [HeartRateSample(time: start, bpm: 100), HeartRateSample(time: start.addingTimeInterval(100), bpm: 160)]
+
+        #expect(PaceHistory.interpolatedBPM(close, at: start.addingTimeInterval(5), gapThresholdSeconds: gap) == 110)
+        // Across a gap, only a sample within half the gap threshold counts.
+        #expect(PaceHistory.interpolatedBPM(apart, at: start.addingTimeInterval(10), gapThresholdSeconds: gap) == 100)
+        #expect(PaceHistory.interpolatedBPM(apart, at: start.addingTimeInterval(50), gapThresholdSeconds: gap) == nil)
+        #expect(PaceHistory.interpolatedBPM([], at: start, gapThresholdSeconds: gap) == nil)
+    }
+
+    @Test("an open step with no time left is skipped, and the steps after it are still laid out")
+    func openStepWithNoTimeLeft() throws {
+        let workout = hillSprints(templateID: UUID())
+        let plan = PlannedActivity(workoutID: workout.id, date: day(3))
+        // 1200 s is less than the 1320 s of fixed steps: the cool-down was cut short.
+        let run = activity(start: day(3), linkedPlanID: plan.id, phases: [(1200, 3.0, 141)])
+
+        let observation = try #require(history([run], plans: [plan], workouts: [workout]).observations.first)
+
+        #expect(!observation.steps.contains { $0.isOpen })
+        #expect(observation.steps.filter { $0.kind == .work }.count == 2)
+        #expect(observation.steps.last?.kind == .cooldown)
+    }
+
+    @Test("a step's pace is a moving pace: a stop inside it counts towards its time but not its pace")
+    func stopsDontCountTowardsPace() throws {
+        let workout = steadyWorkout(minutes: 20, zone: 2)
+        let plan = PlannedActivity(workoutID: workout.id, date: day(3))
+        let run = activity(
+            start: day(3), linkedPlanID: plan.id, phases: [(570, 3.0, 141), (60, 0, 141), (570, 3.0, 141)]
+        )
+
+        let step = try #require(history([run], plans: [plan], workouts: [workout]).observations.first?.steps.first)
+
+        #expect(abs(step.elapsedSeconds - 1200) < 1e-3)
+        // The 12 zero-speed samples span 11 still segments (55 s); the 5 s segments into and out of
+        // the stop average 1.5 m/s, so they still count as moving.
+        #expect(abs(step.sample.seconds - 1145) < 1e-3)
+        #expect(abs(step.sample.meters / step.sample.seconds - 3.0) < 0.02)
+    }
+
+    @Test("noisy speed and heart rate give nearly the same forecast as clean ones")
+    func robustToNoise() {
+        var generator = SplitMix64(seed: 42)
+        func noisyRun(on start: Date) -> Activity {
+            let times = stride(from: 0.0, through: 2400, by: 5).map { start.addingTimeInterval($0) }
+            return Activity(
+                source: .healthKit(UUID()), sport: .running, start: start, duration: 2400,
+                heartRate: times.map { HeartRateSample(time: $0, bpm: 141 + generator.uniform(in: -3...3)) },
+                speed: times.map { SpeedSample(time: $0, metersPerSecond: 3.0 + generator.uniform(in: -0.3...0.3)) }
+            )
+        }
+        let clean = forecast(
+            for: steadyWorkout(minutes: 40, zone: 2), history: history([activity(start: day(3), phases: [(2400, 3.0, 141)])]),
+            before: day(10)
+        )
+        let noisy = forecast(for: steadyWorkout(minutes: 40, zone: 2), history: history([noisyRun(on: day(3))]), before: day(10))
+
+        #expect(noisy.matchedActivityCount == 1)
+        #expect(abs((noisy.distanceMeters ?? 0) - (clean.distanceMeters ?? 0)) / (clean.distanceMeters ?? 1) < 0.02)
+    }
+
+    @Test("a workout planned weeks ahead is forecast as confidently as one planned for tomorrow")
+    func recencyIndependentOfPlanDate() {
+        let paceHistory = history([activity(start: day(3), phases: [(2400, 3.0, 141)])])
+
+        let soon = forecast(for: steadyWorkout(minutes: 40, zone: 2), history: paceHistory, before: day(4))
+        let later = forecast(for: steadyWorkout(minutes: 40, zone: 2), history: paceHistory, before: day(70))
+
+        #expect(soon.distanceMeters == later.distanceMeters)
+    }
+
+    @Test("earlier runs that only give an open step's duration count towards the forecast's activities")
+    func openStepEvidenceIsCounted() {
+        let templateID = UUID()
+        let earlierWorkout = hillSprints(templateID: templateID)
+        let earlierPlan = PlannedActivity(workoutID: earlierWorkout.id, date: day(3))
+        // All in zone 4, so it doesn't match the mostly-zone-2 plan on zones, but its open step does count.
+        let earlier = activity(start: day(3), linkedPlanID: earlierPlan.id, phases: [(2220, 4.0, 169)])
+
+        let projection = forecast(
+            for: hillSprints(templateID: templateID),
+            history: history([earlier], plans: [earlierPlan], workouts: [earlierWorkout]), before: day(10)
+        )
+
+        #expect(projection.matchedActivityCount == 1)
+        #expect(abs(projection.duration - (1320 + 900)) < 1)
+    }
+
+    @Test("the calendar export forecasts planned workouts from its pace history")
+    func calendarExportUsesTheHistory() throws {
+        let easy = steadyWorkout(minutes: 40, zone: 2)
+        let plan = PlannedActivity(workoutID: easy.id, date: day(10))
+        func plannedDistance(_ paceHistory: PaceHistory) -> Double? {
+            let export = CalendarExportBuilder(statisticsCalculator: calculator, paceHistory: paceHistory).build(
+                from: day(10), through: day(10), activities: [], plans: [plan], workouts: [easy], templates: [],
+                metrics: [], athlete: athlete, today: day(10), generatedAt: day(10)
+            )
+            return export.days.first?.activities.first?.distanceMeters
+        }
+
+        let withoutHistory = try #require(plannedDistance(.empty))
+        let withHistory = try #require(plannedDistance(history([activity(start: day(3), phases: [(2400, 3.0, 141)])])))
+
+        #expect(abs(withoutHistory - 2400 / 0.36) < 0.5)
+        #expect(withHistory > 2400 * 2.9)
+    }
+
     // MARK: - Period statistics and the model
 
     @Test("the week's planned totals use the same forecast as a single workout")
@@ -343,5 +515,28 @@ struct HistoricalPaceEstimatorTests {
         #expect(HistoricalPaceEstimator.median([3, 1, 2]) == 2)
         #expect(HistoricalPaceEstimator.median([900, 1100]) == 1000)
         #expect(HistoricalPaceEstimator.median([]) == nil)
+    }
+}
+
+/// A small seeded generator, so the noise test is the same on every run.
+private struct SplitMix64 {
+    private var state: UInt64
+
+    init(seed: UInt64) {
+        state = seed
+    }
+
+    mutating func next() -> UInt64 {
+        state &+= 0x9E37_79B9_7F4A_7C15
+        var z = state
+        z = (z ^ (z >> 30)) &* 0xBF58_476D_1CE4_E5B9
+        z = (z ^ (z >> 27)) &* 0x94D0_49BB_1331_11EB
+        return z ^ (z >> 31)
+    }
+
+    /// A value spread evenly over `range`.
+    mutating func uniform(in range: ClosedRange<Double>) -> Double {
+        let unit = Double(next() >> 11) / Double(1 << 53)
+        return range.lowerBound + (range.upperBound - range.lowerBound) * unit
     }
 }

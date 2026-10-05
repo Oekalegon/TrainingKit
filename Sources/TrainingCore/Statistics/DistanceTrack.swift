@@ -63,6 +63,22 @@ struct DistanceTrack: Sendable {
         return cumulativeMeters[low] + (cumulativeMeters[high] - cumulativeMeters[low]) * fraction
     }
 
+    /// The time and distance spent moving at `minimumSpeed` or faster between `start` and `end`:
+    /// every segment at that speed, counted by how much of it falls inside the interval.
+    func moving(from start: Date, to end: Date, minimumSpeed: Double) -> (seconds: Double, meters: Double) {
+        guard end > start else { return (0, 0) }
+        var seconds = 0.0
+        var meters = 0.0
+        for segment in segments where segment.meters / segment.seconds >= minimumSpeed {
+            let segmentEnd = segment.start.addingTimeInterval(segment.seconds)
+            let overlap = min(end, segmentEnd).timeIntervalSince(max(start, segment.start))
+            guard overlap > 0 else { continue }
+            seconds += overlap
+            meters += segment.meters * overlap / segment.seconds
+        }
+        return (seconds, meters)
+    }
+
     /// When the distance covered first reaches `meters`, or `nil` if it never does.
     func time(reaching meters: Double) -> Date? {
         guard let index = cumulativeMeters.firstIndex(where: { $0 >= meters }) else { return nil }

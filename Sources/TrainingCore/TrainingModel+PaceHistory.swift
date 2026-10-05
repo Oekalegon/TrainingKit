@@ -8,7 +8,8 @@ extension TrainingModel {
     /// can be laid over its recording.
     ///
     /// Reads the store and leaves ``activities``, ``plans`` and ``metrics`` untouched. On a failed
-    /// read ``paceHistory`` keeps its previous value. The history is built off the main actor.
+    /// read ``paceHistory`` keeps its previous value. The history is built off the main actor; when
+    /// calls overlap, the one started last wins, even if an earlier one finishes after it.
     ///
     /// - Parameters:
     ///   - range: The activity start dates to learn from, inclusive on both ends — for example the
@@ -21,15 +22,19 @@ extension TrainingModel {
         in range: ClosedRange<Date>,
         gapThresholdSeconds: TimeInterval = StatisticsCalculator().gapThresholdSeconds
     ) async throws {
+        paceHistoryRefreshCount += 1
+        let refresh = paceHistoryRefreshCount
         let activities = try await stores.activityStore.activities(in: range)
         let plans = try await stores.planStore.plans(in: range)
         let workouts = self.workouts
         let athlete = self.athlete
-        paceHistory = await Task.detached(priority: .utility) {
+        let history = await Task.detached(priority: .utility) {
             PaceHistory(
                 activities: activities, plans: plans, workouts: workouts,
                 athlete: athlete, gapThresholdSeconds: gapThresholdSeconds
             )
         }.value
+        guard refresh == paceHistoryRefreshCount else { return }
+        paceHistory = history
     }
 }

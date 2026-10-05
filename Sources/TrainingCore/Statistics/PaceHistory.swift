@@ -50,7 +50,11 @@ public struct PaceHistory: Sendable, Equatable {
         let zone: Int
         /// `true` for a `.open` step, whose duration is only known from the activity.
         let isOpen: Bool
+        /// Time and distance while moving (see ``PaceHistory/minimumMovingSpeed``), the same
+        /// definition as the zone samples, so a step's pace and its zone's pace are comparable.
         let sample: Sample
+        /// How long the step took, stops included — what an `.open` step's duration is learned from.
+        let elapsedSeconds: Double
     }
 
     /// One completed activity's pace evidence.
@@ -109,6 +113,8 @@ public struct PaceHistory: Sendable, Equatable {
     }
 
     /// Slower than this (1.8 km/h) is standing still or walking to a stop, not moving at a pace.
+    /// Such stretches count towards neither a zone's nor a step's pace, so both are moving paces;
+    /// a forecast's duration is moving time, except for `.open` steps, which take their elapsed time.
     static let minimumMovingSpeed = 0.5
 
     /// `activity`'s pace evidence, or `nil` when it has no usable speed or heart-rate stream, or no
@@ -192,11 +198,17 @@ public struct PaceHistory: Sendable, Equatable {
             }
             end = min(end, activityEnd)
             let seconds = end.timeIntervalSince(cursor)
-            guard seconds > 0 else { break }
+            guard seconds > 0 else {
+                // An open step the other steps left no time for (say the athlete stopped before the
+                // cool-down was over) took no time; the steps after it may still have.
+                if step.goal == .open { continue }
+                break
+            }
             let zone = TimeInZoneBuilder.zone(for: zoneModel.intensityRatio(for: step.target), boundaries: boundaries)
+            let moving = track.moving(from: cursor, to: end, minimumSpeed: minimumMovingSpeed)
             observations.append(StepObservation(
                 position: expandedStep.position, kind: step.kind, zone: max(zone, 1), isOpen: step.goal == .open,
-                sample: Sample(seconds: seconds, meters: track.meters(at: end) - track.meters(at: cursor))
+                sample: Sample(seconds: moving.seconds, meters: moving.meters), elapsedSeconds: seconds
             ))
             cursor = end
         }

@@ -1,7 +1,9 @@
 import Foundation
 
 /// The distance and duration a planned ``StructuredWorkout`` is expected to produce, from
-/// ``StatisticsCalculator/projection(for:athlete:)``.
+/// ``StatisticsCalculator/projection(for:athlete:)`` (the pace model alone) or
+/// ``StatisticsCalculator/projection(for:athlete:paceHistory:before:excluding:)`` (forecast from the
+/// athlete's earlier workouts).
 public struct WorkoutProjection: Sendable, Hashable {
     /// The expected distance in meters, or `nil` when it couldn't be derived — the athlete has no
     /// current heart-rate zone settings, so step intensities (and hence paces) are unknown.

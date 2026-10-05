@@ -660,7 +660,9 @@ struct StatisticsCalculator: Sendable {
   - Pace per zone: the matches' distance over time in the zone, shrunk towards the `PaceModel` pace (scaled by how much faster or slower the matches ran overall) by 300 s of pretend evidence, then made non-decreasing in speed with the zone (pool adjacent violators), so zone 1 is never forecast faster than zone 4.
   - Pace per step: earlier steps of the same kind and target zone, weighted by match weight and length similarity, shrunk towards the zone's pace — a zone-2 recovery jog between intervals is not forecast at steady zone-2 pace.
   - An `.open` step takes the median time the same step (same block/step position) took in earlier runs of the same workout, else of workouts from the same template, else `WorkoutDurationEstimator.defaultOpenStepDuration`.
-  - With no match and no open-step evidence the projection is exactly the `PaceModel` one. Each step keeps its target zone, so time in zone is unchanged; load estimates (`TRIMPPlanEstimator`) still use `WorkoutDurationEstimator`.
+  - Paces are moving paces at both levels: stretches slower than 0.5 m/s (stops) count towards neither. An open step's learned duration is elapsed time, stops included. Ages for the recency weight count from the newest usable activity, not the plan date, so a workout planned weeks ahead isn't forecast less confidently.
+  - With no match and no open-step evidence the projection is exactly the `PaceModel` one. Each step keeps its target zone; only the duration of distance and open steps changes, and with it their time in that zone. Load estimates (`TRIMPPlanEstimator`) still use `WorkoutDurationEstimator`.
+  - The calendar export uses the same forecast (`CalendarExportBuilder.paceHistory`).
 - `WeeklyDelta.distanceFraction` is the "10 % rule" number; `PlanEvaluator` (§8.2) can add a `maxWeeklyDistanceIncrease` guardrail on it — it's a cruder signal than CTL ramp but runners recognise it.
 - Rolling views (4-week averages, monthly, year-to-date) are derived from `[WeeklyStats]` in the app rather than being separate calculators.
 
@@ -714,8 +716,8 @@ What's included (`CalendarExportBuilder`, a pure function):
   distance next to the actual ones), not as a second entry.
 - **Unfulfilled plans for today or later**, with expected TRIMP (the override, or the estimator),
   projected duration and distance, and intended intensity. A time-based workout's distance is
-  projected from the pace model, a figure the week view's planned cards don't show (they show only
-  the measure the workout defines).
+  forecast from `TrainingModel.paceHistory` (see "Pace forecasts" in §9), the same figure the app's
+  detail sheet shows; the week view's planned cards show only the measure the workout defines.
   `trimpSource` says where each TRIMP came from: `heartRate`, `perceivedExertion`, `manual`,
   `estimated` or `override`. **Missed plans** (before today, never
   performed) are left out, as on the week view: they never became load. Only activities inside the

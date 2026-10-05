@@ -233,7 +233,7 @@ public struct StatisticsCalculator: Sendable {
     }
 
     /// Computes `range`'s performed and planned totals independently, per sport, rather than
-    /// ``periodStats(activities:plans:workouts:athlete:range:asOf:previous:)``'s single merged
+    /// ``periodStats(activities:plans:workouts:athlete:range:asOf:previous:paceHistory:)``'s single merged
     /// figure.
     ///
     /// `periodStats` follows the same either/or rule ``DailyLoadSeries`` uses for CTL/ATL: a plan
@@ -449,8 +449,15 @@ public struct StatisticsCalculator: Sendable {
 
     /// The projected duration and distance of each step of a planned workout, with block
     /// repetitions expanded.
-    func stepProjections(for workout: StructuredWorkout, athlete: AthleteProfile) -> [PlannedWorkoutProjector.StepProjection] {
-        PlannedWorkoutProjector(durationEstimator: durationEstimator).stepProjections(workout: workout, athlete: athlete)
+    /// With a non-empty `paceHistory`, forecast as in
+    /// ``projection(for:athlete:paceHistory:before:excluding:)``.
+    func stepProjections(
+        for workout: StructuredWorkout, athlete: AthleteProfile, paceHistory: PaceHistory = .empty,
+        before cutoff: Date = .distantFuture, excluding excludedActivityID: UUID? = nil
+    ) -> [PlannedWorkoutProjector.StepProjection] {
+        PlannedWorkoutProjector(durationEstimator: durationEstimator).stepProjections(
+            workout: workout, athlete: athlete, history: paceHistory, before: cutoff, excluding: excludedActivityID
+        )
     }
 
     /// The projected distance/duration/time-in-zone for a planned workout, via

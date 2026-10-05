@@ -1,7 +1,7 @@
 import Foundation
 
 /// A calendar-day range's performed and planned totals, computed independently per sport by
-/// ``StatisticsCalculator/periodStatsSplit(activities:plans:workouts:athlete:range:asOf:)`` — see
+/// ``StatisticsCalculator/periodStatsSplit(activities:plans:workouts:athlete:range:asOf:paceHistory:)`` — see
 /// that method's own doc comment for why this is two independent figures rather than
 /// ``PeriodStats``'s single merged one.
 public struct PeriodStatsSplit: Sendable, Hashable {

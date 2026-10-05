@@ -11,7 +11,8 @@ import Foundation
 ///
 /// Given a non-empty ``PaceHistory``, the steps' paces (and `.open` steps' durations) are forecast
 /// from the athlete's earlier, similar workouts by ``HistoricalPaceEstimator`` instead (MVP2-35,
-/// MVP2-111); each step keeps the zone above either way, so time in zone is unaffected.
+/// MVP2-111). Each step keeps the zone above either way; only the duration of distance and open
+/// steps changes, and with it their time in that zone.
 struct PlannedWorkoutProjector: Sendable {
     /// Turns a workout step's `StepGoal` into a duration.
     var durationEstimator: WorkoutDurationEstimator

@@ -173,9 +173,10 @@ public struct CalendarExport: Sendable, Codable, Hashable {
         public let trimp: Double
         /// Whether ``trimp`` is the plan's override or an estimate.
         public let trimpSource: Entry.TRIMPSource
-        /// The expected duration, in seconds (projected from the pace model for distance-based steps).
+        /// The expected duration, in seconds (forecast from the athlete's paces for distance and open
+        /// steps; see ``CalendarExportBuilder/paceHistory``).
         public let durationSeconds: Double
-        /// The expected distance, in meters (projected from the pace model for time-based steps),
+        /// The expected distance, in meters (forecast from the athlete's paces for time and open steps),
         /// if it can be projected.
         public let distanceMeters: Double?
     }

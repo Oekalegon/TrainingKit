@@ -47,6 +47,14 @@ public final class TrainingModel {
     /// athlete to confirm or correct (see ``PlanMatchAmbiguity``). Cleared for an activity once it's
     /// manually linked or unlinked. In-memory only: not persisted, so it starts empty after a relaunch.
     public internal(set) var planMatchAmbiguities: [PlanMatchAmbiguity] = []
+    /// The athlete's recent activities as pace evidence for forecasting planned workouts (MVP2-35,
+    /// MVP2-111); pass it to ``StatisticsCalculator``'s projections and period statistics. Empty
+    /// until ``refreshPaceHistory(in:gapThresholdSeconds:)`` has read the store.
+    public internal(set) var paceHistory: PaceHistory = .empty
+    /// Counts ``refreshPaceHistory(in:gapThresholdSeconds:)`` calls, so a refresh that finishes
+    /// after a newer one started doesn't overwrite the newer result.
+    @ObservationIgnored
+    var paceHistoryRefreshCount = 0
     /// The athlete this model reflects: the profile passed to `init`, then whatever
     /// ``updateAthlete(asOf:_:)`` last saved.
     ///

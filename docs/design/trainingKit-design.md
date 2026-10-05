@@ -654,6 +654,15 @@ struct StatisticsCalculator: Sendable {
 
 - Week boundary and first weekday come from `AthleteProfile` (add `weekStartsOn: Weekday`, default Monday), same timezone rule as daily bucketing so a Sunday-night run doesn't land in next week.
 - Future weeks are projected from planned activities: distance/time from the workout steps via `PaceModel`, time in zone from the step targets. `isProjected` marks them, and a partial current week mixes actual and planned exactly like the daily series.
+- **Pace forecasts (MVP2-35, MVP2-111).** Given a `PaceHistory`, the projection forecasts paces from the athlete's own earlier workouts instead of `PaceModel` alone (`StatisticsCalculator.projection(for:athlete:paceHistory:before:excluding:)`, and a `paceHistory:` argument on `periodStats`/`periodStatsSplit` so the totals agree with the per-workout figures):
+  - `PaceHistory` holds, per activity with speed and heart-rate streams, the time and distance run in each heart-rate zone (zones as of the activity's date). For an activity linked to a plan it also lays the workout's steps over the recording (time steps by time, distance steps by the integrated speed, open steps share the remaining time) and records each step's kind, target zone, time and distance. `TrainingModel.refreshPaceHistory(in:)` builds it from the store, not just the loaded window.
+  - `HistoricalPaceEstimator` matches earlier activities of the same sport family whose time-in-zone mix overlaps the plan's by at least half, weighted by overlap², duration similarity, recency (60-day half-life) and ×2/×3 for the same template/workout; the best 12 count. Only activities before the cutoff (the plan's date) are used, so a plan's own activity never informs what it expected.
+  - Pace per zone: the matches' distance over time in the zone, shrunk towards the `PaceModel` pace (scaled by how much faster or slower the matches ran overall) by 300 s of pretend evidence, then made non-decreasing in speed with the zone (pool adjacent violators), so zone 1 is never forecast faster than zone 4.
+  - Pace per step: earlier steps of the same kind and target zone, weighted by match weight and length similarity, shrunk towards the zone's pace — a zone-2 recovery jog between intervals is not forecast at steady zone-2 pace.
+  - An `.open` step takes the median time the same step (same block/step position) took in earlier runs of the same workout, else of workouts from the same template, else `WorkoutDurationEstimator.defaultOpenStepDuration`.
+  - Paces are moving paces at both levels: stretches slower than 0.5 m/s (stops) count towards neither. An open step's learned duration is elapsed time, stops included. Ages for the recency weight count from the newest usable activity, not the plan date, so a workout planned weeks ahead isn't forecast less confidently.
+  - With no match and no open-step evidence the projection is exactly the `PaceModel` one. Each step keeps its target zone; only the duration of distance and open steps changes, and with it their time in that zone. Load estimates (`TRIMPPlanEstimator`) still use `WorkoutDurationEstimator`.
+  - The calendar export uses the same forecast (`CalendarExportBuilder.paceHistory`).
 - `WeeklyDelta.distanceFraction` is the "10 % rule" number; `PlanEvaluator` (§8.2) can add a `maxWeeklyDistanceIncrease` guardrail on it — it's a cruder signal than CTL ramp but runners recognise it.
 - Rolling views (4-week averages, monthly, year-to-date) are derived from `[WeeklyStats]` in the app rather than being separate calculators.
 
@@ -707,7 +716,8 @@ What's included (`CalendarExportBuilder`, a pure function):
   distance next to the actual ones), not as a second entry.
 - **Unfulfilled plans for today or later**, with expected TRIMP (the override, or the estimator),
   projected duration and distance, and intended intensity. A time-based workout's distance is
-  projected from the pace model, a figure the week view itself doesn't show yet (MVP2-35).
+  forecast from `TrainingModel.paceHistory` (see "Pace forecasts" in §9), the same figure the app's
+  detail sheet shows; the week view's planned cards show only the measure the workout defines.
   `trimpSource` says where each TRIMP came from: `heartRate`, `perceivedExertion`, `manual`,
   `estimated` or `override`. **Missed plans** (before today, never
   performed) are left out, as on the week view: they never became load. Only activities inside the

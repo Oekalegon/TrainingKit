@@ -82,14 +82,14 @@ struct HistoricalPaceEstimator: Sendable {
     ) -> Forecast? {
         guard let settings = athlete.currentHeartRateZoneSettings else { return nil }
         let zoneModel = HeartRateZoneModel(settings: settings)
-        guard let boundaries = TimeInZoneBuilder.zoneBoundaries(zoneModel) else { return nil }
+        guard TimeInZoneBuilder.zoneBoundaries(zoneModel) != nil else { return nil }
         let zonePriors = Dictionary(uniqueKeysWithValues: (1...5).map {
             ($0, 1 / athlete.paceModel.secondsPerMeter(atZone: $0))
         })
 
         let planned = PaceHistory.expandedSteps(of: workout).map { expanded -> PlannedStep in
             let step = expanded.step
-            let zone = TimeInZoneBuilder.zone(for: zoneModel.intensityRatio(for: step.target), boundaries: boundaries)
+            let zone = zoneModel.intensityZone(for: step.target)
             let paceZone = max(zone, 1)
             let zonePrior = zonePriors[paceZone] ?? 1
             let priorSpeed: Double

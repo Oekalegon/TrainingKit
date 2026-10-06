@@ -146,7 +146,7 @@ public struct PaceHistory: Sendable, Equatable {
         var steps: [StepObservation] = []
         if let workout, workout.sport.isSameFamily(as: activity.sport) {
             steps = stepObservations(
-                workout: workout, activity: activity, track: track, zoneModel: zoneModel, boundaries: boundaries
+                workout: workout, activity: activity, track: track, zoneModel: zoneModel
             )
         }
 
@@ -162,7 +162,7 @@ public struct PaceHistory: Sendable, Equatable {
     /// without lap data.
     private static func stepObservations(
         workout: StructuredWorkout, activity: Activity, track: DistanceTrack,
-        zoneModel: HeartRateZoneModel, boundaries: [Double]
+        zoneModel: HeartRateZoneModel
     ) -> [StepObservation] {
         let expanded = expandedSteps(of: workout)
         guard !expanded.isEmpty, activity.duration > 0 else { return [] }
@@ -204,7 +204,7 @@ public struct PaceHistory: Sendable, Equatable {
                 if step.goal == .open { continue }
                 break
             }
-            let zone = TimeInZoneBuilder.zone(for: zoneModel.intensityRatio(for: step.target), boundaries: boundaries)
+            let zone = zoneModel.intensityZone(for: step.target)
             let moving = track.moving(from: cursor, to: end, minimumSpeed: minimumMovingSpeed)
             observations.append(StepObservation(
                 position: expandedStep.position, kind: step.kind, zone: max(zone, 1), isOpen: step.goal == .open,

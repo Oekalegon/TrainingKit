@@ -76,17 +76,12 @@ struct PlannedWorkoutProjector: Sendable {
     /// The steps projected at ``AthleteProfile/paceModel``'s paces.
     private func paceModelStepProjections(workout: StructuredWorkout, athlete: AthleteProfile) -> [StepProjection] {
         let zoneModel = athlete.currentHeartRateZoneSettings.map { HeartRateZoneModel(settings: $0) }
-        let boundaries = zoneModel.flatMap { TimeInZoneBuilder.zoneBoundaries($0) }
         var projections: [StepProjection] = []
         for (blockIndex, block) in workout.blocks.enumerated() where block.repetitions > 0 {
             for repetition in 1...block.repetitions {
                 for step in block.steps {
                     let duration = durationEstimator.duration(for: step, athlete: athlete)
-                    var zone: Int?
-                    if let zoneModel {
-                        let ratio = zoneModel.intensityRatio(for: step.target)
-                        zone = boundaries.map { TimeInZoneBuilder.zone(for: ratio, boundaries: $0) } ?? 3
-                    }
+                    let zone = zoneModel?.intensityZone(for: step.target)
                     let distance: Double?
                     switch step.goal {
                     case .distance(let meters):

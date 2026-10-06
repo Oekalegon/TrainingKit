@@ -43,4 +43,17 @@ struct WorkoutDurationEstimatorTests {
         #expect(model.zone(for: .pace(240...250)) == 4)
         #expect(model.zone(for: .rpe(2)) == 1)
     }
+
+    @Test("a method that can't resolve its zones, an out-of-range zone and a heart-rate range all resolve consistently")
+    func unusualTargetsResolveConsistently() throws {
+        let unresolvable = AthleteProfile.fixture(lactateThresholdHeartRateBPM: nil, zoneMethod: .lactateThreshold)
+        #expect(abs(duration(of: .pace(240...250), athlete: unresolvable) - unresolvable.paceModel.duration(forMeters: 5000, atZone: 4)) < 0.001)
+
+        let model = HeartRateZoneModel(settings: try #require(athlete.currentHeartRateZoneSettings))
+        #expect(model.zone(for: .heartRateZone(7)) == 3)
+        // 130–150 bpm at rest 50 / max 190 → ratio ≈ 0.64 → zone 2 under Karvonen.
+        let range = IntensityTarget.heartRateRange(130, 150)
+        #expect(model.zone(for: range) == 2)
+        #expect(abs(duration(of: range, athlete: athlete) - athlete.paceModel.duration(forMeters: 5000, atZone: model.zone(for: range))) < 0.001)
+    }
 }

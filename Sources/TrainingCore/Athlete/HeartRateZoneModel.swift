@@ -140,8 +140,9 @@ public struct HeartRateZoneModel: Sendable {
 
     /// The heart-rate-reserve ratio a workout step's target intensity implies.
     ///
-    /// Shared by ``TRIMPPlanEstimator`` (to weight planned TRIMP) and `StatisticsCalculator` (to
-    /// bucket a planned step into a zone for time-in-zone/distance projection) so the two can't
+    /// Shared by ``TRIMPPlanEstimator`` (to weight planned TRIMP) and, through
+    /// ``intensityZone(for:)``/``zone(for:)``, by `StatisticsCalculator`, ``WorkoutDurationEstimator``
+    /// and the pace forecast (to bucket a planned step into a zone) so they can't
     /// silently drift apart on what a `.pace`/`.power`/`.rpe` target is assumed to mean.
     ///
     /// `.pace`/`.power` approximate a threshold-adjacent effort (roughly zone 4) since MVP 1 has no
@@ -164,17 +165,20 @@ public struct HeartRateZoneModel: Sendable {
         }
     }
 
-    /// The zone (1...5) a workout step's target intensity implies, used wherever a planned step
-    /// needs a pace: it is the zone ``intensityRatio(for:)`` falls in, so a `.pace`/`.power`
-    /// target is zone 4 and a missing target zone 3 here as in the projector and the TRIMP estimator.
+    /// The zone (0...5) a workout step's target intensity falls in; 0 means below zone 1. This is
+    /// the zone ``intensityRatio(for:)`` resolves to, so a `.pace`/`.power` target is zone 4 and a
+    /// missing target zone 3 here as in the projector, the TRIMP estimator and the pace forecast.
+    /// Falls back to ``fallbackZone(for:)`` when the method can't resolve every zone boundary.
     ///
-    /// Use ``fallbackZone(for:)`` when the athlete has no zone settings.
+    /// Use ``zone(for:)`` where the result picks a pace, which has no zone 0.
+    public func intensityZone(for target: IntensityTarget?) -> Int {
+        guard let boundaries = TimeInZoneBuilder.zoneBoundaries(self) else { return Self.fallbackZone(for: target) }
+        return TimeInZoneBuilder.zone(for: intensityRatio(for: target), boundaries: boundaries)
+    }
+
+    /// ``intensityZone(for:)`` clamped to 1...5, for choosing a pace.
     public func zone(for target: IntensityTarget?) -> Int {
-        guard let z1 = zoneRatioRange(1), let z2 = zoneRatioRange(2), let z3 = zoneRatioRange(3),
-              let z4 = zoneRatioRange(4), let z5 = zoneRatioRange(5)
-        else { return Self.fallbackZone(for: target) }
-        let boundaries = [z1.lowerBound, z1.upperBound, z2.upperBound, z3.upperBound, z4.upperBound, z5.upperBound]
-        return max(TimeInZoneBuilder.zone(for: intensityRatio(for: target), boundaries: boundaries), 1)
+        max(intensityZone(for: target), 1)
     }
 
     /// The zone a target implies when there is no zone model to resolve it against: a

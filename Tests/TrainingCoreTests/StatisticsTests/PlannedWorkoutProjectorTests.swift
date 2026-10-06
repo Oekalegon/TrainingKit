@@ -58,12 +58,12 @@ struct PlannedWorkoutProjectorTests {
         #expect(projection.timeInZone.total == 1800)
     }
 
-    @Test("when the athlete's zone method can't resolve every zone, projects at the default zone 3")
+    @Test("when the athlete's zone method can't resolve every zone, projects at the target's fallback zone")
     func fallsBackToZoneThreeWhenBoundariesAreUnresolvable() {
         // `.lactateThreshold` with no recorded threshold heart rate makes every
         // `HeartRateZoneModel.zoneRatioRange(_:)` call return nil, so `TimeInZoneBuilder
-        // .zoneBoundaries(_:)` returns nil and `project` falls back to zone 3 rather than crashing
-        // or mis-assigning a zone.
+        // .zoneBoundaries(_:)` returns nil and `project` falls back to `HeartRateZoneModel.fallbackZone(for:)`
+        // (zone 3 for a step without a target) rather than crashing or mis-assigning a zone.
         let athlete = AthleteProfile(
             sex: .male,
             paceModel: PaceModel(thresholdPaceSecondsPerKilometer: 240),
@@ -78,7 +78,7 @@ struct PlannedWorkoutProjectorTests {
                 )
             ]
         )
-        let unresolvableZoneWorkout = workout([WorkoutBlock(steps: [WorkoutStep(kind: .work, goal: .time(600), target: .heartRateZone(2))])])
+        let unresolvableZoneWorkout = workout([WorkoutBlock(steps: [WorkoutStep(kind: .work, goal: .time(600), target: nil)])])
 
         let projection = projector.project(workout: unresolvableZoneWorkout, athlete: athlete)
 
@@ -99,5 +99,29 @@ struct PlannedWorkoutProjectorTests {
         let expectedDistance = 600 / athlete.paceModel.secondsPerMeter(atZone: 1)
         #expect(abs((projection.distanceMeters ?? 0) - expectedDistance) < 0.01)
         #expect(projection.timeInZone.seconds[0] == 600)
+    }
+
+    @Test("a distance step with a .pace target projects at the zone the duration estimator paced it at")
+    func paceTargetProjectionMatchesEstimatorZone() {
+        let athlete = AthleteProfile.fixture()
+        let step = WorkoutStep(kind: .work, goal: .distance(5000), target: .pace(240...250))
+        let projection = projector.project(workout: workout([WorkoutBlock(steps: [step])]), athlete: athlete)
+
+        let zoneFour = athlete.paceModel.duration(forMeters: 5000, atZone: 4)
+        #expect(abs(projection.duration - zoneFour) < 0.001)
+        #expect(abs((projection.distanceMeters ?? 0) - 5000) < 0.01)
+        #expect(projection.timeInZone.seconds[4] != nil)
+    }
+
+    @Test("with unresolvable zone boundaries a .pace step projects at zone 4, matching the estimator")
+    func paceTargetWithUnresolvableBoundariesIsZoneFour() {
+        var athlete = AthleteProfile.fixture(lactateThresholdHeartRateBPM: nil, zoneMethod: .lactateThreshold)
+        athlete.paceModel = PaceModel(thresholdPaceSecondsPerKilometer: 240)
+        let step = WorkoutStep(kind: .work, goal: .time(600), target: .pace(240...250))
+        let projection = projector.project(workout: workout([WorkoutBlock(steps: [step])]), athlete: athlete)
+
+        #expect(projection.timeInZone.seconds[4] == 600)
+        let expected = 600 / athlete.paceModel.secondsPerMeter(atZone: 4)
+        #expect(abs((projection.distanceMeters ?? 0) - expected) < 0.01)
     }
 }

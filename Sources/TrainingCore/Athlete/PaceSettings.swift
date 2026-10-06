@@ -4,7 +4,7 @@ import Foundation
 ///
 /// Kept dated, like ``HeartRateZoneSettings``, so a change of threshold pace is a record of when it
 /// changed rather than an overwrite.
-public struct PaceSettings: Sendable, Codable, Equatable {
+public struct PaceSettings: Sendable, Codable, Hashable {
     /// The first day this pace model applies.
     public var effectiveDate: Date
     /// The pace model in effect from ``effectiveDate``.

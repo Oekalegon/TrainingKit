@@ -21,6 +21,10 @@ public struct AthleteProfile: Sendable, Codable, Equatable {
     /// Every ``PaceSettings`` this athlete has recorded, in any order. Entered by the athlete, with
     /// the date each takes effect (MVP2-132); a profile stored before the history existed decodes
     /// its single pace model as one entry effective since the beginning of time.
+    ///
+    /// Keep it non-empty: the initializer, decoding and ``removingPaceSettings(on:)`` all do. Assigning
+    /// an empty array leaves ``paceModel`` returning a placeholder 5:00 per kilometer rather than
+    /// failing.
     public var paceHistory: [PaceSettings]
     /// Turns a distance into a duration at a given heart-rate zone, for plan estimation: the entry
     /// of ``paceHistory`` with the latest ``PaceSettings/effectiveDate``, since planning is always

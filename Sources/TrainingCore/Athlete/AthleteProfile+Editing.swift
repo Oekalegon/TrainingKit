@@ -7,6 +7,10 @@ import Foundation
 /// Each takes effect from a calendar day in the athlete's ``AthleteProfile/timeZone``, counted from
 /// the start of that day, so an activity that morning is scored with it. Recording on a day that
 /// already has an entry replaces that entry rather than adding a second one for the same day.
+///
+/// "The same day" is judged in the time zone the profile has when the change is made. After a time
+/// zone change, an older entry keeps its absolute start, so it can sit a few hours off the new zone's
+/// midnight and then match a different day than it was recorded on.
 extension AthleteProfile {
     private var calendar: Calendar {
         var calendar = Calendar(identifier: .gregorian)

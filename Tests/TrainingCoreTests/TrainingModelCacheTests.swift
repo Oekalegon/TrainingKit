@@ -558,3 +558,93 @@ private actor SpyCacheStore: FitnessMetricsCacheStore {
         try await wrapped.clearDirtyWatermark()
     }
 }
+
+@MainActor
+@Suite("TrainingModel cache and athlete edits (MVP2-132)", .serialized)
+struct TrainingModelAthleteEditCacheTests {
+    private func day(_ offset: Int) -> Date {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+        let base = calendar.startOfDay(for: Date(timeIntervalSince1970: 1_700_000_000))
+        return calendar.date(byAdding: .day, value: offset, to: base)!
+    }
+
+    private func makeModel(cache: InMemoryStore) -> TrainingModel {
+        let store = InMemoryStore()
+        let stores = StoreSet(
+            activityStore: store, planStore: store, workoutStore: store,
+            cycleStore: store, raceStore: store, athleteStore: store, fitnessMetricsCacheStore: cache
+        )
+        return TrainingModel(stores: stores, athlete: AthleteProfile.fixture())
+    }
+
+    private func seededCache() async throws -> InMemoryStore {
+        let cache = InMemoryStore()
+        try await cache.upsert([
+            FitnessMetrics(
+                day: day(-1), load: 0, ctl: 42, atl: 42, tsb: 0,
+                monotony: .nan, strain: .nan, isProjected: false, isWarmingUp: false
+            ),
+        ])
+        return cache
+    }
+
+    @Test("changes that don't feed the series leave the cache alone")
+    func nonLoadChangesKeepTheCache() async throws {
+        let cache = try await seededCache()
+        let model = makeModel(cache: cache)
+
+        try await model.updateAthlete(asOf: day(0)) { profile in
+            var changed = profile
+            changed.name = "Alex"
+            changed.avatarImageData = Data([1, 2, 3])
+            changed.usesHealthKitRestingHeartRate = false
+            changed.dateOfBirth = Date(timeIntervalSince1970: 631_152_000)
+            changed.mainSport = .cycling
+            return changed
+        }
+
+        #expect(try await cache.cachedMetrics(in: day(-1)...day(-1)).first?.ctl == 42)
+    }
+
+    @Test("a change to a field the series uses still wipes the cache")
+    func loadChangesStillInvalidate() async throws {
+        let changes: [@Sendable (AthleteProfile) -> AthleteProfile] = [
+            { profile in var changed = profile; changed.sex = .female; return changed },
+            { profile in var changed = profile; changed.weekStartsOn = .sunday; return changed },
+            { profile in
+                profile.recordingPaceModel(PaceModel(thresholdPaceSecondsPerKilometer: 250), from: Date(timeIntervalSince1970: 1_700_000_000))
+            },
+        ]
+        for change in changes {
+            let cache = try await seededCache()
+            let model = makeModel(cache: cache)
+
+            try await model.updateAthlete(asOf: day(0), change)
+
+            #expect(try await cache.cachedMetrics(in: day(-1)...day(-1)).first?.ctl != 42)
+        }
+    }
+
+    @Test("a heart-rate entry recorded by hand keeps the cache before its day, and replacing it in place wipes everything")
+    func recordedHeartRateEntry() async throws {
+        let cache = try await seededCache()
+        let model = makeModel(cache: cache)
+        let today = day(0)
+
+        try await model.updateAthlete(asOf: today) { profile in
+            profile.recordingHeartRateSettings(
+                HeartRateZoneSettings(effectiveDate: today, restingHeartRateBPM: 48, maxHeartRateBPM: 186, maxHeartRateSource: .manual)
+            )
+        }
+        #expect(try await cache.cachedMetrics(in: day(-1)...day(-1)).first?.ctl == 42)
+
+        // The same day again, different values: an in-place edit, so the whole cache goes.
+        try await model.updateAthlete(asOf: today) { profile in
+            profile.recordingHeartRateSettings(
+                HeartRateZoneSettings(effectiveDate: today, restingHeartRateBPM: 47, maxHeartRateBPM: 188, maxHeartRateSource: .manual)
+            )
+        }
+        #expect(try await cache.cachedMetrics(in: day(-1)...day(-1)).first?.ctl != 42)
+    }
+}

@@ -87,6 +87,7 @@ struct AthleteProfile: Sendable, Codable {
                                                        // counts whole years in the athlete's time zone
     var usesHealthKitRestingHeartRate: Bool         // MVP2-132: whether the host app merges HealthKit's
                                                        // resting HR into the history (default true)
+    var avatarImageData: Data?                      // MVP2-132: the athlete's chosen picture, kept small
 }
 ```
 

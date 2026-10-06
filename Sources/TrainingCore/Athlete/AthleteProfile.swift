@@ -68,6 +68,10 @@ public struct AthleteProfile: Sendable, Codable, Equatable {
     /// the history and doesn't offer to edit it; the athlete turns it off to enter their own. Nothing
     /// in `TrainingCore` reads it.
     public var usesHealthKitRestingHeartRate: Bool
+    /// The athlete's picture, as encoded image data (MVP2-132), or `nil` for none. Chosen by the
+    /// athlete, never read from another source. It's stored in the profile and so travels with it, so
+    /// a host app should keep it small (a few tens of kilobytes). Nothing in `TrainingCore` reads it.
+    public var avatarImageData: Data?
 
     /// Creates an athlete profile.
     ///
@@ -84,6 +88,8 @@ public struct AthleteProfile: Sendable, Codable, Equatable {
     ///   - dateOfBirth: The athlete's date of birth, if known; defaults to `nil`.
     ///   - usesHealthKitRestingHeartRate: Whether the resting heart rate follows HealthKit; defaults
     ///     to `true`.
+    ///   - avatarImageData: The athlete's picture as encoded image data, if they chose one; defaults
+    ///     to `nil`.
     ///   - paceHistory: Every ``PaceSettings`` this athlete has recorded; when given and not empty, it
     ///     replaces the single entry `paceModel` would make.
     public init(
@@ -97,6 +103,7 @@ public struct AthleteProfile: Sendable, Codable, Equatable {
         heartRateZoneHistory: [HeartRateZoneSettings],
         dateOfBirth: Date? = nil,
         usesHealthKitRestingHeartRate: Bool = true,
+        avatarImageData: Data? = nil,
         paceHistory: [PaceSettings]? = nil
     ) {
         self.id = id
@@ -111,18 +118,20 @@ public struct AthleteProfile: Sendable, Codable, Equatable {
         self.heartRateZoneHistory = heartRateZoneHistory
         self.dateOfBirth = dateOfBirth
         self.usesHealthKitRestingHeartRate = usesHealthKitRestingHeartRate
+        self.avatarImageData = avatarImageData
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, name, sex, paceModel, paceHistory, timeZone, weekStartsOn, mainSport, heartRateZoneHistory
-        case dateOfBirth, usesHealthKitRestingHeartRate
+        case dateOfBirth, usesHealthKitRestingHeartRate, avatarImageData
     }
 
-    /// Custom decoding so profiles persisted before `mainSport`, `dateOfBirth`, `paceHistory` or
-    /// `usesHealthKitRestingHeartRate` existed still decode, defaulting a missing `mainSport` to
-    /// running, a missing `dateOfBirth` to `nil`, a missing `paceHistory` to the single `paceModel`
-    /// entry and a missing `usesHealthKitRestingHeartRate` to `true`, rather than failing to load
-    /// the athlete's whole profile.
+    /// Custom decoding so profiles persisted before `mainSport`, `dateOfBirth`, `paceHistory`,
+    /// `usesHealthKitRestingHeartRate` or `avatarImageData` existed still decode, defaulting a
+    /// missing `mainSport` to running, a missing `dateOfBirth` or `avatarImageData` to `nil`, a
+    /// missing `paceHistory` to the single `paceModel` entry and a missing
+    /// `usesHealthKitRestingHeartRate` to `true`, rather than failing to load the athlete's whole
+    /// profile.
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(UUID.self, forKey: .id)
@@ -140,6 +149,7 @@ public struct AthleteProfile: Sendable, Codable, Equatable {
         heartRateZoneHistory = try container.decode([HeartRateZoneSettings].self, forKey: .heartRateZoneHistory)
         dateOfBirth = try container.decodeIfPresent(Date.self, forKey: .dateOfBirth)
         usesHealthKitRestingHeartRate = try container.decodeIfPresent(Bool.self, forKey: .usesHealthKitRestingHeartRate) ?? true
+        avatarImageData = try container.decodeIfPresent(Data.self, forKey: .avatarImageData)
     }
 
     /// Encodes the full ``paceHistory`` and also the current ``paceModel`` under its old key, so a
@@ -157,6 +167,7 @@ public struct AthleteProfile: Sendable, Codable, Equatable {
         try container.encode(heartRateZoneHistory, forKey: .heartRateZoneHistory)
         try container.encodeIfPresent(dateOfBirth, forKey: .dateOfBirth)
         try container.encode(usesHealthKitRestingHeartRate, forKey: .usesHealthKitRestingHeartRate)
+        try container.encodeIfPresent(avatarImageData, forKey: .avatarImageData)
     }
 
     /// The ``PaceModel`` in effect on `date`: the latest ``paceHistory`` entry whose effective date is

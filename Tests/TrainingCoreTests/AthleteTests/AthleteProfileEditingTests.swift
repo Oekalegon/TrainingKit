@@ -160,6 +160,23 @@ struct AthleteProfileEditingTests {
         #expect(oldKey["thresholdPaceSecondsPerKilometer"] as? Double == 280)
     }
 
+    @Test("the avatar image round-trips, and a profile without one decodes with none")
+    func avatarRoundTrips() throws {
+        var original = AthleteProfile.fixture()
+        #expect(original.avatarImageData == nil)
+        original.avatarImageData = Data([0xFF, 0xD8, 0xFF, 0xE0])
+
+        let data = try JSONEncoder().encode(original)
+        let decoded = try JSONDecoder().decode(AthleteProfile.self, from: data)
+        #expect(decoded.avatarImageData == original.avatarImageData)
+        #expect(decoded == original)
+
+        var object = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        object.removeValue(forKey: "avatarImageData")
+        let legacy = try JSONSerialization.data(withJSONObject: object)
+        #expect(try JSONDecoder().decode(AthleteProfile.self, from: legacy).avatarImageData == nil)
+    }
+
     @Test("a manually entered max heart rate source round-trips")
     func manualSourceRoundTrips() throws {
         let entry = settings(on: date(6, 10))

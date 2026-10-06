@@ -17,4 +17,7 @@ public enum MaxHeartRateSource: Sendable, Codable, Hashable {
     ///
     /// - Parameter activityID: The ``Activity`` the peak was measured in.
     case workout(activityID: UUID)
+    /// Entered by the athlete (MVP2-132), e.g. from a field test. Taken as given: nothing replaces
+    /// it automatically, and it isn't compared with the age formula or a workout's peak.
+    case manual
 }

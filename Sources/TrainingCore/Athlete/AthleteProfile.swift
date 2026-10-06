@@ -18,8 +18,30 @@ public struct AthleteProfile: Sendable, Codable, Equatable {
     public var name: String
     /// Used to select ``TRIMPCoefficients``.
     public var sex: BiologicalSex
-    /// Turns a distance into a duration at a given heart-rate zone, for plan estimation.
-    public var paceModel: PaceModel
+    /// Every ``PaceSettings`` this athlete has recorded, in any order. Entered by the athlete, with
+    /// the date each takes effect (MVP2-132); a profile stored before the history existed decodes
+    /// its single pace model as one entry effective since the beginning of time.
+    public var paceHistory: [PaceSettings]
+    /// Turns a distance into a duration at a given heart-rate zone, for plan estimation: the entry
+    /// of ``paceHistory`` with the latest ``PaceSettings/effectiveDate``, since planning is always
+    /// about who the athlete is now (the same rule as ``currentHeartRateZoneSettings``). Use
+    /// ``paceModel(asOf:)`` for the model in effect on a given date.
+    ///
+    /// Setting it replaces that latest entry's model; to record a change with a date, use
+    /// ``recordingPaceModel(_:from:)``.
+    public var paceModel: PaceModel {
+        get {
+            paceHistory.max { $0.effectiveDate < $1.effectiveDate }?.paceModel
+                ?? PaceModel(thresholdPaceSecondsPerKilometer: 300)
+        }
+        set {
+            guard let index = paceHistory.indices.max(by: { paceHistory[$0].effectiveDate < paceHistory[$1].effectiveDate }) else {
+                paceHistory = [PaceSettings(effectiveDate: .distantPast, paceModel: newValue)]
+                return
+            }
+            paceHistory[index].paceModel = newValue
+        }
+    }
     /// Boundary for daily bucketing in the fitness series (``DailyLoadSeries``).
     public var timeZone: TimeZone
     /// Boundary for weekly statistics; default is Monday.
@@ -41,6 +63,11 @@ public struct AthleteProfile: Sendable, Codable, Equatable {
     /// the time of the read; ``age(asOf:)`` counts days in the athlete's ``timeZone``, so if the two
     /// zones differ the age can be a day off on the birthday itself.
     public var dateOfBirth: Date?
+    /// Whether the resting heart rate in ``heartRateZoneHistory`` follows the one HealthKit reports
+    /// (MVP2-132). On by default. While on, a host app merges HealthKit's resting heart rate into
+    /// the history and doesn't offer to edit it; the athlete turns it off to enter their own. Nothing
+    /// in `TrainingCore` reads it.
+    public var usesHealthKitRestingHeartRate: Bool
 
     /// Creates an athlete profile.
     ///
@@ -48,12 +75,17 @@ public struct AthleteProfile: Sendable, Codable, Equatable {
     ///   - id: A stable identity for this athlete; defaults to a new random `UUID`.
     ///   - name: A human-readable label, e.g. for a roster picker; defaults to empty.
     ///   - sex: Used to select ``TRIMPCoefficients``.
-    ///   - paceModel: Turns a distance into a duration at a given heart-rate zone.
+    ///   - paceModel: Turns a distance into a duration at a given heart-rate zone; recorded as one
+    ///     ``PaceSettings`` entry effective since the beginning of time, unless `paceHistory` is given.
     ///   - timeZone: Boundary for daily bucketing in the fitness series.
     ///   - weekStartsOn: Boundary for weekly statistics; defaults to Monday.
     ///   - mainSport: The athlete's primary sport; defaults to running.
     ///   - heartRateZoneHistory: Every ``HeartRateZoneSettings`` this athlete has recorded.
     ///   - dateOfBirth: The athlete's date of birth, if known; defaults to `nil`.
+    ///   - usesHealthKitRestingHeartRate: Whether the resting heart rate follows HealthKit; defaults
+    ///     to `true`.
+    ///   - paceHistory: Every ``PaceSettings`` this athlete has recorded; when given, it replaces the
+    ///     single entry `paceModel` would make.
     public init(
         id: UUID = UUID(),
         name: String = "",
@@ -63,37 +95,76 @@ public struct AthleteProfile: Sendable, Codable, Equatable {
         weekStartsOn: Weekday = .monday,
         mainSport: Sport = .running,
         heartRateZoneHistory: [HeartRateZoneSettings],
-        dateOfBirth: Date? = nil
+        dateOfBirth: Date? = nil,
+        usesHealthKitRestingHeartRate: Bool = true,
+        paceHistory: [PaceSettings]? = nil
     ) {
         self.id = id
         self.name = name
         self.sex = sex
-        self.paceModel = paceModel
+        self.paceHistory = paceHistory ?? [PaceSettings(effectiveDate: .distantPast, paceModel: paceModel)]
         self.timeZone = timeZone
         self.weekStartsOn = weekStartsOn
         self.mainSport = mainSport
         self.heartRateZoneHistory = heartRateZoneHistory
         self.dateOfBirth = dateOfBirth
+        self.usesHealthKitRestingHeartRate = usesHealthKitRestingHeartRate
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, name, sex, paceModel, timeZone, weekStartsOn, mainSport, heartRateZoneHistory, dateOfBirth
+        case id, name, sex, paceModel, paceHistory, timeZone, weekStartsOn, mainSport, heartRateZoneHistory
+        case dateOfBirth, usesHealthKitRestingHeartRate
     }
 
-    /// Custom decoding so profiles persisted before `mainSport` or `dateOfBirth` existed still
-    /// decode, defaulting a missing `mainSport` to running and a missing `dateOfBirth` to `nil`
-    /// rather than failing to load the athlete's whole profile.
+    /// Custom decoding so profiles persisted before `mainSport`, `dateOfBirth`, `paceHistory` or
+    /// `usesHealthKitRestingHeartRate` existed still decode, defaulting a missing `mainSport` to
+    /// running, a missing `dateOfBirth` to `nil`, a missing `paceHistory` to the single `paceModel`
+    /// entry and a missing `usesHealthKitRestingHeartRate` to `true`, rather than failing to load
+    /// the athlete's whole profile.
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(UUID.self, forKey: .id)
         name = try container.decode(String.self, forKey: .name)
         sex = try container.decode(BiologicalSex.self, forKey: .sex)
-        paceModel = try container.decode(PaceModel.self, forKey: .paceModel)
+        if let history = try container.decodeIfPresent([PaceSettings].self, forKey: .paceHistory), !history.isEmpty {
+            paceHistory = history
+        } else {
+            let legacy = try container.decode(PaceModel.self, forKey: .paceModel)
+            paceHistory = [PaceSettings(effectiveDate: .distantPast, paceModel: legacy)]
+        }
         timeZone = try container.decode(TimeZone.self, forKey: .timeZone)
         weekStartsOn = try container.decode(Weekday.self, forKey: .weekStartsOn)
         mainSport = try container.decodeIfPresent(Sport.self, forKey: .mainSport) ?? .running
         heartRateZoneHistory = try container.decode([HeartRateZoneSettings].self, forKey: .heartRateZoneHistory)
         dateOfBirth = try container.decodeIfPresent(Date.self, forKey: .dateOfBirth)
+        usesHealthKitRestingHeartRate = try container.decodeIfPresent(Bool.self, forKey: .usesHealthKitRestingHeartRate) ?? true
+    }
+
+    /// Encodes the full ``paceHistory`` and also the current ``paceModel`` under its old key, so a
+    /// reader from before the history existed still finds a pace model.
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(name, forKey: .name)
+        try container.encode(sex, forKey: .sex)
+        try container.encode(paceModel, forKey: .paceModel)
+        try container.encode(paceHistory, forKey: .paceHistory)
+        try container.encode(timeZone, forKey: .timeZone)
+        try container.encode(weekStartsOn, forKey: .weekStartsOn)
+        try container.encode(mainSport, forKey: .mainSport)
+        try container.encode(heartRateZoneHistory, forKey: .heartRateZoneHistory)
+        try container.encodeIfPresent(dateOfBirth, forKey: .dateOfBirth)
+        try container.encode(usesHealthKitRestingHeartRate, forKey: .usesHealthKitRestingHeartRate)
+    }
+
+    /// The ``PaceModel`` in effect on `date`: the latest ``paceHistory`` entry whose effective date is
+    /// on or before it, or the earliest entry when `date` predates them all, like
+    /// ``heartRateZoneSettings(asOf:)``.
+    ///
+    /// - Parameter date: The date to look up.
+    public func paceModel(asOf date: Date) -> PaceModel {
+        let sorted = paceHistory.sorted { $0.effectiveDate < $1.effectiveDate }
+        return (sorted.last { $0.effectiveDate <= date } ?? sorted.first)?.paceModel ?? paceModel
     }
 
     /// The athlete's age in whole years on `today`, or `nil` when ``dateOfBirth`` is unknown.

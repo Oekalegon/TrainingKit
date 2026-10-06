@@ -366,6 +366,21 @@ struct SwiftDataStoreTests {
         #expect(fetched == profile)
     }
 
+    @Test("AthleteStore keeps the pace history and the HealthKit resting-HR switch (MVP2-132)")
+    func athleteStoreKeepsPaceHistoryAndSwitch() async throws {
+        let store = try makeStore()
+        var profile = AthleteProfile.fixture()
+            .recordingPaceModel(PaceModel(thresholdPaceSecondsPerKilometer: 280), from: Date(timeIntervalSince1970: 1_700_000_000))
+        profile.usesHealthKitRestingHeartRate = false
+        try await store.save(profile)
+
+        let fetched = try #require(await store.athleteProfile())
+
+        #expect(fetched == profile)
+        #expect(fetched.paceHistory.count == 2)
+        #expect(!fetched.usesHealthKitRestingHeartRate)
+    }
+
     @Test("AthleteStore profile and import anchor are independent: saving one doesn't clobber the other")
     func athleteStoreProfileAndAnchorAreIndependent() async throws {
         let store = try makeStore()

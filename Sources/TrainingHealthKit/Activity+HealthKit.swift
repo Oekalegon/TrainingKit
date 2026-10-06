@@ -16,12 +16,12 @@ extension Activity {
     ///   - heartRate: This workout's heart-rate samples, already scoped to its time range.
     ///   - existingID: The `id` of the `Activity` already stored for this workout's source, if
     ///     this is a re-import rather than the first import of it. `Activity.source` is the stable
-    ///     dedupe key across re-imports, but `ActivityStore.upsert(_:)` matches by `id` — omitting
-    ///     this (or passing `nil` when an existing activity's id could have been looked up) means a
-    ///     re-import produces a *second* row for the same workout instead of updating the first.
-    ///     Without one the activity's `id` is the workout's own uuid, so every device that imports
-    ///     the workout agrees on it and a synced plan's `completedActivityID` means the same
-    ///     activity everywhere (MVP2-134).
+    ///     dedupe key across re-imports, but `ActivityStore.upsert(_:)` matches by `id`. Without
+    ///     one the activity's `id` is the workout's own uuid, so every device that imports the
+    ///     workout agrees on it and a synced plan's `completedActivityID` means the same activity
+    ///     everywhere (MVP2-134), and a re-import updates the same row. Pass the stored id for an
+    ///     activity imported before ids were derived this way (it has a random one); passing `nil`
+    ///     there would make a *second* row for the workout.
     ///   - scheduledPlanID: The id of the `WorkoutPlan` the workout was started from, if any (see
     ///     `Activity.scheduledPlanID`); `HealthKitActivityImporter` reads it from WorkoutKit.
     public init(

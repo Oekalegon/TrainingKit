@@ -39,9 +39,15 @@ store files (`TrainingPersistenceContainer.make(...)`):
   CloudKit: **records already in iCloud (activities, the old full profile) stay there** until the
   athlete deletes the app's iCloud data (Settings, Apple Account, iCloud, Manage Storage). Nothing
   automatic can remove them safely.
-- **Known gaps:** a plan's `completedActivityID` syncs, but the activity it names exists only on the
-  device that imported it, so on a second device a completed plan can read as matched to an activity
-  that isn't there until the plan links are repaired (`TrainingModel.reconcilePlans(asOf:)`).
+- **Plan links across devices (MVP2-134):** a plan's `completedActivityID` syncs but activities
+  don't, so each device must agree on the activity's id. New HealthKit imports use the workout's
+  uuid as `Activity.id`. Activities imported earlier keep their random ids; for those, a plan held
+  by an activity this device doesn't have is freed when an imported workout names it as its
+  scheduled plan (`Activity.scheduledPlanID`, exact match only; a same-day guess never takes it)
+  and is written only once the reconciler has linked it again. `repairPlanLinks()` leaves a plan
+  alone whose holder isn't on this device, so devices never rewrite it back and forth. Remaining
+  gap: a legacy activity and a new one for the same workout can both claim a plan until the older
+  link is removed by the athlete.
 
 ---
 

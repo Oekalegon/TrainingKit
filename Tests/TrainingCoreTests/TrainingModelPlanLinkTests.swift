@@ -95,6 +95,65 @@ struct TrainingModelPlanLinkTests {
         #expect(try await store.plan(id: other.id)?.completedActivityID == other.completedActivityID)
     }
 
+    @Test("a plan held by an activity that is stored here is not freed by a hint (MVP2-134)")
+    func planHeldByKnownActivityKept() async throws {
+        let (store, model) = makeModel()
+        let w = workout(minutes: 30)
+        try await model.add(w, asOf: day(0))
+        let plan = PlannedActivity(workoutID: w.id, date: day(0))
+        try await model.add(plan, asOf: day(0))
+        let holder = Activity(source: .healthKit(UUID()), sport: .running, start: day(0), duration: 1800, linkedPlanID: plan.id)
+        try await store.upsert([holder])
+        var held = plan
+        held.completedActivityID = holder.id
+        try await store.upsert([held])
+        try await model.load(in: day(0)...day(1), asOf: day(0))
+
+        let second = Activity(
+            source: .healthKit(UUID()), sport: .running, start: day(0), duration: 1800, scheduledPlanID: plan.id
+        )
+        try await model.importActivities(from: StubImporter(activities: [second]), asOf: day(0))
+
+        #expect(try await store.plan(id: plan.id)?.completedActivityID == holder.id)
+    }
+
+    @Test("a freed plan that isn't re-linked keeps its holder in the store (MVP2-134)")
+    func freedPlanNotWrittenWithoutLink() async throws {
+        let (store, model) = makeModel()
+        let w = workout(minutes: 30)
+        try await model.add(w, asOf: day(0))
+        // The hint names the plan, but it's on another day, so the exact match can't link it.
+        let plan = PlannedActivity(workoutID: w.id, date: day(0), completedActivityID: UUID())
+        try await model.add(plan, asOf: day(0))
+        try await model.load(in: day(0)...day(1), asOf: day(0))
+
+        let activity = Activity(
+            source: .healthKit(UUID()), sport: .running, start: day(1), duration: 1800, scheduledPlanID: plan.id
+        )
+        try await model.importActivities(from: StubImporter(activities: [activity]), asOf: day(1))
+
+        #expect(try await store.plan(id: plan.id)?.completedActivityID == plan.completedActivityID)
+    }
+
+    @Test("repair leaves a plan held by another device's activity alone (MVP2-134)")
+    func repairKeepsPlanHeldElsewhere() async throws {
+        let (store, model) = makeModel()
+        let w = workout(minutes: 30)
+        try await model.add(w, asOf: day(0))
+        let elsewhere = UUID()
+        let plan = PlannedActivity(workoutID: w.id, date: day(0), completedActivityID: elsewhere)
+        try await model.add(plan, asOf: day(0))
+        // A legacy activity here also names the plan; the plan is held by an id this device lacks.
+        let legacy = Activity(source: .healthKit(UUID()), sport: .running, start: day(0), duration: 1800, linkedPlanID: plan.id)
+        try await store.upsert([legacy])
+        try await model.load(in: day(0)...day(1), asOf: day(0))
+
+        try await model.reconcilePlans(asOf: day(0))
+
+        #expect(try await store.plan(id: plan.id)?.completedActivityID == elsewhere)
+        #expect(try await store.activity(id: legacy.id)?.linkedPlanID == plan.id)
+    }
+
     @Test("re-importing an activity keeps its scheduled plan id when this run couldn't read it (MVP2-120)")
     func reimportKeepsScheduledPlanID() async throws {
         let (store, model) = makeModel()

@@ -36,6 +36,10 @@ public struct AthleteProfile: Sendable, Codable, Equatable {
     /// The athlete's date of birth, if known (MVP2-124), e.g. read from HealthKit, for showing an
     /// age. `nil` until a source has provided one. Nothing in `TrainingCore` computes with it:
     /// ``TanakaHRMaxEstimator`` takes the date as an argument.
+    ///
+    /// HealthKit gives a calendar day, which arrives here as midnight in the device's time zone at
+    /// the time of the read; ``age(asOf:)`` counts days in the athlete's ``timeZone``, so if the two
+    /// zones differ the age can be a day off on the birthday itself.
     public var dateOfBirth: Date?
 
     /// Creates an athlete profile.

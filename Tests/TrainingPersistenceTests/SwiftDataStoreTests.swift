@@ -353,6 +353,19 @@ struct SwiftDataStoreTests {
         #expect(try await store.athleteProfile() == profile)
     }
 
+    @Test("AthleteStore keeps the date of birth (MVP2-124)")
+    func athleteStoreKeepsDateOfBirth() async throws {
+        let store = try makeStore()
+        var profile = AthleteProfile.fixture()
+        profile.dateOfBirth = Date(timeIntervalSince1970: 631_152_000)
+        try await store.save(profile)
+
+        let fetched = try #require(await store.athleteProfile())
+
+        #expect(fetched.dateOfBirth == profile.dateOfBirth)
+        #expect(fetched == profile)
+    }
+
     @Test("AthleteStore profile and import anchor are independent: saving one doesn't clobber the other")
     func athleteStoreProfileAndAnchorAreIndependent() async throws {
         let store = try makeStore()

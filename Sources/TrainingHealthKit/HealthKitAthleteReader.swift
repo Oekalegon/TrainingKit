@@ -3,8 +3,8 @@ import TrainingCore
 #if canImport(HealthKit)
 import HealthKit
 
-/// Reads resting heart rate, biological sex, and (via `TanakaHRMaxEstimator`) an estimated
-/// maximum heart rate from HealthKit, to pre-fill an `AthleteProfile`.
+/// Reads resting heart rate, biological sex, date of birth and (via `TanakaHRMaxEstimator`, from that
+/// date of birth) an estimated maximum heart rate from HealthKit, to pre-fill an `AthleteProfile`.
 ///
 /// Never reads HRmax directly — HealthKit doesn't report one, so this always estimates from date
 /// of birth instead, leaving the user to override it, per the design's Tanaka-formula-with-override

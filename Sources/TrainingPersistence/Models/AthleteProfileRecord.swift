@@ -2,7 +2,11 @@ import TrainingCore
 import Foundation
 import SwiftData
 
-/// The persisted singleton row for the athlete profile and the incremental-import anchor.
+/// The persisted singleton row for the whole athlete profile and the incremental-import anchor, in
+/// the local-only store (MVP2-131): the profile carries sex, date of birth and heart-rate settings read
+/// from HealthKit, which must not sync to iCloud, and the anchor is a per-device HealthKit anchor. The
+/// part of the profile the athlete chooses, and that does sync, is also kept in
+/// ``AthletePreferencesRecord``.
 ///
 /// Both fields are optional and independent: the anchor can be saved before a profile ever is
 /// (importing activities doesn't require the profile to be set up first), and vice versa. There's

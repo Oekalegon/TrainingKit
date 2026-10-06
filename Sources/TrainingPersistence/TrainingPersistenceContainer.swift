@@ -3,30 +3,52 @@ import SwiftData
 
 /// Builds the `ModelContainer` covering every model type `TrainingPersistence` persists.
 public enum TrainingPersistenceContainer {
-    /// Every model type this package persists, for building a `Schema`/`ModelContainer` that
-    /// includes all of them together — they share one container since ``SwiftDataStore`` is one
-    /// actor over all five store protocols.
-    public static var modelTypes: [any PersistentModel.Type] {
+    /// The models that sync through CloudKit (MVP2-131): what the athlete plans and chooses, none of
+    /// it health information.
+    public static var syncedModelTypes: [any PersistentModel.Type] {
         [
-            ActivityRecord.self,
-            DeletedActivitySourceRecord.self,
-            ActivityJoinRecord.self,
             PlannedActivityRecord.self,
             StructuredWorkoutRecord.self,
             TrainingCycleRecord.self,
             RaceRecord.self,
+            AthletePreferencesRecord.self,
+        ]
+    }
+
+    /// The models that stay on the device (MVP2-131): everything read from or derived from HealthKit,
+    /// since Apple's guideline 5.1.3(ii) forbids storing health information in iCloud. Activities
+    /// carry heart-rate samples; the profile carries sex, date of birth and heart-rate settings; the
+    /// fitness metrics are computed from both.
+    public static var localModelTypes: [any PersistentModel.Type] {
+        [
+            ActivityRecord.self,
+            DeletedActivitySourceRecord.self,
+            ActivityJoinRecord.self,
             AthleteProfileRecord.self,
             FitnessMetricsRecord.self,
             FitnessMetricsCacheStateRecord.self,
         ]
     }
 
-    /// Builds a `ModelContainer` covering every model type this package persists.
+    /// Every model type this package persists, for building a `Schema`/`ModelContainer` that
+    /// includes all of them together — they share one container since ``SwiftDataStore`` is one
+    /// actor over all the store protocols. ``syncedModelTypes`` and ``localModelTypes`` partition it.
+    public static var modelTypes: [any PersistentModel.Type] {
+        syncedModelTypes + localModelTypes
+    }
+
+    /// Builds the `ModelContainer` covering every model type this package persists, as two stores
+    /// (MVP2-131): ``syncedModelTypes`` in a CloudKit-synced one, ``localModelTypes`` in a local-only
+    /// one. They share the container, so ``SwiftDataStore`` and its one context see both.
+    ///
+    /// The first launch on a store written before the split moves its local-only data across (see
+    /// `LegacyStoreMigration`).
     ///
     /// - Parameters:
-    ///   - cloudKitDatabase: Defaults to `.automatic`, syncing via the app's default CloudKit
-    ///     container (set up via the app target's own iCloud entitlement — this package has no
-    ///     opinion on which container). Pass `.none` for a local-only store. Container creation
+    ///   - cloudKitDatabase: What the *synced* store uses; the local-only store never syncs. Defaults to
+    ///     `.automatic`, syncing via the app's default CloudKit container (set up via the app
+    ///     target's own iCloud entitlement — this package has no opinion on which container). Pass
+    ///     `.none` for a fully local container. Container creation
     ///     succeeds either way even without the entitlement in place — SwiftData doesn't validate
     ///     CloudKit connectivity synchronously at init, only once it actually attempts to sync — so
     ///     a missing entitlement shows up later as silent/logged sync failures, not as a thrown
@@ -43,22 +65,52 @@ public enum TrainingPersistenceContainer {
     ///     forwards it to Core Data's internal handler.
     ///   - isStoredInMemoryOnly: `true` for a throwaway container (tests, previews) that never
     ///     touches disk; defaults to `false`.
+    ///   - storeDirectory: Where the two store files live; defaults to the app's Application Support
+    ///     directory, where SwiftData puts its default store. Ignored when `isStoredInMemoryOnly`.
     /// - Returns: A `ModelContainer` ready to build a ``SwiftDataStore`` from.
     /// - Throws: Whatever `ModelContainer.init(for:configurations:)` throws — most commonly a
-    ///   schema mismatch against an existing on-disk store.
+    ///   schema mismatch against an existing on-disk store — or what migrating an old store throws.
     public static func make(
         cloudKitDatabase: ModelConfiguration.CloudKitDatabase = .automatic,
-        isStoredInMemoryOnly: Bool = false
+        isStoredInMemoryOnly: Bool = false,
+        storeDirectory: URL? = nil
     ) throws -> ModelContainer {
-        let schema = Schema(modelTypes)
-        let configuration = ModelConfiguration(
-            schema: schema,
-            isStoredInMemoryOnly: isStoredInMemoryOnly,
-            cloudKitDatabase: cloudKitDatabase
+        let directory = storeDirectory ?? URL.applicationSupportDirectory
+        if !isStoredInMemoryOnly {
+            try LegacyStoreMigration.copyLocalDataIfNeeded(in: directory)
+        }
+        let container = try makeSplitContainer(
+            cloudKitDatabase: cloudKitDatabase, isStoredInMemoryOnly: isStoredInMemoryOnly, directory: directory
         )
-        let container = try ModelContainer(for: schema, configurations: [configuration])
+        if !isStoredInMemoryOnly {
+            try LegacyStoreMigration.finish(in: container, directory: directory)
+        }
         try backfillActivityStartIfNeeded(in: container)
         return container
+    }
+
+    /// The two-store container itself, without migrating anything: the step ``make(cloudKitDatabase:isStoredInMemoryOnly:storeDirectory:)``
+    /// takes between copying an old store's local data and finishing the migration.
+    static func makeSplitContainer(
+        cloudKitDatabase: ModelConfiguration.CloudKitDatabase, isStoredInMemoryOnly: Bool, directory: URL
+    ) throws -> ModelContainer {
+        let syncedSchema = Schema(syncedModelTypes)
+        let localSchema = Schema(localModelTypes)
+        // The synced store keeps the name and file of the single store this package used to make, so
+        // its CloudKit mirror carries on unchanged.
+        let synced = isStoredInMemoryOnly
+            ? ModelConfiguration("default", schema: syncedSchema, isStoredInMemoryOnly: true, cloudKitDatabase: cloudKitDatabase)
+            : ModelConfiguration(
+                "default", schema: syncedSchema, url: LegacyStoreMigration.syncedStoreURL(in: directory),
+                cloudKitDatabase: cloudKitDatabase
+            )
+        let local = isStoredInMemoryOnly
+            ? ModelConfiguration("Local", schema: localSchema, isStoredInMemoryOnly: true, cloudKitDatabase: .none)
+            : ModelConfiguration(
+                "Local", schema: localSchema, url: LegacyStoreMigration.localStoreURL(in: directory),
+                cloudKitDatabase: .none
+            )
+        return try ModelContainer(for: Schema(modelTypes), configurations: [synced, local])
     }
 
     /// One-time repair for `ActivityRecord` rows that predate its `start` column.

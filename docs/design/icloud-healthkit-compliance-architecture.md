@@ -11,6 +11,40 @@ Implement a **Dual-Database Split Architecture** using SwiftData (or CoreData). 
 
 ---
 
+## Implementation status (MVP2-131)
+
+Implemented in `TrainingPersistence` as **one `ModelContainer` with two `ModelConfiguration`s**, not two
+containers, so `SwiftDataStore` and its single context still see everything while the data lands in two
+store files (`TrainingPersistenceContainer.make(...)`):
+
+| Store | File | CloudKit | Models |
+|---|---|---|---|
+| Synced ("default") | `default.store` | `.automatic` (the app's iCloud container) | `PlannedActivityRecord`, `StructuredWorkoutRecord`, `TrainingCycleRecord`, `RaceRecord`, `AthletePreferencesRecord` |
+| Local ("Local") | `Local.store` | none | `ActivityRecord` (with its heart-rate samples), `DeletedActivitySourceRecord`, `ActivityJoinRecord`, `AthleteProfileRecord`, `FitnessMetricsRecord`, `FitnessMetricsCacheStateRecord` |
+
+- **The athlete profile is split.** `AthleteProfileRecord` (local) holds the whole profile and the
+  HealthKit import anchor. `AthletePreferencesRecord` (synced) holds only what the athlete types or
+  chooses: name, picture, time zone, week start, main sport, the pace history and the HealthKit
+  resting-heart-rate switch. Sex, date of birth and the heart-rate settings never sync.
+  `SwiftDataStore.athleteProfile()` merges the two, the synced preferences winning, so a preference
+  edited on another device shows up; `save(_:)` writes both. The import anchor is local because it is a
+  per-device HealthKit anchor: a synced anchor would make a second device skip workouts it never
+  imported.
+- **Other devices import from their own Health**, as section 3 describes. A device without HealthKit
+  data (a Mac without iCloud Health sync) therefore shows plans and preferences but no activities.
+- **Migration.** The synced store keeps the old single store's file, so its CloudKit mirror carries on.
+  On the first launch after the split, `LegacyStoreMigration` copies the activities, tombstones,
+  joins and profile out of the old file (opened without CloudKit, and only read) into `Local.store`,
+  then the split container stops using the local-only tables in `default.store` (SwiftData may leave their rows in the file). Before that, the old file is copied to `default.store.pre-split` (with its `-wal` and `-shm` siblings) as a backup the athlete can delete later. None of this deletes anything in
+  CloudKit: **records already in iCloud (activities, the old full profile) stay there** until the
+  athlete deletes the app's iCloud data (Settings, Apple Account, iCloud, Manage Storage). Nothing
+  automatic can remove them safely.
+- **Known gaps:** a plan's `completedActivityID` syncs, but the activity it names exists only on the
+  device that imported it, so on a second device a completed plan can read as matched to an activity
+  that isn't there until the plan links are repaired (`TrainingModel.reconcilePlans(asOf:)`).
+
+---
+
 ## 2. The Dual-Database Split Architecture
 
 The app will run two distinct database containers locally. They operate independently to achieve zero backend cloud liability while keeping the interface completely responsive.

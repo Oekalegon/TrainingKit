@@ -209,4 +209,103 @@ struct PlanReconcilerTests {
             #expect(linked[near40.id] == plans[1].id)
         }
     }
+
+    // MARK: Exact match by scheduled plan id (MVP2-120)
+
+    /// Two same-day running plans, 20 and 50 minutes: the heuristic would give a 45-minute activity the
+    /// 50-minute one.
+    private func shortAndLongPlans() -> (workouts: [StructuredWorkout], short: PlannedActivity, long: PlannedActivity) {
+        let shortID = UUID()
+        let longID = UUID()
+        return (
+            [workout(id: shortID, sport: .running, minutes: 20), workout(id: longID, sport: .running, minutes: 50)],
+            PlannedActivity(workoutID: shortID, date: day(0)),
+            PlannedActivity(workoutID: longID, date: day(0))
+        )
+    }
+
+    @Test("an activity started from a plan links to exactly that plan, ahead of the heuristic")
+    func scheduledPlanIDWinsOverHeuristic() {
+        let (workouts, short, long) = shortAndLongPlans()
+        let activity = Activity(
+            source: .manual, sport: .running, start: day(0), duration: 45 * 60, scheduledPlanID: short.id
+        )
+
+        let result = reconciler.reconcile(activities: [activity], plans: [short, long], workouts: workouts, athlete: athlete)
+
+        #expect(result.activities[0].linkedPlanID == short.id)
+        #expect(result.plans.first { $0.id == short.id }?.completedActivityID == activity.id)
+        #expect(result.plans.first { $0.id == long.id }?.completedActivityID == nil)
+        // An exact match has no runner-up to flag.
+        #expect(result.ambiguities.isEmpty)
+    }
+
+    @Test("an exact match claims its plan before another activity's heuristic can take it")
+    func scheduledPlanIDClaimsBeforeHeuristic() {
+        let (workouts, short, long) = shortAndLongPlans()
+        // The first activity fits the long plan best by duration, but the second was started from it.
+        let heuristic = Activity(source: .manual, sport: .running, start: day(0), duration: 50 * 60)
+        let started = Activity(
+            source: .manual, sport: .running, start: day(0), duration: 25 * 60, scheduledPlanID: long.id
+        )
+
+        let result = reconciler.reconcile(
+            activities: [heuristic, started], plans: [short, long], workouts: workouts, athlete: athlete
+        )
+
+        #expect(result.activities.first { $0.id == started.id }?.linkedPlanID == long.id)
+        #expect(result.activities.first { $0.id == heuristic.id }?.linkedPlanID == short.id)
+    }
+
+    @Test("a scheduled plan id for another day or a missing plan falls back to the heuristic")
+    func unusableScheduledPlanIDFallsBack() {
+        let (workouts, short, long) = shortAndLongPlans()
+        let otherDay = PlannedActivity(workoutID: long.workoutID, date: day(3))
+
+        let otherDayResult = reconciler.reconcile(
+            activities: [Activity(source: .manual, sport: .running, start: day(0), duration: 45 * 60, scheduledPlanID: otherDay.id)],
+            plans: [otherDay, short], workouts: workouts, athlete: athlete
+        )
+        // Never across days: the same-day plan is chosen instead.
+        #expect(otherDayResult.activities[0].linkedPlanID == short.id)
+
+        let missingResult = reconciler.reconcile(
+            activities: [Activity(source: .manual, sport: .running, start: day(0), duration: 45 * 60, scheduledPlanID: UUID())],
+            plans: [short, long], workouts: workouts, athlete: athlete
+        )
+        #expect(missingResult.activities[0].linkedPlanID == long.id)
+    }
+
+    @Test("a second activity naming an already-taken plan stays unlinked instead of guessing another plan")
+    func takenScheduledPlanLeavesActivityUnlinked() {
+        let (workouts, short, long) = shortAndLongPlans()
+        // A workout paused and saved as two pieces, both carrying the plan's id. Passed latest first, to
+        // show the earliest piece wins whatever the array order.
+        let later = Activity(
+            source: .manual, sport: .running, start: day(0).addingTimeInterval(3600), duration: 600,
+            scheduledPlanID: short.id
+        )
+        let earlier = Activity(source: .manual, sport: .running, start: day(0), duration: 1200, scheduledPlanID: short.id)
+
+        let result = reconciler.reconcile(
+            activities: [later, earlier], plans: [short, long], workouts: workouts, athlete: athlete
+        )
+
+        #expect(result.activities.first { $0.id == earlier.id }?.linkedPlanID == short.id)
+        #expect(result.activities.first { $0.id == later.id }?.linkedPlanID == nil)
+        #expect(result.plans.first { $0.id == long.id }?.completedActivityID == nil)
+    }
+
+    @Test("an activity that is already linked keeps its link, whatever its scheduled plan id says")
+    func alreadyLinkedActivityKeepsItsLink() {
+        let (workouts, short, long) = shortAndLongPlans()
+        let activity = Activity(
+            source: .manual, sport: .running, start: day(0), duration: 45 * 60,
+            linkedPlanID: long.id, scheduledPlanID: short.id
+        )
+
+        let result = reconciler.reconcile(activities: [activity], plans: [short, long], workouts: workouts, athlete: athlete)
+
+        #expect(result.activities[0].linkedPlanID == long.id)
+    }
 }

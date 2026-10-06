@@ -86,6 +86,16 @@ struct HealthKitMappingTests {
         #expect(activity.perceivedExertion == nil)
     }
 
+    @Test("the scheduled plan id the importer read is carried onto the activity (MVP2-120)")
+    func activityMappingCarriesScheduledPlanID() {
+        let start = Date(timeIntervalSince1970: 1_700_000_000)
+        let workout = HKWorkout(activityType: .running, start: start, end: start.addingTimeInterval(1800))
+        let planID = UUID()
+
+        #expect(Activity(healthKitWorkout: workout, heartRate: [], scheduledPlanID: planID).scheduledPlanID == planID)
+        #expect(Activity(healthKitWorkout: workout, heartRate: []).scheduledPlanID == nil)
+    }
+
     @Test("a workout with no distance maps to a nil distanceMeters, not 0")
     func activityMappingNoDistance() {
         let start = Date(timeIntervalSince1970: 1_700_000_000)

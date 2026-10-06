@@ -3,6 +3,7 @@ import Foundation
 
 #if canImport(HealthKit)
 import HealthKit
+import WorkoutKit
 
 /// Imports completed workouts and their heart-rate samples from HealthKit.
 ///
@@ -87,15 +88,37 @@ public struct HealthKitActivityImporter: ActivityImporting {
         let activities = try await mapBounded(result.addedSamples, maxConcurrent: maxConcurrentWorkouts) { workout in
             async let heartRateTask = self.heartRateOrEmpty(for: workout)
             async let existingIDTask = self.activityStore?.activity(source: .healthKit(workout.uuid))?.id
+            async let scheduledPlanIDTask = self.scheduledPlanID(for: workout)
             let heartRate = await heartRateTask
+            let scheduledPlanID = await scheduledPlanIDTask
             let existingID = try await existingIDTask
-            return Activity(healthKitWorkout: workout, heartRate: heartRate, existingID: existingID)
+            return Activity(
+                healthKitWorkout: workout, heartRate: heartRate, existingID: existingID,
+                scheduledPlanID: scheduledPlanID
+            )
         }
 
         let deletedSources = result.deletedObjects.map { ActivitySource.healthKit($0.uuid) }
         let newAnchor = try Self.encode(result.newAnchor)
 
         return ImportResult(upserted: activities, deletedSources: deletedSources, anchor: newAnchor)
+    }
+
+    /// The id of the scheduled `WorkoutPlan` `workout` was started from (MVP2-120), or `nil` for a
+    /// workout that wasn't started from one. With per-plan ids (`WorkoutKitBridge`) that id is the
+    /// `PlannedActivity`'s own.
+    ///
+    /// A failed lookup is caught and logged, like ``heartRateOrEmpty(for:)``: the workout is still
+    /// imported, just matched to its plan by the same-day heuristic instead.
+    private func scheduledPlanID(for workout: HKWorkout) async -> UUID? {
+        do {
+            return try await workout.workoutPlan?.id
+        } catch {
+            Logging.importer.error(
+                "workoutPlan lookup failed for workout \(workout.uuid, privacy: .public): \(String(describing: error), privacy: .public); matching it to a plan by day and sport instead"
+            )
+            return nil
+        }
     }
 
     /// Like ``heartRateSamples(for:)``, but a failed query is caught and logged rather than thrown,

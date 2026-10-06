@@ -127,6 +127,8 @@ extension TrainingModel {
         for index in toUpsert.indices {
             if let existing = existingByID[toUpsert[index].id] {
                 if toUpsert[index].linkedPlanID == nil { toUpsert[index].linkedPlanID = existing.linkedPlanID }
+                // Likewise the hint, in case this run's WorkoutKit lookup failed.
+                if toUpsert[index].scheduledPlanID == nil { toUpsert[index].scheduledPlanID = existing.scheduledPlanID }
             } else {
                 newActivities.append(toUpsert[index])
             }

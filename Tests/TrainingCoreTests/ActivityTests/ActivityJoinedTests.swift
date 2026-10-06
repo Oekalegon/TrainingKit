@@ -6,6 +6,33 @@ import Testing
 struct ActivityJoinedTests {
     private let t0 = Date(timeIntervalSince1970: 1_700_000_000)
 
+    @Test("A joined activity keeps the scheduled plan id of whichever piece has one (MVP2-120)")
+    func keepsScheduledPlanID() {
+        let planID = UUID()
+        let first = Activity(source: .healthKit(UUID()), sport: .running, start: t0, duration: 343)
+        let second = Activity(
+            source: .healthKit(UUID()), sport: .running, start: t0.addingTimeInterval(360), duration: 600,
+            scheduledPlanID: planID
+        )
+
+        #expect(Activity.joined(first, second).scheduledPlanID == planID)
+    }
+
+    @Test("An activity stored before scheduledPlanID existed still decodes, with none (MVP2-120)")
+    func decodesWithoutScheduledPlanID() throws {
+        let activity = Activity(source: .manual, sport: .running, start: t0, duration: 100, scheduledPlanID: UUID())
+        let encoded = try JSONEncoder().encode(activity)
+        var object = try #require(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        object.removeValue(forKey: "scheduledPlanID")
+        let legacy = try JSONSerialization.data(withJSONObject: object)
+
+        let decoded = try JSONDecoder().decode(Activity.self, from: legacy)
+
+        #expect(decoded.scheduledPlanID == nil)
+        #expect(decoded.id == activity.id)
+        #expect(try JSONDecoder().decode(Activity.self, from: encoded).scheduledPlanID == activity.scheduledPlanID)
+    }
+
     @Test("Combines span, distance, and sample streams in time order")
     func combines() {
         let planID = UUID()

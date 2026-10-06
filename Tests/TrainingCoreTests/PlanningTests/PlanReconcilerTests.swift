@@ -257,12 +257,10 @@ struct PlanReconcilerTests {
         #expect(result.activities.first { $0.id == heuristic.id }?.linkedPlanID == short.id)
     }
 
-    @Test("a scheduled plan id for another day, a missing plan or a matched plan falls back to the heuristic")
+    @Test("a scheduled plan id for another day or a missing plan falls back to the heuristic")
     func unusableScheduledPlanIDFallsBack() {
         let (workouts, short, long) = shortAndLongPlans()
         let otherDay = PlannedActivity(workoutID: long.workoutID, date: day(3))
-        var matched = short
-        matched.completedActivityID = UUID()
 
         let otherDayResult = reconciler.reconcile(
             activities: [Activity(source: .manual, sport: .running, start: day(0), duration: 45 * 60, scheduledPlanID: otherDay.id)],
@@ -276,12 +274,26 @@ struct PlanReconcilerTests {
             plans: [short, long], workouts: workouts, athlete: athlete
         )
         #expect(missingResult.activities[0].linkedPlanID == long.id)
+    }
 
-        let matchedResult = reconciler.reconcile(
-            activities: [Activity(source: .manual, sport: .running, start: day(0), duration: 45 * 60, scheduledPlanID: matched.id)],
-            plans: [matched, long], workouts: workouts, athlete: athlete
+    @Test("a second activity naming an already-taken plan stays unlinked instead of guessing another plan")
+    func takenScheduledPlanLeavesActivityUnlinked() {
+        let (workouts, short, long) = shortAndLongPlans()
+        // A workout paused and saved as two pieces, both carrying the plan's id. Passed latest first, to
+        // show the earliest piece wins whatever the array order.
+        let later = Activity(
+            source: .manual, sport: .running, start: day(0).addingTimeInterval(3600), duration: 600,
+            scheduledPlanID: short.id
         )
-        #expect(matchedResult.activities[0].linkedPlanID == long.id)
+        let earlier = Activity(source: .manual, sport: .running, start: day(0), duration: 1200, scheduledPlanID: short.id)
+
+        let result = reconciler.reconcile(
+            activities: [later, earlier], plans: [short, long], workouts: workouts, athlete: athlete
+        )
+
+        #expect(result.activities.first { $0.id == earlier.id }?.linkedPlanID == short.id)
+        #expect(result.activities.first { $0.id == later.id }?.linkedPlanID == nil)
+        #expect(result.plans.first { $0.id == long.id }?.completedActivityID == nil)
     }
 
     @Test("an activity that is already linked keeps its link, whatever its scheduled plan id says")

@@ -74,6 +74,22 @@ struct TrainingModelPlanLinkTests {
         #expect(model.planMatchAmbiguities.isEmpty)
     }
 
+    @Test("re-importing an activity keeps its scheduled plan id when this run couldn't read it (MVP2-120)")
+    func reimportKeepsScheduledPlanID() async throws {
+        let (store, model) = makeModel()
+        let planID = UUID()
+        let first = Activity(
+            source: .healthKit(UUID()), sport: .running, start: day(0), duration: 1800, scheduledPlanID: planID
+        )
+        try await model.importActivities(from: StubImporter(activities: [first]), asOf: day(0))
+
+        var again = first
+        again.scheduledPlanID = nil
+        try await model.importActivities(from: StubImporter(activities: [again]), asOf: day(0))
+
+        #expect(try await store.activity(id: first.id)?.scheduledPlanID == planID)
+    }
+
     @Test("import matches a plan even before any load(in:) has populated the model")
     func importLinksBeforeAnyLoad() async throws {
         let (store, model) = makeModel()

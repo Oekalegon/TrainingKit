@@ -43,7 +43,10 @@ public struct PlanReconciler: Sendable {
     ///
     /// An activity that names the plan it was started from (``Activity/scheduledPlanID``, the id of the
     /// Watch workout) is matched to that plan first, exactly and without ambiguity, provided the plan
-    /// is unmatched and on the activity's day; the heuristic below then sees only what's left.
+    /// is unmatched and on the activity's day (earliest activity first); the heuristic below then sees
+    /// only what's left. A hint whose plan exists on that day but is already taken (say the second
+    /// piece of a paused workout) leaves its activity unlinked rather than guessing another plan; a
+    /// hint for a missing plan or another day falls through to the heuristic.
     ///
     /// A near-tie is still linked to the closest plan (the best guess) but is also reported in
     /// ``PlanReconciliation/ambiguities``, never silently resolved.
@@ -74,22 +77,31 @@ public struct PlanReconciler: Sendable {
         var plans = plans
 
         // Exact matches first: the athlete started this very plan, so there's nothing to guess. Same
-        // day only, like every other link; a hint for another day (or a deleted or already-matched
-        // plan) falls through to the heuristic like any other activity.
-        for activityIndex in activities.indices where activities[activityIndex].linkedPlanID == nil {
+        // day only, like every other link, and earliest activity first so the outcome doesn't depend
+        // on the order the importer returned them in. A hint for another day or a plan that no
+        // longer exists falls through to the heuristic like any other activity; one whose plan is on
+        // the day but already taken (another piece of the same workout) is left unlinked, since
+        // guessing a different plan is exactly what the hint rules out.
+        var heldBack = Set<Int>()
+        for activityIndex in activities.indices.sorted(by: { activities[$0].start < activities[$1].start })
+        where activities[activityIndex].linkedPlanID == nil {
             guard let scheduledID = activities[activityIndex].scheduledPlanID,
-                  let planIndex = plans.firstIndex(where: { $0.id == scheduledID && $0.completedActivityID == nil }),
+                  let planIndex = plans.firstIndex(where: { $0.id == scheduledID }),
                   calendar.isDate(plans[planIndex].date, inSameDayAs: activities[activityIndex].start)
             else { continue }
-            activities[activityIndex].linkedPlanID = scheduledID
-            plans[planIndex].completedActivityID = activities[activityIndex].id
+            if plans[planIndex].completedActivityID == nil {
+                activities[activityIndex].linkedPlanID = scheduledID
+                plans[planIndex].completedActivityID = activities[activityIndex].id
+            } else {
+                heldBack.insert(activityIndex)
+            }
         }
 
         // Every viable (activity, plan) pair with its mismatch score. Plans are only ever candidates
         // for activities on their own day (and sport), so a link never crosses days.
         var candidatesByActivity: [Int: [(plan: Int, score: Double)]] = [:]
         for activityIndex in activities.indices {
-            guard activities[activityIndex].linkedPlanID == nil else { continue }
+            guard activities[activityIndex].linkedPlanID == nil, !heldBack.contains(activityIndex) else { continue }
             let activity = activities[activityIndex]
             let activityDay = calendar.startOfDay(for: activity.start)
 

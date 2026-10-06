@@ -20,7 +20,7 @@ extension Activity {
     ///     this (or passing `nil` when an existing activity's id could have been looked up) means a
     ///     re-import produces a *second* row for the same workout instead of updating the first.
     ///   - scheduledPlanID: The id of the `WorkoutPlan` the workout was started from, if any (see
-    ///     ``Activity/scheduledPlanID``); `HealthKitActivityImporter` reads it from WorkoutKit.
+    ///     `Activity.scheduledPlanID`); `HealthKitActivityImporter` reads it from WorkoutKit.
     public init(
         healthKitWorkout workout: HKWorkout,
         heartRate: [HeartRateSample],

@@ -181,7 +181,7 @@ eligible set but leaves its entry in place, marked complete.
 Item 1 touches `TrainingHealthKit` (the importer reads the plan id and carries it on
 `Activity.scheduledPlanID`) and `PlanReconciler`. Done as MVP2-120, a separate ticket from the
 scheduler: the reconciler matches on the id first, same day only, and falls back to the heuristic
-when the plan is gone, already matched or on another day.
+when the plan is gone or on another day. An activity whose plan is already taken stays unlinked.
 
 ### 4.5 Testing
 

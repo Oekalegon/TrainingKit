@@ -106,7 +106,7 @@ public struct HealthKitActivityImporter: ActivityImporting {
 
     /// The id of the scheduled `WorkoutPlan` `workout` was started from (MVP2-120), or `nil` for a
     /// workout that wasn't started from one. With per-plan ids (`WorkoutKitBridge`) that id is the
-    /// ``PlannedActivity``'s own.
+    /// `PlannedActivity`'s own.
     ///
     /// A failed lookup is caught and logged, like ``heartRateOrEmpty(for:)``: the workout is still
     /// imported, just matched to its plan by the same-day heuristic instead.

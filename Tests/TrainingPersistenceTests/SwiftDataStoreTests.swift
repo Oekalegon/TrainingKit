@@ -31,6 +31,34 @@ struct SwiftDataStoreTests {
         #expect(try await store.activity(id: outOfRange.id) == outOfRange)
     }
 
+    @Test("ActivityStore activityListItems matches activities(in:) without the samples, joins included (MVP2-129)")
+    func activityStoreSummaries() async throws {
+        let store = try makeStore()
+        let planID = UUID()
+        let hr = (0..<50).map { HeartRateSample(time: day(0).addingTimeInterval(Double($0)), bpm: 140) }
+        let run = Activity(
+            source: .manual, sport: .running, start: day(1), duration: 1800, distanceMeters: 5000,
+            heartRate: hr, linkedPlanID: planID
+        )
+        let first = Activity(source: .healthKit(UUID()), sport: .cycling, start: day(2), duration: 900)
+        let second = Activity(source: .healthKit(UUID()), sport: .cycling, start: day(2).addingTimeInterval(1000), duration: 900)
+        let outOfRange = Activity(source: .manual, sport: .running, start: day(50), duration: 600)
+        try await store.upsert([run, first, second, outOfRange])
+        let joined = try #require(Activity.joined([first, second]))
+        try await store.saveJoin(joined, components: [first.id, second.id], replacing: [])
+
+        let summaries = try await store.activityListItems(in: day(0)...day(10))
+        let full = try await store.activities(in: day(0)...day(10))
+
+        #expect(Set(summaries) == Set(full.map(ActivityListItem.init)))
+        #expect(summaries.count == 2)
+        let runSummary = try #require(summaries.first { $0.id == run.id })
+        #expect(runSummary.distanceMeters == 5000)
+        #expect(runSummary.linkedPlanID == planID)
+        #expect(runSummary.sport == .running)
+        #expect(summaries.contains { $0.id == joined.id })
+    }
+
     @Test("ActivityStore activities(ids:) returns the stored ones keyed by id, skipping unknown ids")
     func activityStoreBatchLookup() async throws {
         let store = try makeStore()

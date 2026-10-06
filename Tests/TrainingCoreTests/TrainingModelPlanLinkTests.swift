@@ -48,6 +48,32 @@ struct TrainingModelPlanLinkTests {
         #expect(model.plans.first?.completedActivityID == activity.id)
     }
 
+    @Test("import links an activity to the plan it was started from, not the closest one by duration (MVP2-120)")
+    func importLinksByScheduledPlanID() async throws {
+        let (store, model) = makeModel()
+        let short = workout(minutes: 20)
+        let long = workout(minutes: 50)
+        try await model.add(short, asOf: day(0))
+        try await model.add(long, asOf: day(0))
+        let shortPlan = PlannedActivity(workoutID: short.id, date: day(0))
+        let longPlan = PlannedActivity(workoutID: long.id, date: day(0))
+        try await model.add(shortPlan, asOf: day(0))
+        try await model.add(longPlan, asOf: day(0))
+        try await model.load(in: day(0)...day(1), asOf: day(0))
+
+        // 45 minutes fits the long plan best, but the Watch says it was the short one.
+        let activity = Activity(
+            source: .healthKit(UUID()), sport: .running, start: day(0), duration: 45 * 60,
+            scheduledPlanID: shortPlan.id
+        )
+        try await model.importActivities(from: StubImporter(activities: [activity]), asOf: day(0))
+
+        #expect(model.activities.first?.linkedPlanID == shortPlan.id)
+        #expect(try await store.plan(id: shortPlan.id)?.completedActivityID == activity.id)
+        #expect(try await store.plan(id: longPlan.id)?.completedActivityID == nil)
+        #expect(model.planMatchAmbiguities.isEmpty)
+    }
+
     @Test("import matches a plan even before any load(in:) has populated the model")
     func importLinksBeforeAnyLoad() async throws {
         let (store, model) = makeModel()

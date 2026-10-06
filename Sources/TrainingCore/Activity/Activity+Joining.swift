@@ -97,7 +97,8 @@ extension Activity {
             cadence: cadence,
             geographicBounds: bounds,
             perceivedExertion: exertion,
-            linkedPlanID: first.linkedPlanID ?? second.linkedPlanID
+            linkedPlanID: first.linkedPlanID ?? second.linkedPlanID,
+            scheduledPlanID: first.scheduledPlanID ?? second.scheduledPlanID
         )
     }
 

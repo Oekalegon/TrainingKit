@@ -168,6 +168,7 @@ struct Activity: Identifiable, Sendable, Codable {
     var distanceMeters: Double?
     var heartRate: [HeartRateSample]  // may be empty
     var linkedPlanID: UUID?           // reconciliation with a PlannedActivity
+    var scheduledPlanID: UUID?        // the plan the Watch workout was started from (hint; MVP2-120)
 }
 
 struct HeartRateSample: Sendable, Codable {
@@ -425,7 +426,7 @@ struct WorkoutKitBridge {
 
 ### 5.3 Reconciliation (`TrainingCore`)
 
-`PlanReconciler` links a completed `Activity` to a `PlannedActivity` on the same day with the same sport. With several candidates the best fit wins, judged on what the plan explicitly sets (total duration if every step has a time goal, distance if every step has a distance goal); an estimated duration is only a fallback. Assignment is best-pair-first across all activities of a day, and a close runner-up is flagged (`PlanMatchAmbiguity`) rather than silently resolved. Only newly imported activities are auto-matched, so a manual unlink sticks; a manual link (`TrainingModel.linkActivity`) is also same-day only. Sets `PlannedActivity.completedActivityID` and `Activity.linkedPlanID`. In MVP 1 this only affects the merge rule (today's actual beats today's estimate); in MVP 4 the `(expected, actual)` pairs it produces are the training data for calibration.
+`PlanReconciler` links a completed `Activity` to a `PlannedActivity` on the same day with the same sport. An activity that names the plan it was started from (`scheduledPlanID`, read by the HealthKit importer from `HKWorkout.workoutPlan`, whose id is the plan's own) is matched to that plan first, exactly and without an ambiguity flag, when the plan is unmatched and on the activity's day (MVP2-120); a hint that can't be used falls through to the heuristic. With several candidates the best fit wins, judged on what the plan explicitly sets (total duration if every step has a time goal, distance if every step has a distance goal); an estimated duration is only a fallback. Assignment is best-pair-first across all activities of a day, and a close runner-up is flagged (`PlanMatchAmbiguity`) rather than silently resolved. Only newly imported activities are auto-matched, so a manual unlink sticks; a manual link (`TrainingModel.linkActivity`) is also same-day only. Sets `PlannedActivity.completedActivityID` and `Activity.linkedPlanID`. In MVP 1 this only affects the merge rule (today's actual beats today's estimate); in MVP 4 the `(expected, actual)` pairs it produces are the training data for calibration.
 
 ---
 

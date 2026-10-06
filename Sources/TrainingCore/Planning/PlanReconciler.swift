@@ -41,6 +41,10 @@ public struct PlanReconciler: Sendable {
     /// Returns updated copies with `Activity.linkedPlanID` and `PlannedActivity.completedActivityID`
     /// set; activities/plans that already carry a link, or find no match, are returned unchanged.
     ///
+    /// An activity that names the plan it was started from (``Activity/scheduledPlanID``, the id of the
+    /// Watch workout) is matched to that plan first, exactly and without ambiguity, provided the plan
+    /// is unmatched and on the activity's day; the heuristic below then sees only what's left.
+    ///
     /// A near-tie is still linked to the closest plan (the best guess) but is also reported in
     /// ``PlanReconciliation/ambiguities``, never silently resolved.
     public func reconcile(
@@ -68,6 +72,18 @@ public struct PlanReconciler: Sendable {
 
         var activities = activities
         var plans = plans
+
+        // Exact matches first: the athlete started this very plan, so there's nothing to guess. Same
+        // day only, like every other link; a hint for another day (or a deleted or already-matched
+        // plan) falls through to the heuristic like any other activity.
+        for activityIndex in activities.indices where activities[activityIndex].linkedPlanID == nil {
+            guard let scheduledID = activities[activityIndex].scheduledPlanID,
+                  let planIndex = plans.firstIndex(where: { $0.id == scheduledID && $0.completedActivityID == nil }),
+                  calendar.isDate(plans[planIndex].date, inSameDayAs: activities[activityIndex].start)
+            else { continue }
+            activities[activityIndex].linkedPlanID = scheduledID
+            plans[planIndex].completedActivityID = activities[activityIndex].id
+        }
 
         // Every viable (activity, plan) pair with its mismatch score. Plans are only ever candidates
         // for activities on their own day (and sport), so a link never crosses days.

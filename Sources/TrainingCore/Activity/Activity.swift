@@ -35,6 +35,12 @@ public struct Activity: Identifiable, Sendable, Codable, Hashable {
     public var perceivedExertion: Int?
     /// Set by ``PlanReconciler`` once this activity is matched to a ``PlannedActivity``.
     public var linkedPlanID: UUID?
+    /// The ``PlannedActivity`` this workout was started from on the Apple Watch, if the source
+    /// reports one (the id of the scheduled `WorkoutPlan`, which is the plan's own id).
+    ///
+    /// A hint, not a link: ``PlanReconciler`` turns it into ``linkedPlanID`` when that plan still
+    /// exists, is unmatched and falls on the activity's day, and otherwise ignores it.
+    public var scheduledPlanID: UUID?
 
     /// The time span this activity covers, from ``start`` to `start + duration`.
     ///
@@ -61,6 +67,7 @@ public struct Activity: Identifiable, Sendable, Codable, Hashable {
     ///   - geographicBounds: The geographic area covered, if known.
     ///   - perceivedExertion: Borg CR10 rating (1...10), if entered.
     ///   - linkedPlanID: The matched ``PlannedActivity``'s id, if already reconciled.
+    ///   - scheduledPlanID: The id of the plan the workout was started from, if the source knows it.
     public init(
         id: UUID = UUID(),
         source: ActivitySource,
@@ -74,7 +81,8 @@ public struct Activity: Identifiable, Sendable, Codable, Hashable {
         cadence: CadenceStats? = nil,
         geographicBounds: GeographicBounds? = nil,
         perceivedExertion: Int? = nil,
-        linkedPlanID: UUID? = nil
+        linkedPlanID: UUID? = nil,
+        scheduledPlanID: UUID? = nil
     ) {
         self.id = id
         self.source = source
@@ -89,5 +97,6 @@ public struct Activity: Identifiable, Sendable, Codable, Hashable {
         self.geographicBounds = geographicBounds
         self.perceivedExertion = perceivedExertion
         self.linkedPlanID = linkedPlanID
+        self.scheduledPlanID = scheduledPlanID
     }
 }

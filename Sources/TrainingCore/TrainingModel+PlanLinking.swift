@@ -57,8 +57,9 @@ extension TrainingModel {
         guard let earliest = candidates.map(\.start).min(), let latest = candidates.map(\.start).max() else { return }
         // A day either side, so the reconciler's timezone-aware same-day check has the plans it needs.
         let day: TimeInterval = 86_400
-        let plans = try await stores.planStore.plans(in: earliest.addingTimeInterval(-day)...latest.addingTimeInterval(day))
+        var plans = try await stores.planStore.plans(in: earliest.addingTimeInterval(-day)...latest.addingTimeInterval(day))
         guard !plans.isEmpty else { return }
+        try await freeUnknownHolders(of: &plans, startedBy: candidates)
         let workouts = try await stores.workoutStore.workouts()
 
         let result = PlanReconciler().reconcile(activities: candidates, plans: plans, workouts: workouts, athlete: athlete)
@@ -70,6 +71,30 @@ extension TrainingModel {
         let resolved = Set(result.ambiguities.map(\.activityID))
         planMatchAmbiguities.removeAll { resolved.contains($0.activityID) }
         planMatchAmbiguities.append(contentsOf: result.ambiguities)
+    }
+
+    /// Frees the plans in `plans` whose holder isn't an activity in this device's store, but which one
+    /// of `candidates` was started from (``Activity/scheduledPlanID``).
+    ///
+    /// Plans sync between devices but activities don't (MVP2-134): a plan completed on another device
+    /// names an activity only that device has — always so for activities imported before their ids were
+    /// derived from the HealthKit workout's uuid. Without this such a plan would never accept the exact
+    /// match for the workout done from it. Only an exact hint frees it: a plan whose holder is merely
+    /// not imported here yet must not be taken by a same-day guess. `plans` is updated and the freed
+    /// plans are saved.
+    private func freeUnknownHolders(of plans: inout [PlannedActivity], startedBy candidates: [Activity]) async throws {
+        let hinted = Set(candidates.compactMap(\.scheduledPlanID))
+        let holderIDs = plans.compactMap { hinted.contains($0.id) ? $0.completedActivityID : nil }
+        guard !holderIDs.isEmpty else { return }
+        let known = try await stores.activityStore.activities(ids: holderIDs)
+        var freed: [PlannedActivity] = []
+        for index in plans.indices {
+            guard hinted.contains(plans[index].id), let holder = plans[index].completedActivityID,
+                  known[holder] == nil, !candidates.contains(where: { $0.id == holder }) else { continue }
+            plans[index].completedActivityID = nil
+            freed.append(plans[index])
+        }
+        if !freed.isEmpty { try await stores.planStore.upsert(freed) }
     }
 
     private func performLink(activityID: UUID, planID: UUID, asOf today: Date) async throws {

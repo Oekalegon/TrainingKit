@@ -74,6 +74,27 @@ struct TrainingModelPlanLinkTests {
         #expect(model.planMatchAmbiguities.isEmpty)
     }
 
+    @Test("a plan completed on another device is freed for the exact match, but not for a same-day guess (MVP2-134)")
+    func planHeldByUnknownActivity() async throws {
+        let (store, model) = makeModel()
+        let w = workout(minutes: 30)
+        try await model.add(w, asOf: day(0))
+        let started = PlannedActivity(workoutID: w.id, date: day(0), completedActivityID: UUID())
+        let other = PlannedActivity(workoutID: w.id, date: day(0), completedActivityID: UUID())
+        try await model.add(started, asOf: day(0))
+        try await model.add(other, asOf: day(0))
+        try await model.load(in: day(0)...day(1), asOf: day(0))
+
+        let activity = Activity(
+            source: .healthKit(UUID()), sport: .running, start: day(0), duration: 1800, scheduledPlanID: started.id
+        )
+        try await model.importActivities(from: StubImporter(activities: [activity]), asOf: day(0))
+
+        #expect(try await store.plan(id: started.id)?.completedActivityID == activity.id)
+        // No hint names it, so a guess can't take it from the activity that isn't imported here yet.
+        #expect(try await store.plan(id: other.id)?.completedActivityID == other.completedActivityID)
+    }
+
     @Test("re-importing an activity keeps its scheduled plan id when this run couldn't read it (MVP2-120)")
     func reimportKeepsScheduledPlanID() async throws {
         let (store, model) = makeModel()

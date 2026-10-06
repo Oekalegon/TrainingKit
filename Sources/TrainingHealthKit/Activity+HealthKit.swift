@@ -19,6 +19,9 @@ extension Activity {
     ///     dedupe key across re-imports, but `ActivityStore.upsert(_:)` matches by `id` — omitting
     ///     this (or passing `nil` when an existing activity's id could have been looked up) means a
     ///     re-import produces a *second* row for the same workout instead of updating the first.
+    ///     Without one the activity's `id` is the workout's own uuid, so every device that imports
+    ///     the workout agrees on it and a synced plan's `completedActivityID` means the same
+    ///     activity everywhere (MVP2-134).
     ///   - scheduledPlanID: The id of the `WorkoutPlan` the workout was started from, if any (see
     ///     `Activity.scheduledPlanID`); `HealthKitActivityImporter` reads it from WorkoutKit.
     public init(
@@ -28,7 +31,7 @@ extension Activity {
         scheduledPlanID: UUID? = nil
     ) {
         self.init(
-            id: existingID ?? UUID(),
+            id: existingID ?? workout.uuid,
             source: .healthKit(workout.uuid),
             sport: Sport(healthKitActivityType: workout.workoutActivityType),
             start: workout.startDate,

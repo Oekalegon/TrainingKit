@@ -1,6 +1,11 @@
 import Foundation
 
-/// What a list of activities shows: an ``Activity`` without its samples and statistics (distinct from the display-oriented ``ActivitySummary``).
+/// What a list of activities shows: an ``Activity`` without its samples and statistics.
+///
+/// Not to be confused with the display-oriented ``ActivitySummary``.
+///
+/// The persistence layer decodes these fields from the same encoded payload as ``Activity``, so
+/// renaming or re-keying one of them in `Activity`'s `Codable` conformance must be mirrored there.
 ///
 /// Read through ``ActivityStore/activityListItems(in:)``, which a store can answer without building
 /// every activity's heart-rate and speed samples; fetch the full ``Activity`` with
@@ -19,7 +24,15 @@ public struct ActivityListItem: Identifiable, Sendable, Hashable {
     /// The plan this activity is matched to, if any (``Activity/linkedPlanID``).
     public var linkedPlanID: UUID?
 
-    /// Creates a summary.
+    /// Creates a list item.
+    ///
+    /// - Parameters:
+    ///   - id: The activity's id.
+    ///   - sport: The kind of activity performed.
+    ///   - start: When the activity began.
+    ///   - duration: How long it lasted, in seconds.
+    ///   - distanceMeters: Total distance in meters, if known.
+    ///   - linkedPlanID: The matched plan's id, if any.
     public init(
         id: UUID, sport: Sport, start: Date, duration: TimeInterval,
         distanceMeters: Double? = nil, linkedPlanID: UUID? = nil
@@ -32,7 +45,9 @@ public struct ActivityListItem: Identifiable, Sendable, Hashable {
         self.linkedPlanID = linkedPlanID
     }
 
-    /// The summary of `activity`.
+    /// The list item for `activity`.
+    ///
+    /// - Parameter activity: The activity to read the list fields from.
     public init(_ activity: Activity) {
         self.init(
             id: activity.id, sport: activity.sport, start: activity.start, duration: activity.duration,

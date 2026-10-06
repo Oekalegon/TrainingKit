@@ -19,6 +19,11 @@ public protocol ActivityStore: Sendable {
     ///
     /// The default implementation summarizes ``activities(in:)``; a store that can skip the
     /// samples when reading overrides it.
+    ///
+    /// - Parameter range: The closed range of start dates to read, with the same join semantics as
+    ///   ``activities(in:)``.
+    /// - Returns: One item per activity shown, in no particular order.
+    /// - Throws: If any stored activity can't be read; no partial result is returned.
     func activityListItems(in range: ClosedRange<Date>) async throws -> [ActivityListItem]
 
     /// Inserts new activities or replaces existing ones matched by `id`.

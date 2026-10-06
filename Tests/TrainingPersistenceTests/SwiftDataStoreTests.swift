@@ -59,6 +59,32 @@ struct SwiftDataStoreTests {
         #expect(summaries.contains { $0.id == joined.id })
     }
 
+    @Test("ActivityStore activityListItems keeps nil optionals, and an empty range is empty (MVP2-129)")
+    func activityStoreSummariesBare() async throws {
+        let store = try makeStore()
+        let bare = Activity(source: .manual, sport: .cycling, start: day(1), duration: 600)
+        try await store.upsert([bare])
+
+        let items = try await store.activityListItems(in: day(0)...day(10))
+        #expect(items == [ActivityListItem(bare)])
+        #expect(items.first?.distanceMeters == nil)
+        #expect(items.first?.linkedPlanID == nil)
+        #expect(try await store.activityListItems(in: day(20)...day(30)).isEmpty)
+    }
+
+    @Test("ActivityStore activityListItems returns a join when the range reaches only a later piece (MVP2-129)")
+    func activityStoreSummariesLaterPiece() async throws {
+        let store = try makeStore()
+        let first = Activity(source: .healthKit(UUID()), sport: .cycling, start: day(2), duration: 900)
+        let second = Activity(source: .healthKit(UUID()), sport: .cycling, start: day(5), duration: 900)
+        try await store.upsert([first, second])
+        let joined = try #require(Activity.joined([first, second]))
+        try await store.saveJoin(joined, components: [first.id, second.id], replacing: [])
+
+        let items = try await store.activityListItems(in: day(4)...day(6))
+        #expect(items.map(\.id) == [joined.id])
+    }
+
     @Test("ActivityStore activities(ids:) returns the stored ones keyed by id, skipping unknown ids")
     func activityStoreBatchLookup() async throws {
         let store = try makeStore()

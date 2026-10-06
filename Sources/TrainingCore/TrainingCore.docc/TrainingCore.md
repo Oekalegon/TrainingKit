@@ -80,6 +80,7 @@ See `docs/design/trainingKit-design.md` in the package repository for the full m
 ### Statistics
 
 - ``ActivitySummary``
+- ``ActivityListItem``
 - ``TimeInZone``
 - ``WeeklyStats``
 - ``WeeklyDelta``

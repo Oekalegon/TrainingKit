@@ -33,6 +33,10 @@ public struct AthleteProfile: Sendable, Codable, Equatable {
     /// changing your resting/max heart rate or zone method today doesn't silently rewrite the
     /// history of past training load.
     public var heartRateZoneHistory: [HeartRateZoneSettings]
+    /// The athlete's date of birth, if known (MVP2-124), e.g. read from HealthKit, for showing an
+    /// age. `nil` until a source has provided one. Nothing in `TrainingCore` computes with it:
+    /// ``TanakaHRMaxEstimator`` takes the date as an argument.
+    public var dateOfBirth: Date?
 
     /// Creates an athlete profile.
     ///
@@ -45,6 +49,7 @@ public struct AthleteProfile: Sendable, Codable, Equatable {
     ///   - weekStartsOn: Boundary for weekly statistics; defaults to Monday.
     ///   - mainSport: The athlete's primary sport; defaults to running.
     ///   - heartRateZoneHistory: Every ``HeartRateZoneSettings`` this athlete has recorded.
+    ///   - dateOfBirth: The athlete's date of birth, if known; defaults to `nil`.
     public init(
         id: UUID = UUID(),
         name: String = "",
@@ -53,7 +58,8 @@ public struct AthleteProfile: Sendable, Codable, Equatable {
         timeZone: TimeZone,
         weekStartsOn: Weekday = .monday,
         mainSport: Sport = .running,
-        heartRateZoneHistory: [HeartRateZoneSettings]
+        heartRateZoneHistory: [HeartRateZoneSettings],
+        dateOfBirth: Date? = nil
     ) {
         self.id = id
         self.name = name
@@ -63,14 +69,16 @@ public struct AthleteProfile: Sendable, Codable, Equatable {
         self.weekStartsOn = weekStartsOn
         self.mainSport = mainSport
         self.heartRateZoneHistory = heartRateZoneHistory
+        self.dateOfBirth = dateOfBirth
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, name, sex, paceModel, timeZone, weekStartsOn, mainSport, heartRateZoneHistory
+        case id, name, sex, paceModel, timeZone, weekStartsOn, mainSport, heartRateZoneHistory, dateOfBirth
     }
 
-    /// Custom decoding so profiles persisted before `mainSport` existed still decode, defaulting
-    /// the missing field to running rather than failing to load the athlete's whole profile.
+    /// Custom decoding so profiles persisted before `mainSport` or `dateOfBirth` existed still
+    /// decode, defaulting a missing `mainSport` to running and a missing `dateOfBirth` to `nil`
+    /// rather than failing to load the athlete's whole profile.
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(UUID.self, forKey: .id)
@@ -81,6 +89,22 @@ public struct AthleteProfile: Sendable, Codable, Equatable {
         weekStartsOn = try container.decode(Weekday.self, forKey: .weekStartsOn)
         mainSport = try container.decodeIfPresent(Sport.self, forKey: .mainSport) ?? .running
         heartRateZoneHistory = try container.decode([HeartRateZoneSettings].self, forKey: .heartRateZoneHistory)
+        dateOfBirth = try container.decodeIfPresent(Date.self, forKey: .dateOfBirth)
+    }
+
+    /// The athlete's age in whole years on `today`, or `nil` when ``dateOfBirth`` is unknown.
+    ///
+    /// Counted on calendar days in the athlete's ``timeZone``, so the age ticks over on the birthday
+    /// itself, not hours before or after it, and never goes below zero for a birth date in the future.
+    ///
+    /// - Parameter today: The date to compute the age as of; injected rather than `Date()` for
+    ///   determinism, matching the rest of `TrainingCore`.
+    public func age(asOf today: Date) -> Int? {
+        guard let dateOfBirth else { return nil }
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = timeZone
+        let years = calendar.dateComponents([.year], from: calendar.startOfDay(for: dateOfBirth), to: calendar.startOfDay(for: today)).year ?? 0
+        return max(years, 0)
     }
 
     /// The most recently effective ``HeartRateZoneSettings``, used for planning (which is always

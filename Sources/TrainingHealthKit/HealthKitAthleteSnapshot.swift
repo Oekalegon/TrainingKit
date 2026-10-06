@@ -15,6 +15,9 @@ public struct HealthKitAthleteSnapshot: Sendable, Hashable {
     /// Maximum heart rate estimated from date of birth via `TanakaHRMaxEstimator` — HealthKit
     /// never reports HRmax directly.
     public let estimatedMaxHeartRateBPM: Double?
+    /// The athlete's date of birth, if HealthKit has one on record (MVP2-124). The same value
+    /// ``estimatedMaxHeartRateBPM`` is estimated from.
+    public let dateOfBirth: Date?
 
     /// Creates an athlete snapshot.
     ///
@@ -22,9 +25,16 @@ public struct HealthKitAthleteSnapshot: Sendable, Hashable {
     ///   - restingHeartRateBPM: The smoothed resting heart rate, if any readings were found.
     ///   - biologicalSex: The athlete's biological sex, if known.
     ///   - estimatedMaxHeartRateBPM: Maximum heart rate estimated from date of birth, if known.
-    public init(restingHeartRateBPM: Double?, biologicalSex: BiologicalSex?, estimatedMaxHeartRateBPM: Double?) {
+    ///   - dateOfBirth: The athlete's date of birth, if known; defaults to `nil`.
+    public init(
+        restingHeartRateBPM: Double?,
+        biologicalSex: BiologicalSex?,
+        estimatedMaxHeartRateBPM: Double?,
+        dateOfBirth: Date? = nil
+    ) {
         self.restingHeartRateBPM = restingHeartRateBPM
         self.biologicalSex = biologicalSex
         self.estimatedMaxHeartRateBPM = estimatedMaxHeartRateBPM
+        self.dateOfBirth = dateOfBirth
     }
 }

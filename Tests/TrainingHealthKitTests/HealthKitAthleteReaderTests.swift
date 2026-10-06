@@ -24,6 +24,7 @@ struct HealthKitAthleteReaderTests {
         #expect(snapshot.restingHeartRateBPM == nil)
         #expect(snapshot.biologicalSex == nil)
         #expect(snapshot.estimatedMaxHeartRateBPM == nil)
+        #expect(snapshot.dateOfBirth == nil)
     }
 }
 #endif

@@ -81,6 +81,8 @@ struct AthleteProfile: Sendable, Codable {
     var heartRateZoneHistory: [HeartRateZoneSettings] // resting/max HR + zone method, dated so
                                                        // recomputing an old activity's load uses the
                                                        // settings effective on its date, not today's
+    var dateOfBirth: Date?                          // from HealthKit when known (MVP2-124); `age(asOf:)`
+                                                       // counts whole years in the athlete's time zone
 }
 ```
 
@@ -397,7 +399,7 @@ protocol ActivityImporting: Sendable {
 - `HKAnchoredObjectQuery` on `HKWorkoutType` → new/updated/deleted workouts since the last anchor. Anchor persisted via `AthleteStore`.
 - For each workout, a scoped `HKSampleQuery` on `heartRate` bounded to the workout's `startDate...endDate`, sorted, mapped to `[HeartRateSample]`.
 - `Activity.source = .healthKit(workout.uuid)`; the UUID is the dedupe key.
-- `HealthKitAthleteReader` supplies resting HR (median `restingHeartRate` sample over the trailing 1–2 weeks, via `RestingHeartRateSmoother`, to absorb day-to-day noise before it feeds zone settings) and `biologicalSex()` to pre-fill `AthleteProfile`. HRmax is never read from HealthKit; default to Tanaka (`208 − 0.7 × age`) from `dateOfBirth`, raised later from workouts that exceed it (§2.1, MVP2-56).
+- `HealthKitAthleteReader` supplies resting HR (median `restingHeartRate` sample over the trailing 1–2 weeks, via `RestingHeartRateSmoother`, to absorb day-to-day noise before it feeds zone settings) and `biologicalSex()` to pre-fill `AthleteProfile`; the snapshot also carries `dateOfBirth`, which the app merges onto the profile for showing an age (MVP2-124). HRmax is never read from HealthKit; default to Tanaka (`208 − 0.7 × age`) from `dateOfBirth`, raised later from workouts that exceed it (§2.1, MVP2-56).
 
 Requested authorisations: read `workoutType`, `heartRate`, `restingHeartRate`, `dateOfBirth`, `biologicalSex`. No write scopes in MVP 1.
 

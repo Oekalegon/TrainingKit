@@ -78,6 +78,17 @@ struct AthleteProfileEditingTests {
         #expect(athlete.paceModel.thresholdPaceSecondsPerKilometer == 300)
     }
 
+    @Test("an empty pace history given to the initializer counts as none: the pace model becomes the one entry")
+    func emptyPaceHistoryFallsBack() {
+        let athlete = AthleteProfile(
+            sex: .male, paceModel: PaceModel(thresholdPaceSecondsPerKilometer: 255),
+            timeZone: TimeZone(identifier: "UTC")!, heartRateZoneHistory: [], paceHistory: []
+        )
+
+        #expect(athlete.paceHistory.count == 1)
+        #expect(athlete.paceModel.thresholdPaceSecondsPerKilometer == 255)
+    }
+
     @Test("a recorded pace is dated; paceModel is the latest, paceModel(asOf:) the one in effect then")
     func recordedPaceIsDated() {
         let athlete = AthleteProfile.fixture(thresholdPaceSecondsPerKilometer: 300)

@@ -84,8 +84,8 @@ public struct AthleteProfile: Sendable, Codable, Equatable {
     ///   - dateOfBirth: The athlete's date of birth, if known; defaults to `nil`.
     ///   - usesHealthKitRestingHeartRate: Whether the resting heart rate follows HealthKit; defaults
     ///     to `true`.
-    ///   - paceHistory: Every ``PaceSettings`` this athlete has recorded; when given, it replaces the
-    ///     single entry `paceModel` would make.
+    ///   - paceHistory: Every ``PaceSettings`` this athlete has recorded; when given and not empty, it
+    ///     replaces the single entry `paceModel` would make.
     public init(
         id: UUID = UUID(),
         name: String = "",
@@ -102,7 +102,9 @@ public struct AthleteProfile: Sendable, Codable, Equatable {
         self.id = id
         self.name = name
         self.sex = sex
-        self.paceHistory = paceHistory ?? [PaceSettings(effectiveDate: .distantPast, paceModel: paceModel)]
+        // An empty history would leave `paceModel` with nothing to return, so it counts as none given.
+        self.paceHistory = paceHistory.flatMap { $0.isEmpty ? nil : $0 }
+            ?? [PaceSettings(effectiveDate: .distantPast, paceModel: paceModel)]
         self.timeZone = timeZone
         self.weekStartsOn = weekStartsOn
         self.mainSport = mainSport

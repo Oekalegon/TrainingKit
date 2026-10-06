@@ -63,6 +63,24 @@ extension ActivityRecord {
         try PersistenceCoding.decode(Activity.self, from: payload)
     }
 
+    /// Decodes just the summary fields of `payload`, skipping the samples.
+    func toListItem() throws -> ActivityListItem {
+        let fields = try PersistenceCoding.decode(SummaryFields.self, from: payload)
+        return ActivityListItem(
+            id: id, sport: fields.sport, start: fields.start, duration: fields.duration,
+            distanceMeters: fields.distanceMeters, linkedPlanID: fields.linkedPlanID
+        )
+    }
+
+    /// The fields of an encoded `Activity` that ``toListItem()`` reads; the decoder ignores the rest.
+    private struct SummaryFields: Decodable {
+        let sport: Sport
+        let start: Date
+        let duration: TimeInterval
+        let distanceMeters: Double?
+        let linkedPlanID: UUID?
+    }
+
     /// Replaces this record's `sourceKey`/`start`/`payload` with `activity`'s, leaving `id`
     /// unchanged.
     ///

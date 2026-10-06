@@ -13,6 +13,19 @@ public protocol ActivityStore: Sendable {
     /// find hidden components.
     func activities(in range: ClosedRange<Date>) async throws -> [Activity]
 
+    /// The same activities as ``activities(in:)`` (joins hiding their pieces the same way), as
+    /// ``ActivityListItem``s: no samples, so a list over years of history doesn't have to build
+    /// them. The order is unspecified.
+    ///
+    /// The default implementation summarizes ``activities(in:)``; a store that can skip the
+    /// samples when reading overrides it.
+    ///
+    /// - Parameter range: The closed range of start dates to read, with the same join semantics as
+    ///   ``activities(in:)``.
+    /// - Returns: One item per activity shown, in no particular order.
+    /// - Throws: If any stored activity can't be read; no partial result is returned.
+    func activityListItems(in range: ClosedRange<Date>) async throws -> [ActivityListItem]
+
     /// Inserts new activities or replaces existing ones matched by `id`.
     ///
     /// Also matched by `source` (except sources with no natural key of their own — `.manual` and
@@ -120,5 +133,11 @@ extension ActivityStore {
             if let activity = try await activity(id: id) { result[id] = activity }
         }
         return result
+    }
+}
+
+extension ActivityStore {
+    public func activityListItems(in range: ClosedRange<Date>) async throws -> [ActivityListItem] {
+        try await activities(in: range).map(ActivityListItem.init)
     }
 }

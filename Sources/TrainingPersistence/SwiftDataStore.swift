@@ -32,6 +32,20 @@ public actor SwiftDataStore: ActivityStore, PlanStore, WorkoutLibraryStore, Cycl
     /// activity table is large enough (years of imported history) that decoding every `payload` on
     /// every call is a measurable cost the other, smaller tables don't have.
     public func activities(in range: ClosedRange<Date>) async throws -> [Activity] {
+        try activityRecords(in: range).map { try $0.toActivity() }
+    }
+
+    /// See `ActivityStore/activityListItems(in:)`.
+    ///
+    /// Decodes only the summary fields of each record's payload, so the heart-rate and speed
+    /// samples are never built.
+    public func activityListItems(in range: ClosedRange<Date>) async throws -> [ActivityListItem] {
+        try activityRecords(in: range).map { try $0.toListItem() }
+    }
+
+    /// The records `activities(in:)` shows for `range`: those starting in it, minus pieces hidden by
+    /// a join, plus each join with a piece in it.
+    private func activityRecords(in range: ClosedRange<Date>) throws -> [ActivityRecord] {
         let lowerBound = range.lowerBound
         let upperBound = range.upperBound
         let descriptor = FetchDescriptor<ActivityRecord>(
@@ -42,7 +56,7 @@ public actor SwiftDataStore: ActivityStore, PlanStore, WorkoutLibraryStore, Cycl
         // The join table is tiny (one row per joined session), so it's read whole rather than
         // predicated — same reasoning as the tombstone table in `upsert(_:)`.
         let joins = try joinComponentIDs()
-        guard !joins.isEmpty else { return try inRange.map { try $0.toActivity() } }
+        guard !joins.isEmpty else { return inRange }
 
         let hidden = Set(joins.values.joined())
         let inRangeIDs = Set(inRange.map(\.id))
@@ -55,7 +69,7 @@ public actor SwiftDataStore: ActivityStore, PlanStore, WorkoutLibraryStore, Cycl
             else { continue }
             records.append(record)
         }
-        return try records.map { try $0.toActivity() }
+        return records
     }
 
     /// See `ActivityStore/upsert(_:)`.

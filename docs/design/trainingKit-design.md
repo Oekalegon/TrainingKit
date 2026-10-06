@@ -372,6 +372,7 @@ Core defines the storage contract; `TrainingPersistence` implements it with Swif
 ```swift
 protocol ActivityStore: Sendable {
     func activities(in range: ClosedRange<Date>) async throws -> [Activity]
+    func activityListItems(in range: ClosedRange<Date>) async throws -> [ActivityListItem]   // MVP2-129
     func upsert(_ activities: [Activity]) async throws
     func activity(sourceID: String) async throws -> Activity?   // dedupe on re-import
 
@@ -398,6 +399,8 @@ An `InMemoryStore` implementing all five ships in Core for tests and previews.
 - `unjoinActivity` reverses a join. Deleting a join deletes its pieces (tombstoned) except any piece another join still uses.
 - A piece deleted at its origin dissolves the join; a re-import that changes a piece rebuilds the join in place, keeping its own plan link and perceived exertion.
 - A component can belong to one join at a time (`ActivityJoinError.componentAlreadyJoined`); joining a joined activity flattens into one join of N.
+
+**List items (MVP2-129).** `activityListItems(in:)` returns what `activities(in:)` shows, joins included, as `ActivityListItem`s (id, sport, start, duration, distance, linked plan) without the samples. The protocol default maps `activities(in:)`; `SwiftDataStore` overrides it to decode only those fields from each payload, so a list over years of history never builds heart-rate or speed samples. The order is unspecified.
 
 The join operations are part of `ActivityStore` (rather than a separate protocol) because the hiding has to happen inside `activities(in:)`; this costs every conformer three extra methods. Revisit if a second conformer family appears.
 

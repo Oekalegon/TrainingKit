@@ -135,6 +135,29 @@ struct TrainingModelPlanLinkTests {
         #expect(try await store.plan(id: plan.id)?.completedActivityID == plan.completedActivityID)
     }
 
+    @Test("two pieces started from one plan held elsewhere: the earlier takes it, the other stays unlinked (MVP2-134)")
+    func twoPiecesOfOneHintedPlan() async throws {
+        let (store, model) = makeModel()
+        let w = workout(minutes: 30)
+        try await model.add(w, asOf: day(0))
+        let plan = PlannedActivity(workoutID: w.id, date: day(0), completedActivityID: UUID())
+        try await model.add(plan, asOf: day(0))
+        try await model.load(in: day(0)...day(1), asOf: day(0))
+
+        let early = Activity(
+            source: .healthKit(UUID()), sport: .running, start: day(0), duration: 900, scheduledPlanID: plan.id
+        )
+        let late = Activity(
+            source: .healthKit(UUID()), sport: .running, start: day(0).addingTimeInterval(3600), duration: 900,
+            scheduledPlanID: plan.id
+        )
+        try await model.importActivities(from: StubImporter(activities: [late, early]), asOf: day(0))
+
+        #expect(try await store.plan(id: plan.id)?.completedActivityID == early.id)
+        #expect(try await store.activity(id: early.id)?.linkedPlanID == plan.id)
+        #expect(try await store.activity(id: late.id)?.linkedPlanID == nil)
+    }
+
     @Test("repair leaves a plan held by another device's activity alone (MVP2-134)")
     func repairKeepsPlanHeldElsewhere() async throws {
         let (store, model) = makeModel()

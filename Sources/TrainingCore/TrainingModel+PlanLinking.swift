@@ -57,8 +57,9 @@ extension TrainingModel {
         guard let earliest = candidates.map(\.start).min(), let latest = candidates.map(\.start).max() else { return }
         // A day either side, so the reconciler's timezone-aware same-day check has the plans it needs.
         let day: TimeInterval = 86_400
-        let plans = try await stores.planStore.plans(in: earliest.addingTimeInterval(-day)...latest.addingTimeInterval(day))
+        var plans = try await stores.planStore.plans(in: earliest.addingTimeInterval(-day)...latest.addingTimeInterval(day))
         guard !plans.isEmpty else { return }
+        try await freeUnknownHolders(of: &plans, startedBy: candidates)
         let workouts = try await stores.workoutStore.workouts()
 
         let result = PlanReconciler().reconcile(activities: candidates, plans: plans, workouts: workouts, athlete: athlete)
@@ -70,6 +71,28 @@ extension TrainingModel {
         let resolved = Set(result.ambiguities.map(\.activityID))
         planMatchAmbiguities.removeAll { resolved.contains($0.activityID) }
         planMatchAmbiguities.append(contentsOf: result.ambiguities)
+    }
+
+    /// Frees, in `plans` only, the plans whose holder isn't an activity in this device's store but which
+    /// one of `candidates` was started from (``Activity/scheduledPlanID``).
+    ///
+    /// Plans sync between devices but activities don't (MVP2-134): a plan completed on another device
+    /// names an activity only that device has, as always for activities imported before their ids were
+    /// derived from the HealthKit workout's uuid. Only an exact hint frees it, so a plan whose holder
+    /// merely isn't imported here yet is never taken by a same-day guess. Nothing is written: the caller
+    /// persists a freed plan only once the reconciler has linked it again, so a free that finds no
+    /// replacement never reaches the store.
+    private func freeUnknownHolders(of plans: inout [PlannedActivity], startedBy candidates: [Activity]) async throws {
+        let hinted = Set(candidates.compactMap(\.scheduledPlanID))
+        let heldHinted = plans.indices.filter { hinted.contains(plans[$0].id) && plans[$0].completedActivityID != nil }
+        guard !heldHinted.isEmpty else { return }
+        let known = try await stores.activityStore.activities(ids: heldHinted.compactMap { plans[$0].completedActivityID })
+        let candidateIDs = Set(candidates.map(\.id))
+        for index in heldHinted {
+            guard let holder = plans[index].completedActivityID,
+                  known[holder] == nil, !candidateIDs.contains(holder) else { continue }
+            plans[index].completedActivityID = nil
+        }
     }
 
     private func performLink(activityID: UUID, planID: UUID, asOf today: Date) async throws {
@@ -185,8 +208,9 @@ extension TrainingModel {
     /// in two stores that can't commit together, so a failure partway through a change can leave one
     /// side set. For each loaded activity that names a plan: a missing plan drops the link; a plan
     /// that's free (or held by one of the activity's own pieces) is pointed back at the activity; a
-    /// plan held by something else drops the activity's link. Then any loaded plan whose holder is
-    /// gone, or doesn't name the plan back, is freed.
+    /// plan held by something else drops the activity's link, unless that holder isn't on this device
+    /// (completed elsewhere; synced plans may name activities only another device has), when it's left
+    /// alone. Then any loaded plan whose holder is here but doesn't name the plan back is freed.
     func repairPlanLinks() async throws {
         for activity in activities {
             guard let planID = activity.linkedPlanID else { continue }
@@ -201,6 +225,11 @@ extension TrainingModel {
             if plan.completedActivityID == nil || plan.completedActivityID.map(pieces.contains) == true {
                 plan.completedActivityID = activity.id
                 try await stores.planStore.upsert([plan])
+            } else if let holderID = plan.completedActivityID,
+                      try await stores.activityStore.activity(id: holderID) == nil {
+                // Held by an activity this device doesn't have (completed on another device): leave
+                // both sides as they are. Rewriting the plan would sync back and forth between devices.
+                continue
             } else {
                 var cleared = activity
                 cleared.linkedPlanID = nil
@@ -209,8 +238,10 @@ extension TrainingModel {
         }
         for var plan in try await loadedPlansFromStore() {
             guard let holderID = plan.completedActivityID else { continue }
-            let holder = try await stores.activityStore.activity(id: holderID)
-            if holder?.linkedPlanID != plan.id {
+            // A holder this device doesn't have may be another device's activity, so only a holder
+            // that's here and doesn't name the plan back is a half link.
+            guard let holder = try await stores.activityStore.activity(id: holderID) else { continue }
+            if holder.linkedPlanID != plan.id {
                 plan.completedActivityID = nil
                 try await stores.planStore.upsert([plan])
             }

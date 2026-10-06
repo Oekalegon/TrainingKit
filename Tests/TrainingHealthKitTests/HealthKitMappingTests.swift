@@ -106,20 +106,16 @@ struct HealthKitMappingTests {
         #expect(activity.distanceMeters == nil)
     }
 
-    @Test("omitting existingID gives each mapped activity its own fresh id")
-    func activityMappingWithoutExistingIDGetsFreshID() {
+    @Test("omitting existingID uses the workout's uuid, so every device agrees on the id")
+    func activityMappingWithoutExistingIDUsesWorkoutUUID() {
         let start = Date(timeIntervalSince1970: 1_700_000_000)
         let workout = HKWorkout(activityType: .running, start: start, end: start.addingTimeInterval(1800))
 
         let first = Activity(healthKitWorkout: workout, heartRate: [])
         let second = Activity(healthKitWorkout: workout, heartRate: [])
 
-        // Same HealthKit workout mapped twice without a known existing id: same source (the
-        // dedupe key), but two different fresh ids -- exactly why a caller upserting these by id
-        // must look up and pass the existing one on a re-import, rather than relying on this
-        // initializer alone to dedupe.
-        #expect(first.source == second.source)
-        #expect(first.id != second.id)
+        #expect(first.id == workout.uuid)
+        #expect(first.id == second.id)
     }
 
     @Test("passing existingID reuses it, so a re-imported workout replaces rather than duplicates")

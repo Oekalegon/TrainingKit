@@ -105,7 +105,9 @@ struct SplitContainerTests {
 
     /// Writes a store the way this package did before the split: one store, every model but the
     /// preferences record, no CloudKit.
-    private func writeLegacyStore(in directory: URL, activity: Activity, plan: PlannedActivity, profile: AthleteProfile) throws {
+    private func writeLegacyStore(
+        in directory: URL, activity: Activity, plan: PlannedActivity, profile: AthleteProfile, metrics: FitnessMetrics? = nil
+    ) throws {
         let legacyTypes = TrainingPersistenceContainer.modelTypes.filter { $0 != AthletePreferencesRecord.self }
         let container = try ModelContainer(
             for: Schema(legacyTypes),
@@ -123,6 +125,9 @@ struct SplitContainerTests {
         try profileRecord.update(from: profile)
         profileRecord.importAnchorData = Data([7, 7])
         context.insert(profileRecord)
+        if let metrics {
+            context.insert(try FitnessMetricsRecord(metrics: metrics))
+        }
         try context.save()
     }
 
@@ -151,6 +156,90 @@ struct SplitContainerTests {
         #expect(try ModelContext(container).fetch(FetchDescriptor<DeletedActivitySourceRecord>()).count == 1)
         // The preferences were given to the synced store.
         #expect(try ModelContext(container).fetch(FetchDescriptor<AthletePreferencesRecord>()).count == 1)
+    }
+
+    @Test("the old file is kept as a backup before its local-only tables are dropped")
+    func keepsABackupOfTheOldStore() async throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let activity = Activity(source: .healthKit(UUID()), sport: .running, start: day(1), duration: 1800)
+        try writeLegacyStore(
+            in: directory, activity: activity, plan: PlannedActivity(workoutID: UUID(), date: day(2)),
+            profile: AthleteProfile.fixture()
+        )
+
+        _ = try TrainingPersistenceContainer.make(cloudKitDatabase: .none, storeDirectory: directory)
+
+        // The backup is a complete old store: opened as one, it still has the activity the split
+        // container removed from the original file.
+        let legacyTypes = TrainingPersistenceContainer.modelTypes.filter { $0 != AthletePreferencesRecord.self }
+        let backup = try ModelContainer(
+            for: Schema(legacyTypes),
+            configurations: [ModelConfiguration(
+                "default", schema: Schema(legacyTypes), url: LegacyStoreMigration.backupURL(in: directory),
+                cloudKitDatabase: .none
+            )]
+        )
+        #expect(try ModelContext(backup).fetch(FetchDescriptor<ActivityRecord>()).count == 1)
+        #expect(try ModelContext(backup).fetch(FetchDescriptor<PlannedActivityRecord>()).count == 1)
+    }
+
+    @Test("an interrupted migration resumes without copying again from an emptied old store")
+    func resumesAnInterruptedMigration() async throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let activity = Activity(source: .healthKit(UUID()), sport: .running, start: day(1), duration: 1800)
+        try writeLegacyStore(
+            in: directory, activity: activity, plan: PlannedActivity(workoutID: UUID(), date: day(2)),
+            profile: AthleteProfile.fixture()
+        )
+
+        // The first launch got as far as copying, and the old file then lost its local-only rows
+        // (emptied here by hand: how much of it the split container removes is SwiftData's business),
+        // before the final step.
+        try LegacyStoreMigration.copyLocalDataIfNeeded(in: directory)
+        do {
+            let legacyTypes = TrainingPersistenceContainer.modelTypes.filter { $0 != AthletePreferencesRecord.self }
+            let old = try ModelContainer(
+                for: Schema(legacyTypes),
+                configurations: [ModelConfiguration(
+                    "default", schema: Schema(legacyTypes),
+                    url: LegacyStoreMigration.syncedStoreURL(in: directory), cloudKitDatabase: .none
+                )]
+            )
+            let context = ModelContext(old)
+            try context.delete(model: ActivityRecord.self)
+            try context.delete(model: DeletedActivitySourceRecord.self)
+            try context.delete(model: ActivityJoinRecord.self)
+            try context.delete(model: AthleteProfileRecord.self)
+            try context.save()
+        }
+
+        // The next launch must not copy again from the now-emptied old file over the good copy.
+        let container = try TrainingPersistenceContainer.make(cloudKitDatabase: .none, storeDirectory: directory)
+        let store = SwiftDataStore(modelContainer: container)
+
+        #expect(try await store.activity(id: activity.id) == activity)
+        #expect(try await store.athleteProfile() != nil)
+        #expect(try ModelContext(container).fetch(FetchDescriptor<AthletePreferencesRecord>()).count == 1)
+    }
+
+    @Test("the fitness-metrics cache isn't carried over: it rebuilds from the activities")
+    func metricsCacheIsNotCopied() async throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try writeLegacyStore(
+            in: directory, activity: Activity(source: .manual, sport: .running, start: day(1), duration: 600),
+            plan: PlannedActivity(workoutID: UUID(), date: day(2)), profile: AthleteProfile.fixture(),
+            metrics: FitnessMetrics(
+                day: day(1), load: 10, ctl: 5, atl: 6, tsb: -1,
+                monotony: .nan, strain: .nan, isProjected: false, isWarmingUp: false
+            )
+        )
+
+        let container = try TrainingPersistenceContainer.make(cloudKitDatabase: .none, storeDirectory: directory)
+
+        #expect(try ModelContext(container).fetch(FetchDescriptor<FitnessMetricsRecord>()).isEmpty)
     }
 
     @Test("opening the container again after migrating copies nothing twice")

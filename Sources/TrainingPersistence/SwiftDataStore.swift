@@ -208,8 +208,7 @@ public actor SwiftDataStore: ActivityStore, PlanStore, WorkoutLibraryStore, Cycl
     /// app should either. Exists only for `TestApps/HealthKitHarness`/`PersistenceHarness` to reset
     /// between manual test runs (via `@testable import TrainingPersistence`), and for tests here —
     /// deliberately `internal`, not `public`, so it can't become a real button in a real app by
-    /// accident. Deletes are tracked individually by SwiftData's CloudKit mirroring exactly like
-    /// `deleteActivity(source:)`, so they propagate to every other device syncing this store.
+    /// accident. Activities live in the local-only store (MVP2-131), so nothing here reaches iCloud.
     @discardableResult
     func deleteAllActivities() async throws -> Int {
         let records = try modelContext.fetch(FetchDescriptor<ActivityRecord>())

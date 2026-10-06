@@ -10,11 +10,14 @@ import TrainingCore
 /// the athlete's preferences stay in the synced one (see ``TrainingPersistenceContainer``).
 ///
 /// The synced store keeps its file (`default.store`) and so its CloudKit mirror: opening it with the
-/// reduced schema drops the local-only tables locally, which doesn't delete anything in CloudKit.
+/// reduced schema stops using the local-only tables (SwiftData may or may not remove their rows from the file), which doesn't delete anything in CloudKit.
 /// So the local-only rows are copied out first, into `Local.store`, by opening the old file without
 /// CloudKit (so nothing is exported or imported meanwhile) and without changing it. Records that
 /// were already in iCloud stay there until the athlete deletes the app's iCloud data; nothing here
 /// can remove them safely.
+///
+/// Before the split container touches it, the old file is copied to `default.store.pre-split` (with its `-wal`
+/// and `-shm` siblings), so a copy that turns out incomplete never costs the original.
 ///
 /// A small state file makes it safe to interrupt: `copied` means `Local.store` holds the copy and the
 /// old file may already have lost its local tables, so a rerun must not copy again.
@@ -35,6 +38,23 @@ enum LegacyStoreMigration {
     private static func stateURL(in directory: URL) -> URL { directory.appending(path: "split-migration-state") }
     static func syncedStoreURL(in directory: URL) -> URL { directory.appending(path: "default.store") }
     static func localStoreURL(in directory: URL) -> URL { directory.appending(path: "Local.store") }
+    /// Where the old file is kept, with its `-wal` and `-shm` siblings, before the split stops using its
+    /// local-only tables.
+    static func backupURL(in directory: URL) -> URL { directory.appending(path: "default.store.pre-split") }
+
+    /// Copies the old store file and its write-ahead-log siblings next to it, unless a backup is
+    /// already there. The split container is about to remove the local-only tables from the old file
+    /// for good, and the copy into `Local.store` has only been checked by not throwing, so this keeps
+    /// the original. The athlete can delete it once the split has proved itself.
+    private static func backUpLegacyStore(in directory: URL) throws {
+        let fileManager = FileManager.default
+        guard !fileManager.fileExists(atPath: backupURL(in: directory).path) else { return }
+        for suffix in ["", "-wal", "-shm"] {
+            let source = URL(fileURLWithPath: syncedStoreURL(in: directory).path + suffix)
+            guard fileManager.fileExists(atPath: source.path) else { continue }
+            try fileManager.copyItem(at: source, to: URL(fileURLWithPath: backupURL(in: directory).path + suffix))
+        }
+    }
 
     private static func state(in directory: URL) -> State? {
         (try? String(contentsOf: stateURL(in: directory), encoding: .utf8)).flatMap { State(rawValue: $0) }
@@ -64,6 +84,7 @@ enum LegacyStoreMigration {
             }
         }
 
+        try backUpLegacyStore(in: directory)
         let legacy = try ModelContainer(
             for: Schema(legacyModelTypes),
             configurations: [ModelConfiguration(

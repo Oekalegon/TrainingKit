@@ -35,7 +35,7 @@ store files (`TrainingPersistenceContainer.make(...)`):
 - **Migration.** The synced store keeps the old single store's file, so its CloudKit mirror carries on.
   On the first launch after the split, `LegacyStoreMigration` copies the activities, tombstones,
   joins and profile out of the old file (opened without CloudKit, and only read) into `Local.store`,
-  then the split container drops the local-only tables from `default.store`. That deletes nothing in
+  then the split container stops using the local-only tables in `default.store` (SwiftData may leave their rows in the file). Before that, the old file is copied to `default.store.pre-split` (with its `-wal` and `-shm` siblings) as a backup the athlete can delete later. None of this deletes anything in
   CloudKit: **records already in iCloud (activities, the old full profile) stay there** until the
   athlete deletes the app's iCloud data (Settings, Apple Account, iCloud, Manage Storage). Nothing
   automatic can remove them safely.

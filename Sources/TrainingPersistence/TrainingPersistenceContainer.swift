@@ -79,6 +79,21 @@ public enum TrainingPersistenceContainer {
         if !isStoredInMemoryOnly {
             try LegacyStoreMigration.copyLocalDataIfNeeded(in: directory)
         }
+        let container = try makeSplitContainer(
+            cloudKitDatabase: cloudKitDatabase, isStoredInMemoryOnly: isStoredInMemoryOnly, directory: directory
+        )
+        if !isStoredInMemoryOnly {
+            try LegacyStoreMigration.finish(in: container, directory: directory)
+        }
+        try backfillActivityStartIfNeeded(in: container)
+        return container
+    }
+
+    /// The two-store container itself, without migrating anything: the step ``make(cloudKitDatabase:isStoredInMemoryOnly:storeDirectory:)``
+    /// takes between copying an old store's local data and finishing the migration.
+    static func makeSplitContainer(
+        cloudKitDatabase: ModelConfiguration.CloudKitDatabase, isStoredInMemoryOnly: Bool, directory: URL
+    ) throws -> ModelContainer {
         let syncedSchema = Schema(syncedModelTypes)
         let localSchema = Schema(localModelTypes)
         // The synced store keeps the name and file of the single store this package used to make, so
@@ -95,12 +110,7 @@ public enum TrainingPersistenceContainer {
                 "Local", schema: localSchema, url: LegacyStoreMigration.localStoreURL(in: directory),
                 cloudKitDatabase: .none
             )
-        let container = try ModelContainer(for: Schema(modelTypes), configurations: [synced, local])
-        if !isStoredInMemoryOnly {
-            try LegacyStoreMigration.finish(in: container, directory: directory)
-        }
-        try backfillActivityStartIfNeeded(in: container)
-        return container
+        return try ModelContainer(for: Schema(modelTypes), configurations: [synced, local])
     }
 
     /// One-time repair for `ActivityRecord` rows that predate its `start` column.

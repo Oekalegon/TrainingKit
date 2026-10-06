@@ -140,8 +140,9 @@ public struct HeartRateZoneModel: Sendable {
 
     /// The heart-rate-reserve ratio a workout step's target intensity implies.
     ///
-    /// Shared by ``TRIMPPlanEstimator`` (to weight planned TRIMP) and `StatisticsCalculator` (to
-    /// bucket a planned step into a zone for time-in-zone/distance projection) so the two can't
+    /// Shared by ``TRIMPPlanEstimator`` (to weight planned TRIMP) and, through
+    /// ``intensityZone(for:)``/``zone(for:)``, by `StatisticsCalculator`, ``WorkoutDurationEstimator``
+    /// and the pace forecast (to bucket a planned step into a zone) so they can't
     /// silently drift apart on what a `.pace`/`.power`/`.rpe` target is assumed to mean.
     ///
     /// `.pace`/`.power` approximate a threshold-adjacent effort (roughly zone 4) since MVP 1 has no
@@ -161,6 +162,33 @@ public struct HeartRateZoneModel: Sendable {
             return zoneMidpointRatio(4) ?? 0.85
         case .rpe(let rpe):
             return Double(rpe) / 10
+        }
+    }
+
+    /// The zone (0...5) a workout step's target intensity falls in; 0 means below zone 1. This is
+    /// the zone ``intensityRatio(for:)`` resolves to, so a `.pace`/`.power` target is zone 4 and a
+    /// missing target zone 3 here as in the projector, the TRIMP estimator and the pace forecast.
+    /// Falls back to ``fallbackZone(for:)`` when the method can't resolve every zone boundary.
+    ///
+    /// Use ``zone(for:)`` where the result picks a pace, which has no zone 0.
+    public func intensityZone(for target: IntensityTarget?) -> Int {
+        guard let boundaries = TimeInZoneBuilder.zoneBoundaries(self) else { return Self.fallbackZone(for: target) }
+        return TimeInZoneBuilder.zone(for: intensityRatio(for: target), boundaries: boundaries)
+    }
+
+    /// ``intensityZone(for:)`` clamped to 1...5, for choosing a pace.
+    public func zone(for target: IntensityTarget?) -> Int {
+        max(intensityZone(for: target), 1)
+    }
+
+    /// The zone a target implies when there is no zone model to resolve it against: a
+    /// `.heartRateZone` target's own zone (3 if out of range), zone 4 for `.pace`/`.power`
+    /// (matching ``intensityRatio(for:)``), and zone 3 otherwise.
+    public static func fallbackZone(for target: IntensityTarget?) -> Int {
+        switch target {
+        case .heartRateZone(let zone): return (1...5).contains(zone) ? zone : 3
+        case .pace, .power: return 4
+        default: return 3
         }
     }
 }

@@ -367,7 +367,7 @@ Logging: `os.Logger` with subsystem `com.<you>.trainingKit`, categories `Import`
 
 ## 4. Store protocols
 
-Core defines the storage contract; `TrainingPersistence` implements it with SwiftData (+ CloudKit so the Mac and Watch see what the phone imported).
+Core defines the storage contract; `TrainingPersistence` implements it with SwiftData in two stores (MVP2-131): plans, workouts, cycles, races and the athlete's own preferences sync through CloudKit; activities (with their heart-rate samples), joins, tombstones, the fitness-metrics cache and the HealthKit-derived parts of the profile stay on the device, because Apple's guideline 5.1.3(ii) forbids storing health information in iCloud. Each device imports its own activities from HealthKit. See `docs/design/icloud-healthkit-compliance-architecture.md` for which model lives where and how an old single store is migrated.
 
 ```swift
 protocol ActivityStore: Sendable {

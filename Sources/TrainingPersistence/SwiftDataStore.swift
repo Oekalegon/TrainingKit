@@ -453,14 +453,29 @@ public actor SwiftDataStore: ActivityStore, PlanStore, WorkoutLibraryStore, Cycl
     // MARK: AthleteStore
 
     /// See `AthleteStore/athleteProfile()`.
+    ///
+    /// The profile is kept in two places (MVP2-131): the whole of it in the local-only
+    /// ``AthleteProfileRecord``, and just the athlete's own preferences in the CloudKit-synced
+    /// ``AthletePreferencesRecord``. When the synced record exists its preferences replace the local
+    /// ones, so a change made on another device shows up here; the health-derived fields (sex, date of
+    /// birth, heart-rate settings) only ever come from the local record.
     public func athleteProfile() async throws -> AthleteProfile? {
-        try singletonRecordIfExists()?.toProfile()
+        guard let local = try singletonRecordIfExists()?.toProfile() else { return nil }
+        guard let preferences = try preferencesRecordIfExists()?.toPreferences() else { return local }
+        return preferences.apply(to: local)
     }
 
-    /// See `AthleteStore/save(_:)`.
+    /// See `AthleteStore/save(_:)`. Writes the whole profile locally and its preferences to the
+    /// synced record, in one save.
     public func save(_ profile: AthleteProfile) async throws {
         let record = try singletonRecord()
         try record.update(from: profile)
+        let preferences = AthletePreferences(of: profile)
+        if let existing = try preferencesRecordIfExists() {
+            try existing.update(from: preferences)
+        } else {
+            modelContext.insert(try AthletePreferencesRecord(preferences: preferences))
+        }
         try modelContext.save()
     }
 
@@ -475,6 +490,10 @@ public actor SwiftDataStore: ActivityStore, PlanStore, WorkoutLibraryStore, Cycl
         let record = try singletonRecord()
         record.importAnchorData = anchor?.data
         try modelContext.save()
+    }
+
+    private func preferencesRecordIfExists() throws -> AthletePreferencesRecord? {
+        try modelContext.fetch(FetchDescriptor<AthletePreferencesRecord>()).first
     }
 
     private func singletonRecordIfExists() throws -> AthleteProfileRecord? {

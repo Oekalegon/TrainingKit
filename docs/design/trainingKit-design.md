@@ -72,7 +72,9 @@ struct AthleteProfile: Sendable, Codable {
     let id: UUID                                    // stable identity; see "Multiple athletes" below
     var name: String                                // human-readable label, e.g. for a roster picker
     var sex: BiologicalSex                          // .male, .female, .unspecified (uses male coefficients)
-    var paceModel: PaceModel                        // used to turn distance steps into time
+    var paceHistory: [PaceSettings]                 // dated pace models (MVP2-132); `paceModel` is the
+                                                       // latest, `paceModel(asOf:)` the one in effect then
+    var paceModel: PaceModel                        // computed: used to turn distance steps into time
     var timeZone: TimeZone                          // daily bucketing boundary
     var weekStartsOn: Weekday                       // weekly stats boundary, default .monday
     var mainSport: Sport                            // primary sport, e.g. for a weekly overview
@@ -83,8 +85,23 @@ struct AthleteProfile: Sendable, Codable {
                                                        // settings effective on its date, not today's
     var dateOfBirth: Date?                          // from HealthKit when known (MVP2-124); `age(asOf:)`
                                                        // counts whole years in the athlete's time zone
+    var usesHealthKitRestingHeartRate: Bool         // MVP2-132: whether the host app merges HealthKit's
+                                                       // resting HR into the history (default true)
+    var avatarImageData: Data?                      // MVP2-132: the athlete's chosen picture, kept small
 }
 ```
+
+#### Editing the profile (MVP2-132)
+
+`AthleteProfile+Editing` has the changes the athlete makes by hand, as pure functions applied through
+`TrainingModel.updateAthlete(asOf:_:)`: `recordingHeartRateSettings(_:)` / `removingHeartRateSettings(on:)`
+and `recordingPaceModel(_:from:)` / `removingPaceSettings(on:)`. Each entry takes effect from the start
+of its day in the athlete's time zone, recording on a day that already has one replaces it, and the last
+entry can't be removed. `paceHistory` mirrors `heartRateZoneHistory`: a profile stored with one
+`paceModel` decodes it as an entry effective since the beginning of time, and the current pace model is
+also written under its old key. Planning uses the latest entry (`paceModel`), like
+`currentHeartRateZoneSettings`; `paceModel(asOf:)` gives the one in effect on a date. Changing the
+time zone or week start rebuilds the whole fitness-metrics cache (`TrainingModel.athlete`'s `didSet`).
 
 `HeartRateZoneModel` derives `deltaHRRatio(for bpm:)` from the profile and maps HR zones ↔ ratios so a workout step targeting "Zone 3" can be turned into a TRIMP intensity.
 
@@ -94,6 +111,7 @@ Each `HeartRateZoneSettings` entry records where its max heart rate came from in
 `maxHeartRateSource`:
 - `.formula`: estimated from age (Tanaka); the default, and what older saved settings decode to;
 - `.workout(activityID:)`: reached in an ordinary workout.
+- `.manual`: entered by the athlete (MVP2-132); nothing replaces it automatically.
 
 Max heart rate drives the Karvonen zones and the heart-rate-reserve ratio TRIMP is built on. An age
 estimate is commonly about 10 bpm off for an individual, and the ratio isn't clamped above 1, so a

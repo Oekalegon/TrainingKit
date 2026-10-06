@@ -69,12 +69,19 @@ public final class TrainingModel {
     /// invalidates only from its earliest new `effectiveDate` forward (since
     /// ``AthleteProfile/heartRateZoneSettings(asOf:)`` only ever looks backward from an activity's
     /// date, a zone change can't affect anything earlier). Editing an existing entry in place
-    /// (same `effectiveDate`, different bpm values), removing one, or changing any other athlete
-    /// field (`sex`, `paceModel`, `timeZone`, `weekStartsOn`) isn't date-scoped the same way, so it
-    /// conservatively invalidates the entire cache instead.
+    /// (same `effectiveDate`, different bpm values), removing one, or changing `sex`, the pace
+    /// history, `timeZone` or `weekStartsOn` isn't date-scoped the same way, so it conservatively
+    /// invalidates the entire cache instead. Changing anything else (`name`, `mainSport`,
+    /// `dateOfBirth`, `usesHealthKitRestingHeartRate`, `avatarImageData`) doesn't touch the cache: none
+    /// of them feeds the series, so a rename or a new picture must not rebuild the whole history.
     public internal(set) var athlete: AthleteProfile {
         didSet {
             guard athlete != oldValue else { return }
+            // Only what feeds the series counts; see the property's doc comment.
+            guard athlete.sex != oldValue.sex || athlete.paceHistory != oldValue.paceHistory
+                || athlete.timeZone != oldValue.timeZone || athlete.weekStartsOn != oldValue.weekStartsOn
+                || athlete.heartRateZoneHistory != oldValue.heartRateZoneHistory
+            else { return }
             let oldDates = Set(oldValue.heartRateZoneHistory.map(\.effectiveDate))
             let changedDates = athlete.heartRateZoneHistory
                 .map(\.effectiveDate)

@@ -163,4 +163,28 @@ public struct HeartRateZoneModel: Sendable {
             return Double(rpe) / 10
         }
     }
+
+    /// The zone (1...5) a workout step's target intensity implies, used wherever a planned step
+    /// needs a pace: it is the zone ``intensityRatio(for:)`` falls in, so a `.pace`/`.power`
+    /// target is zone 4 and a missing target zone 3 here as in the projector and the TRIMP estimator.
+    ///
+    /// Use ``fallbackZone(for:)`` when the athlete has no zone settings.
+    public func zone(for target: IntensityTarget?) -> Int {
+        guard let z1 = zoneRatioRange(1), let z2 = zoneRatioRange(2), let z3 = zoneRatioRange(3),
+              let z4 = zoneRatioRange(4), let z5 = zoneRatioRange(5)
+        else { return Self.fallbackZone(for: target) }
+        let boundaries = [z1.lowerBound, z1.upperBound, z2.upperBound, z3.upperBound, z4.upperBound, z5.upperBound]
+        return max(TimeInZoneBuilder.zone(for: intensityRatio(for: target), boundaries: boundaries), 1)
+    }
+
+    /// The zone a target implies when there is no zone model to resolve it against: a
+    /// `.heartRateZone` target's own zone (3 if out of range), zone 4 for `.pace`/`.power`
+    /// (matching ``intensityRatio(for:)``), and zone 3 otherwise.
+    public static func fallbackZone(for target: IntensityTarget?) -> Int {
+        switch target {
+        case .heartRateZone(let zone): return (1...5).contains(zone) ? zone : 3
+        case .pace, .power: return 4
+        default: return 3
+        }
+    }
 }

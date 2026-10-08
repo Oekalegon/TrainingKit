@@ -604,6 +604,30 @@ struct SwiftDataStoreTests {
         #expect(try await store.race(id: race.id) == nil)
     }
 
+    // MARK: GoalStore
+
+    @Test("GoalStore upsert/fetch round-trips every target kind, replaces by id and deletes")
+    func goalStoreRoundTrip() async throws {
+        let store = try makeStore()
+        var time = Goal(name: "Sub-20 5k", target: .time(sport: .running, distanceMeters: 5000, seconds: 1200), notes: "Parkrun")
+        let volume = Goal(name: "1500 km", target: .volume(sport: nil, measure: .distanceMeters, amount: 1_500_000, per: .year))
+        let text = Goal(name: "Enjoy running again", target: .freeText)
+
+        try await store.upsert([time, volume, text])
+        time.notes = nil
+        try await store.upsert([time])
+
+        let stored = try await store.goals()
+        #expect(Set(stored) == [time, volume, text])
+        #expect(try await store.goal(id: volume.id) == volume)
+
+        try await store.deleteGoal(id: volume.id)
+        try await store.deleteGoal(id: UUID())
+
+        #expect(try await store.goal(id: volume.id) == nil)
+        #expect(try await store.goals().count == 2)
+    }
+
     @Test("RaceStore delete is a no-op for an id that doesn't exist")
     func raceStoreDeleteMissingIsNoOp() async throws {
         let store = try makeStore()

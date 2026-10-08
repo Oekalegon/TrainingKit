@@ -21,7 +21,7 @@ import SwiftData
 /// indexed date fields if profiling ever shows otherwise. `activities(in:)` is the one query that
 /// already needed this: see its doc comment below.
 @ModelActor
-public actor SwiftDataStore: ActivityStore, PlanStore, WorkoutLibraryStore, CycleStore, RaceStore, AthleteStore,
+public actor SwiftDataStore: ActivityStore, PlanStore, WorkoutLibraryStore, CycleStore, RaceStore, GoalStore, AthleteStore,
     FitnessMetricsCacheStore {
     // MARK: ActivityStore
 
@@ -460,6 +460,46 @@ public actor SwiftDataStore: ActivityStore, PlanStore, WorkoutLibraryStore, Cycl
 
     private func fetchRaceRecord(id: UUID) throws -> RaceRecord? {
         let descriptor = FetchDescriptor<RaceRecord>(predicate: #Predicate { $0.id == id })
+        return try modelContext.fetch(descriptor).first
+    }
+
+    // MARK: GoalStore
+
+    /// See `GoalStore/goals()`.
+    public func goals() async throws -> [Goal] {
+        try modelContext.fetch(FetchDescriptor<GoalRecord>()).map { try $0.toGoal() }
+    }
+
+    /// See `GoalStore/goal(id:)`.
+    public func goal(id: UUID) async throws -> Goal? {
+        try fetchGoalRecord(id: id)?.toGoal()
+    }
+
+    /// See `GoalStore/upsert(_:)`.
+    public func upsert(_ goals: [Goal]) async throws {
+        var existingRecordsByID: [UUID: GoalRecord] = [:]
+        for record in try modelContext.fetch(FetchDescriptor<GoalRecord>()) {
+            existingRecordsByID[record.id] = record
+        }
+        for goal in goals {
+            if let existing = existingRecordsByID[goal.id] {
+                try existing.update(from: goal)
+            } else {
+                modelContext.insert(try GoalRecord(goal: goal))
+            }
+        }
+        try modelContext.save()
+    }
+
+    /// See `GoalStore/deleteGoal(id:)`.
+    public func deleteGoal(id: UUID) async throws {
+        guard let record = try fetchGoalRecord(id: id) else { return }
+        modelContext.delete(record)
+        try modelContext.save()
+    }
+
+    private func fetchGoalRecord(id: UUID) throws -> GoalRecord? {
+        let descriptor = FetchDescriptor<GoalRecord>(predicate: #Predicate { $0.id == id })
         return try modelContext.fetch(descriptor).first
     }
 

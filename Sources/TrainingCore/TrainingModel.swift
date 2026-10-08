@@ -16,6 +16,9 @@ public final class TrainingModel {
     public private(set) var workouts: [StructuredWorkout] = []
     public private(set) var cycles: [TrainingCycle] = []
     public private(set) var races: [Race] = []
+    /// Every goal, as of the last ``load(in:asOf:)`` or goal change: goals have no date, so they aren't
+    /// limited to the loaded range. Empty when the ``StoreSet`` has no ``GoalStore``.
+    public private(set) var goals: [Goal] = []
     public private(set) var metrics: [FitnessMetrics] = []
     /// Advice on activities in ``activities`` whose ``Activity/dateRange``s overlap or sit close
     /// together — see ``ActivityOverlapChecker/findOverlaps(in:thresholds:)``. Recomputed on every
@@ -154,7 +157,7 @@ public final class TrainingModel {
     /// Creates a training model.
     ///
     /// - Parameters:
-    ///   - stores: Where activities/plans/workouts/cycles/races/the athlete profile are persisted.
+    ///   - stores: Where activities/plans/workouts/cycles/races/goals/the athlete profile are persisted.
     ///   - athlete: The athlete this model reflects.
     ///   - parameters: EWMA time constants and monotony window; defaults to the standard values.
     ///   - intensityParameters: The thresholds for classifying intensity; defaults to the standard values.
@@ -189,6 +192,7 @@ public final class TrainingModel {
         let newWorkouts = try await stores.workoutStore.workouts()
         let newCycles = try await stores.cycleStore.cycles(in: range)
         let newRaces = try await stores.raceStore.races(in: range)
+        let newGoals = try await stores.goalStore?.goals() ?? []
         let newHasEverImportedActivities = try await stores.athleteStore.importAnchor() != nil
 
         activities = newActivities
@@ -196,6 +200,7 @@ public final class TrainingModel {
         workouts = newWorkouts
         cycles = newCycles
         races = newRaces
+        goals = newGoals
         hasEverImportedActivities = newHasEverImportedActivities
         loadedRange = range
         await recompute(asOf: today)
@@ -321,6 +326,28 @@ public final class TrainingModel {
             races = try await stores.raceStore.races(in: loadedRange)
         }
         await recompute(asOf: today)
+    }
+
+    /// Upserts `goal` into ``GoalStore`` and reloads ``goals``. Nothing is recomputed: no metric
+    /// depends on goals.
+    ///
+    /// - Throws: ``GoalStoreError/notConfigured`` if the ``StoreSet`` has no ``GoalStore``, or whatever
+    ///   the store throws.
+    public func add(_ goal: Goal) async throws {
+        guard let goalStore = stores.goalStore else { throw GoalStoreError.notConfigured }
+        try await goalStore.upsert([goal])
+        goals = try await goalStore.goals()
+    }
+
+    /// Removes the goal with id `id` and reloads ``goals``. A no-op, other than the reload, if `id`
+    /// doesn't exist in the store.
+    ///
+    /// - Throws: ``GoalStoreError/notConfigured`` if the ``StoreSet`` has no ``GoalStore``, or whatever
+    ///   the store throws.
+    public func deleteGoal(id: UUID) async throws {
+        guard let goalStore = stores.goalStore else { throw GoalStoreError.notConfigured }
+        try await goalStore.deleteGoal(id: id)
+        goals = try await goalStore.goals()
     }
 
     /// Rebuilds ``metrics``.

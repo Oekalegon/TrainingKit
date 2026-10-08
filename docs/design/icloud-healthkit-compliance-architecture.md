@@ -19,7 +19,7 @@ store files (`TrainingPersistenceContainer.make(...)`):
 
 | Store | File | CloudKit | Models |
 |---|---|---|---|
-| Synced ("default") | `default.store` | `.automatic` (the app's iCloud container) | `PlannedActivityRecord`, `StructuredWorkoutRecord`, `TrainingCycleRecord`, `RaceRecord`, `AthletePreferencesRecord` |
+| Synced ("default") | `default.store` | `.automatic` (the app's iCloud container) | `PlannedActivityRecord`, `StructuredWorkoutRecord`, `TrainingCycleRecord`, `RaceRecord`, `GoalRecord`, `AthletePreferencesRecord` |
 | Local ("Local") | `Local.store` | none | `ActivityRecord` (with its heart-rate samples), `DeletedActivitySourceRecord`, `ActivityJoinRecord`, `AthleteProfileRecord`, `FitnessMetricsRecord`, `FitnessMetricsCacheStateRecord` |
 
 - **The athlete profile is split.** `AthleteProfileRecord` (local) holds the whole profile and the

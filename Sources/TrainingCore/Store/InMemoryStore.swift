@@ -1,13 +1,13 @@
 import Foundation
 
-/// An in-memory implementation of all six Core store protocols, for tests and previews.
+/// An in-memory implementation of all the Core store protocols, for tests and previews.
 ///
-/// A single actor conforming to all six protocols at once is why the per-store mutation methods
+/// A single actor conforming to all the protocols at once is why the per-store mutation methods
 /// above are named distinctly (`deletePlan`/`deleteWorkout`/`deleteCycle` rather than a shared
 /// `delete(id:)`) — Swift can't satisfy identically-shaped requirements from different protocols
 /// with different implementations on one conforming type.
 public actor InMemoryStore: ActivityStore, PlanStore, WorkoutLibraryStore, WorkoutTemplateStore, CycleStore,
-    AthleteStore, FitnessMetricsCacheStore, RaceStore {
+    AthleteStore, FitnessMetricsCacheStore, RaceStore, GoalStore {
     private var activitiesByID: [UUID: Activity] = [:]
     private var deletedSources: Set<ActivitySource> = []
     /// Joined activity id → its component ids. See ``ActivityStore/saveJoin(_:components:replacing:)``.
@@ -17,6 +17,7 @@ public actor InMemoryStore: ActivityStore, PlanStore, WorkoutLibraryStore, Worko
     private var templatesByID: [UUID: WorkoutTemplate] = [:]
     private var cyclesByID: [UUID: TrainingCycle] = [:]
     private var racesByID: [UUID: Race] = [:]
+    private var goalsByID: [UUID: Goal] = [:]
     private var profile: AthleteProfile?
     private var anchor: ImportAnchor?
     private var cachedMetricsByDay: [Date: FitnessMetrics] = [:]
@@ -252,6 +253,30 @@ public actor InMemoryStore: ActivityStore, PlanStore, WorkoutLibraryStore, Worko
             throw CycleStoreError.hasChildren(id)
         }
         cyclesByID.removeValue(forKey: id)
+    }
+
+    // MARK: GoalStore
+
+    /// See ``GoalStore/goals()``.
+    public func goals() async throws -> [Goal] {
+        Array(goalsByID.values)
+    }
+
+    /// See ``GoalStore/goal(id:)``.
+    public func goal(id: UUID) async throws -> Goal? {
+        goalsByID[id]
+    }
+
+    /// See ``GoalStore/upsert(_:)``.
+    public func upsert(_ goals: [Goal]) async throws {
+        for goal in goals {
+            goalsByID[goal.id] = goal
+        }
+    }
+
+    /// See ``GoalStore/deleteGoal(id:)``.
+    public func deleteGoal(id: UUID) async throws {
+        goalsByID.removeValue(forKey: id)
     }
 
     // MARK: RaceStore

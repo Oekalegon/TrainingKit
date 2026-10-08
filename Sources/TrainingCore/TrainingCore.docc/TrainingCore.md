@@ -104,6 +104,13 @@ See `docs/design/trainingKit-design.md` in the package repository for the full m
 - ``Race``
 - ``RacePriority``
 
+### Goals
+
+- ``Goal``
+- ``GoalTarget``
+- ``GoalMeasure``
+- ``GoalPeriod``
+
 ### Plan Evaluation
 
 - ``PlanEvaluator``
@@ -121,6 +128,9 @@ See `docs/design/trainingKit-design.md` in the package repository for the full m
 - ``CycleStore``
 - ``CycleStoreError``
 - ``CycleNestingValidator``
+- ``RaceStore``
+- ``GoalStore``
+- ``GoalStoreError``
 - ``AthleteStore``
 - ``InMemoryStore``
 - ``StoreSet``

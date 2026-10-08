@@ -433,4 +433,26 @@ struct InMemoryStoreTests {
         let store = InMemoryStore()
         try await store.deleteRace(id: UUID())
     }
+
+    // MARK: GoalStore
+
+    @Test("GoalStore upsert/fetch round-trips, replaces by id and deletes")
+    func goalStore() async throws {
+        let store = InMemoryStore()
+        var goal = Goal(name: "Sub-20 5k", target: .time(sport: .running, distanceMeters: 5000, seconds: 1200))
+        let other = Goal(name: "Enjoy running again", target: .freeText)
+
+        try await store.upsert([goal, other])
+        goal.name = "Sub-19:30 5k"
+        try await store.upsert([goal])
+
+        #expect(try await store.goals().count == 2)
+        #expect(try await store.goal(id: goal.id)?.name == "Sub-19:30 5k")
+
+        try await store.deleteGoal(id: goal.id)
+        try await store.deleteGoal(id: UUID())
+
+        #expect(try await store.goals().map(\.id) == [other.id])
+        #expect(try await store.goal(id: goal.id) == nil)
+    }
 }

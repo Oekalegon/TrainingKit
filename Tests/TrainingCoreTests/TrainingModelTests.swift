@@ -208,6 +208,45 @@ struct TrainingModelTests {
         #expect(try await store.race(id: race.id) == race)
     }
 
+    @Test("goals load without a date range, and add(_ goal:) and deleteGoal(id:) keep them in step with the store")
+    func goalsLoadAddAndDelete() async throws {
+        let store = InMemoryStore()
+        let stores = StoreSet(
+            activityStore: store, planStore: store, workoutStore: store,
+            cycleStore: store, raceStore: store, athleteStore: store, goalStore: store
+        )
+        let existing = Goal(name: "Sub-20 5k", target: .time(sport: .running, distanceMeters: 5000, seconds: 1200))
+        try await store.upsert([existing])
+        let model = TrainingModel(stores: stores, athlete: AthleteProfile.fixture())
+
+        try await model.load(in: day(0)...day(13), asOf: day(0))
+        #expect(model.goals == [existing])
+
+        let added = Goal(name: "Enjoy running again", target: .freeText)
+        try await model.add(added)
+        #expect(Set(model.goals.map(\.id)) == [existing.id, added.id])
+        #expect(try await store.goal(id: added.id) == added)
+
+        try await model.deleteGoal(id: existing.id)
+        #expect(model.goals.map(\.id) == [added.id])
+        #expect(try await store.goal(id: existing.id) == nil)
+    }
+
+    @Test("without a GoalStore, goals stay empty and changing them throws notConfigured")
+    func goalsWithoutStore() async throws {
+        let (_, stores) = makeStores()
+        let model = TrainingModel(stores: stores, athlete: AthleteProfile.fixture())
+        try await model.load(in: day(0)...day(13), asOf: day(0))
+
+        #expect(model.goals.isEmpty)
+        await #expect(throws: GoalStoreError.notConfigured) {
+            try await model.add(Goal(name: "x", target: .freeText))
+        }
+        await #expect(throws: GoalStoreError.notConfigured) {
+            try await model.deleteGoal(id: UUID())
+        }
+    }
+
     @Test("deleteRace(id:) removes it from the store and local state")
     func deleteRaceRemovesFromStoreAndState() async throws {
         let (store, stores) = makeStores()

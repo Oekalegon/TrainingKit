@@ -43,6 +43,7 @@ struct SplitContainerTests {
             #expect(!synced.contains(healthModel), "\(healthModel) would sync to iCloud")
         }
         #expect(synced.contains("AthletePreferencesRecord"))
+        #expect(synced.contains("GoalRecord"))
     }
 
     // MARK: The synced preferences

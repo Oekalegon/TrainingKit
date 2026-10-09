@@ -21,7 +21,8 @@ public final class TrainingModel {
     public private(set) var goals: [Goal] = []
     /// The athlete's own workout templates (MVP2-140), as of the last ``load(in:asOf:)`` or template
     /// change, in no guaranteed order. The built-in ones (``BuiltInWorkoutTemplates``) aren't stored,
-    /// so they aren't here. Empty when the ``StoreSet`` has no ``WorkoutTemplateStore``.
+    /// so they aren't here. Includes archived templates (``WorkoutTemplate/isArchived``), which a caller
+    /// offering templates should leave out. Empty when the ``StoreSet`` has no ``WorkoutTemplateStore``.
     public private(set) var templates: [WorkoutTemplate] = []
     public private(set) var metrics: [FitnessMetrics] = []
     /// Advice on activities in ``activities`` whose ``Activity/dateRange``s overlap or sit close
@@ -368,15 +369,43 @@ public final class TrainingModel {
         templates = try await templateStore.templates()
     }
 
-    /// Removes the template with id `id` and reloads ``templates``. A no-op, other than the reload, if
-    /// `id` doesn't exist in the store. Plans made from it keep their workouts.
+    /// Removes the template with id `id` and reloads ``templates``.
     ///
+    /// A template that a plan's workout was made from is archived instead (MVP2-142): kept, with
+    /// ``WorkoutTemplate/archivedDate`` set, so those plans can still open its parameters and an export
+    /// can still name it. Every plan counts, past or upcoming. One no plan uses is deleted. Deleting an
+    /// archived template again leaves it archived; an id that doesn't exist is a no-op.
+    ///
+    /// - Parameter today: Stamped as the archive date; injected for the same determinism reason as
+    ///   ``load(in:asOf:)``.
+    /// - Returns: What happened to the template.
     /// - Throws: ``WorkoutTemplateStoreError/notConfigured`` if the ``StoreSet`` has no
-    ///   ``WorkoutTemplateStore``, or whatever the store throws.
-    public func deleteTemplate(id: UUID) async throws {
+    ///   ``WorkoutTemplateStore``, or whatever the stores throw.
+    @discardableResult
+    public func deleteTemplate(id: UUID, asOf today: Date = .now) async throws -> TemplateRemoval {
         guard let templateStore = stores.templateStore else { throw WorkoutTemplateStoreError.notConfigured }
-        try await templateStore.deleteTemplate(id: id)
+        var removal = TemplateRemoval.deleted
+        if var template = try await templateStore.template(id: id) {
+            if template.isArchived {
+                removal = .archived
+            } else if try await isUsedByAPlan(templateID: id) {
+                template.archivedDate = today
+                try await templateStore.upsert([template])
+                removal = .archived
+            } else {
+                try await templateStore.deleteTemplate(id: id)
+            }
+        }
         templates = try await templateStore.templates()
+        return removal
+    }
+
+    /// Whether any plan, on any day, uses a workout made from the template with this id.
+    private func isUsedByAPlan(templateID: UUID) async throws -> Bool {
+        let workoutIDs = Set(try await stores.workoutStore.workouts().filter { $0.templateID == templateID }.map(\.id))
+        guard !workoutIDs.isEmpty else { return false }
+        let plans = try await stores.planStore.plans(in: Date.distantPast...Date.distantFuture)
+        return plans.contains { workoutIDs.contains($0.workoutID) }
     }
 
     /// Rebuilds ``metrics``.

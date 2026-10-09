@@ -357,7 +357,8 @@ public final class TrainingModel {
     }
 
     /// Upserts `template` into ``WorkoutTemplateStore`` and reloads ``templates``. Plans already made
-    /// from the template keep the workouts they were instantiated into.
+    /// from the template keep the workouts they were instantiated into, so ``plans`` and ``workouts``
+    /// aren't reloaded and nothing is recomputed.
     ///
     /// - Throws: ``WorkoutTemplateStoreError/notConfigured`` if the ``StoreSet`` has no
     ///   ``WorkoutTemplateStore``, or whatever the store throws.

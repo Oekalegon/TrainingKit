@@ -539,8 +539,19 @@ public actor SwiftDataStore: ActivityStore, PlanStore, WorkoutLibraryStore, Cycl
     }
 
     /// See `WorkoutTemplateStore/template(id:)`.
+    ///
+    /// Returns `nil` and logs for a record that can't be decoded, as ``templates()`` skips it, so the
+    /// two never disagree about whether a template exists.
     public func template(id: UUID) async throws -> WorkoutTemplate? {
-        try fetchTemplateRecord(id: id)?.toTemplate()
+        guard let record = try fetchTemplateRecord(id: id) else { return nil }
+        do {
+            return try record.toTemplate()
+        } catch {
+            Logging.persistence.error(
+                "Template \(id, privacy: .public) can't be decoded: \(String(describing: error), privacy: .public)"
+            )
+            return nil
+        }
     }
 
     /// See `WorkoutTemplateStore/upsert(_:)`.

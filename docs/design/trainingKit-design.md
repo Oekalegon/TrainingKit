@@ -477,7 +477,8 @@ Sources/
                       MacroTemplate, CycleLayoutBuilder
     Goals/            Goal, GoalTarget, GoalMeasure, GoalPeriod
     Store/            ActivityStore, PlanStore, WorkoutLibraryStore, CycleStore, RaceStore,
-                      GoalStore, AthleteStore, InMemoryStore
+                      GoalStore, WorkoutTemplateStore, WorkoutTemplateStoreError,
+                      AthleteStore, FitnessMetricsCacheStore, InMemoryStore
     TrainingModel.swift
   TrainingHealthKit/  HealthKitActivityImporter, HealthKitAthleteReader, ImportAnchor
   TrainingWorkoutKit/ WorkoutKitBridge, WorkoutKitMapping+Goals, WorkoutKitMapping+Alerts

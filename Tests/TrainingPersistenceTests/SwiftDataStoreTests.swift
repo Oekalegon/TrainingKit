@@ -698,6 +698,29 @@ struct SwiftDataStoreTests {
         #expect(templates == [good])
     }
 
+    @Test("a template with a step kind this version doesn't know is skipped by both templates() and template(id:)")
+    func templateStoreSkipsUnknownStepKind() async throws {
+        let container = try TrainingPersistenceContainer.make(cloudKitDatabase: .none, isStoredInMemoryOnly: true)
+        let store = SwiftDataStore(modelContainer: container)
+        let good = WorkoutTemplate(name: "Easy", sport: .running, parameters: [], blocks: [])
+        try await store.upsert([good])
+        // Right shape, but a step kind a newer version might add.
+        let futureID = UUID()
+        let future = try JSONEncoder().encode(
+            WorkoutTemplate(
+                id: futureID, name: "Future", sport: .running, parameters: [],
+                blocks: [TemplateBlock(steps: [TemplateStep(kind: .work, goal: .open)])]
+            )
+        )
+        let json = String(decoding: future, as: UTF8.self).replacingOccurrences(of: "\"work\"", with: "\"sprint\"")
+        let context = ModelContext(container)
+        context.insert(WorkoutTemplateRecord(id: futureID, payload: Data(json.utf8)))
+        try context.save()
+
+        #expect(try await store.templates() == [good])
+        #expect(try await store.template(id: futureID) == nil)
+    }
+
     @Test("RaceStore delete is a no-op for an id that doesn't exist")
     func raceStoreDeleteMissingIsNoOp() async throws {
         let store = try makeStore()

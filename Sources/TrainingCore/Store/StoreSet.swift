@@ -1,5 +1,5 @@
-/// Bundles the six Core store protocols so callers (``TrainingModel`` here, the MVP 2 LLM tool
-/// layer later) can pass one value instead of six separate store parameters.
+/// Bundles the Core store protocols so callers (``TrainingModel`` here, the MVP 2 LLM tool
+/// layer later) can pass one value instead of one parameter per store.
 public struct StoreSet: Sendable {
     /// Storage for completed activities.
     public var activityStore: any ActivityStore
@@ -13,6 +13,9 @@ public struct StoreSet: Sendable {
     public var raceStore: any RaceStore
     /// Storage for the athlete profile.
     public var athleteStore: any AthleteStore
+    /// Storage for goals. `nil` leaves ``TrainingModel/goals`` empty, and makes adding or removing
+    /// a goal throw ``GoalStoreError/notConfigured``.
+    public var goalStore: (any GoalStore)?
     /// Storage for the persisted CTL/ATL/TSB/monotony/strain cache. `nil` disables caching
     /// entirely — ``TrainingModel`` recomputes the full daily series from scratch on every
     /// `recompute(asOf:)`, exactly as it did before this store existed.
@@ -29,6 +32,8 @@ public struct StoreSet: Sendable {
     ///   - athleteStore: Storage for the athlete profile.
     ///   - fitnessMetricsCacheStore: Storage for the persisted fitness-metrics cache; defaults to
     ///     `nil` (caching disabled), so every existing caller is unaffected.
+    ///   - goalStore: Storage for goals; defaults to `nil` (no goals), so every existing caller is
+    ///     unaffected.
     public init(
         activityStore: any ActivityStore,
         planStore: any PlanStore,
@@ -36,7 +41,8 @@ public struct StoreSet: Sendable {
         cycleStore: any CycleStore,
         raceStore: any RaceStore,
         athleteStore: any AthleteStore,
-        fitnessMetricsCacheStore: (any FitnessMetricsCacheStore)? = nil
+        fitnessMetricsCacheStore: (any FitnessMetricsCacheStore)? = nil,
+        goalStore: (any GoalStore)? = nil
     ) {
         self.activityStore = activityStore
         self.planStore = planStore
@@ -45,5 +51,6 @@ public struct StoreSet: Sendable {
         self.raceStore = raceStore
         self.athleteStore = athleteStore
         self.fitnessMetricsCacheStore = fitnessMetricsCacheStore
+        self.goalStore = goalStore
     }
 }

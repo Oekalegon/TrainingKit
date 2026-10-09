@@ -247,6 +247,45 @@ struct TrainingModelTests {
         }
     }
 
+    @Test("custom templates load, and add(_ template:) and deleteTemplate(id:) keep them in step with the store")
+    func templatesLoadAddAndDelete() async throws {
+        let store = InMemoryStore()
+        let stores = StoreSet(
+            activityStore: store, planStore: store, workoutStore: store,
+            cycleStore: store, raceStore: store, athleteStore: store, templateStore: store
+        )
+        let existing = WorkoutTemplate(name: "Recovery run", sport: .running, parameters: [], blocks: [])
+        try await store.upsert([existing])
+        let model = TrainingModel(stores: stores, athlete: AthleteProfile.fixture())
+
+        try await model.load(in: day(0)...day(13), asOf: day(0))
+        #expect(model.templates == [existing])
+
+        let added = WorkoutTemplate(name: "Hill repeats", sport: .running, parameters: [], blocks: [])
+        try await model.add(added)
+        #expect(Set(model.templates.map(\.id)) == [existing.id, added.id])
+        #expect(try await store.template(id: added.id) == added)
+
+        try await model.deleteTemplate(id: existing.id)
+        #expect(model.templates.map(\.id) == [added.id])
+        #expect(try await store.template(id: existing.id) == nil)
+    }
+
+    @Test("without a WorkoutTemplateStore, templates stay empty and changing them throws notConfigured")
+    func templatesWithoutStore() async throws {
+        let (_, stores) = makeStores()
+        let model = TrainingModel(stores: stores, athlete: AthleteProfile.fixture())
+        try await model.load(in: day(0)...day(13), asOf: day(0))
+
+        #expect(model.templates.isEmpty)
+        await #expect(throws: WorkoutTemplateStoreError.notConfigured) {
+            try await model.add(WorkoutTemplate(name: "x", sport: .running, parameters: [], blocks: []))
+        }
+        await #expect(throws: WorkoutTemplateStoreError.notConfigured) {
+            try await model.deleteTemplate(id: UUID())
+        }
+    }
+
     @Test("deleteRace(id:) removes it from the store and local state")
     func deleteRaceRemovesFromStoreAndState() async throws {
         let (store, stores) = makeStores()

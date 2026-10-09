@@ -12,6 +12,7 @@ public enum TrainingPersistenceContainer {
             TrainingCycleRecord.self,
             RaceRecord.self,
             GoalRecord.self,
+            WorkoutTemplateRecord.self,
             AthletePreferencesRecord.self,
         ]
     }

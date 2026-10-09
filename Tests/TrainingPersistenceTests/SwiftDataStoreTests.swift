@@ -644,6 +644,83 @@ struct SwiftDataStoreTests {
         #expect(goals == [good])
     }
 
+    // MARK: WorkoutTemplateStore
+
+    @Test("WorkoutTemplateStore upsert/fetch round-trips parameters and parameterised blocks, replaces by id and deletes")
+    func templateStoreRoundTrip() async throws {
+        let store = try makeStore()
+        var intervals = WorkoutTemplate(
+            name: "Intervals", titleName: "Reps", sport: .running,
+            parameters: [
+                WorkoutTemplateParameter(key: "reps", name: "Repeats", unit: .count, defaultValue: 6, range: 2...12),
+                WorkoutTemplateParameter(key: "work", name: "Work", unit: .minutes, defaultValue: 3)
+            ],
+            blocks: [
+                TemplateBlock(steps: [TemplateStep(kind: .warmup, goal: .time(.fixed(600)), target: .heartRateZone(2))]),
+                TemplateBlock(
+                    steps: [
+                        TemplateStep(kind: .work, goal: .time(.parameter("work")), target: .heartRateZone(4)),
+                        TemplateStep(kind: .recovery, goal: .open)
+                    ],
+                    repetitions: .parameter("reps")
+                )
+            ]
+        )
+        let easy = WorkoutTemplate(name: "Easy", sport: .cycling, parameters: [], blocks: [])
+
+        try await store.upsert([intervals, easy])
+        intervals.name = "Track intervals"
+        try await store.upsert([intervals])
+
+        let stored = try await store.templates()
+        #expect(Set(stored) == [intervals, easy])
+        #expect(try await store.template(id: intervals.id) == intervals)
+
+        try await store.deleteTemplate(id: easy.id)
+        try await store.deleteTemplate(id: UUID())
+
+        #expect(try await store.template(id: easy.id) == nil)
+        #expect(try await store.templates().count == 1)
+    }
+
+    @Test("WorkoutTemplateStore skips a record it can't decode instead of failing the whole list (MVP2-140)")
+    func templateStoreSkipsUndecodableRecord() async throws {
+        let container = try TrainingPersistenceContainer.make(cloudKitDatabase: .none, isStoredInMemoryOnly: true)
+        let store = SwiftDataStore(modelContainer: container)
+        let good = WorkoutTemplate(name: "Easy", sport: .running, parameters: [], blocks: [])
+        try await store.upsert([good])
+        let context = ModelContext(container)
+        context.insert(WorkoutTemplateRecord(id: UUID(), payload: Data(#"{"name":"Future","blocks":"?"}"#.utf8)))
+        try context.save()
+
+        let templates = try await store.templates()
+
+        #expect(templates == [good])
+    }
+
+    @Test("a template with a step kind this version doesn't know is skipped by both templates() and template(id:)")
+    func templateStoreSkipsUnknownStepKind() async throws {
+        let container = try TrainingPersistenceContainer.make(cloudKitDatabase: .none, isStoredInMemoryOnly: true)
+        let store = SwiftDataStore(modelContainer: container)
+        let good = WorkoutTemplate(name: "Easy", sport: .running, parameters: [], blocks: [])
+        try await store.upsert([good])
+        // Right shape, but a step kind a newer version might add.
+        let futureID = UUID()
+        let future = try JSONEncoder().encode(
+            WorkoutTemplate(
+                id: futureID, name: "Future", sport: .running, parameters: [],
+                blocks: [TemplateBlock(steps: [TemplateStep(kind: .work, goal: .open)])]
+            )
+        )
+        let json = String(decoding: future, as: UTF8.self).replacingOccurrences(of: "\"work\"", with: "\"sprint\"")
+        let context = ModelContext(container)
+        context.insert(WorkoutTemplateRecord(id: futureID, payload: Data(json.utf8)))
+        try context.save()
+
+        #expect(try await store.templates() == [good])
+        #expect(try await store.template(id: futureID) == nil)
+    }
+
     @Test("RaceStore delete is a no-op for an id that doesn't exist")
     func raceStoreDeleteMissingIsNoOp() async throws {
         let store = try makeStore()

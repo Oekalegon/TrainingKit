@@ -44,6 +44,7 @@ struct SplitContainerTests {
         }
         #expect(synced.contains("AthletePreferencesRecord"))
         #expect(synced.contains("GoalRecord"))
+        #expect(synced.contains("WorkoutTemplateRecord"))
     }
 
     // MARK: The synced preferences

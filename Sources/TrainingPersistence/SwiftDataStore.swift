@@ -466,8 +466,22 @@ public actor SwiftDataStore: ActivityStore, PlanStore, WorkoutLibraryStore, Cycl
     // MARK: GoalStore
 
     /// See `GoalStore/goals()`.
+    ///
+    /// A record that can't be decoded is skipped and logged rather than thrown (MVP2-139): goals sync,
+    /// so another device running a newer version can write a target kind this one doesn't know, and
+    /// one such goal mustn't make `TrainingModel.load(in:asOf:)` fail for everything else. It stays
+    /// in the store untouched.
     public func goals() async throws -> [Goal] {
-        try modelContext.fetch(FetchDescriptor<GoalRecord>()).map { try $0.toGoal() }
+        try modelContext.fetch(FetchDescriptor<GoalRecord>()).compactMap { record in
+            do {
+                return try record.toGoal()
+            } catch {
+                Logging.persistence.error(
+                    "Skipping goal \(record.id, privacy: .public) that can't be decoded: \(String(describing: error), privacy: .public)"
+                )
+                return nil
+            }
+        }
     }
 
     /// See `GoalStore/goal(id:)`.

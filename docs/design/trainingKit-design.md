@@ -367,7 +367,9 @@ Logging: `os.Logger` with subsystem `com.<you>.trainingKit`, categories `Import`
 
 ## 4. Store protocols
 
-Core defines the storage contract; `TrainingPersistence` implements it with SwiftData in two stores (MVP2-131): plans, workouts, cycles, races and the athlete's own preferences sync through CloudKit; activities (with their heart-rate samples), joins, tombstones, the fitness-metrics cache and the HealthKit-derived parts of the profile stay on the device, because Apple's guideline 5.1.3(ii) forbids storing health information in iCloud. Each device imports its own activities from HealthKit. See `docs/design/icloud-healthkit-compliance-architecture.md` for which model lives where and how an old single store is migrated.
+Core defines the storage contract; `TrainingPersistence` implements it with SwiftData in two stores (MVP2-131): plans, workouts, cycles, races, goals and the athlete's own preferences sync through CloudKit; activities (with their heart-rate samples), joins, tombstones, the fitness-metrics cache and the HealthKit-derived parts of the profile stay on the device, because Apple's guideline 5.1.3(ii) forbids storing health information in iCloud. Each device imports its own activities from HealthKit. See `docs/design/icloud-healthkit-compliance-architecture.md` for which model lives where and how an old single store is migrated.
+
+A `Goal` (MVP2-139) is a non-event target with no date and no calendar presence, separate from `Race`: its `GoalTarget` is a time over a distance ("sub-20 5k"), a volume per week, month or year for a sport or all sports ("run 1500 km this year"), or free text. `GoalStore.goals()` has no range because a goal has no date, and `TrainingModel.goals` loads with the rest. Nothing reads goals yet; a management UI and plans that use them are MVP 5. `SwiftDataStore.goals()` skips and logs a record it can't decode, so a target kind written by a newer version on another device doesn't fail the whole load.
 
 ```swift
 protocol ActivityStore: Sendable {
@@ -471,8 +473,9 @@ Sources/
                       CycleStats, CycleFitness, StatisticsCalculator, HeartRateSegmentIterator
     Cycles/           TrainingCycle, CycleLevel, CyclePhase, MesocycleTemplate,
                       MacroTemplate, CycleLayoutBuilder
-    Store/            ActivityStore, PlanStore, WorkoutLibraryStore, CycleStore, AthleteStore,
-                      InMemoryStore
+    Goals/            Goal, GoalTarget, GoalMeasure, GoalPeriod
+    Store/            ActivityStore, PlanStore, WorkoutLibraryStore, CycleStore, RaceStore,
+                      GoalStore, AthleteStore, InMemoryStore
     TrainingModel.swift
   TrainingHealthKit/  HealthKitActivityImporter, HealthKitAthleteReader, ImportAnchor
   TrainingWorkoutKit/ WorkoutKitBridge, WorkoutKitMapping+Goals, WorkoutKitMapping+Alerts

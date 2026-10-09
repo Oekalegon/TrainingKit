@@ -628,6 +628,22 @@ struct SwiftDataStoreTests {
         #expect(try await store.goals().count == 2)
     }
 
+    @Test("GoalStore skips a record it can't decode instead of failing the whole list (MVP2-139)")
+    func goalStoreSkipsUndecodableRecord() async throws {
+        let container = try TrainingPersistenceContainer.make(cloudKitDatabase: .none, isStoredInMemoryOnly: true)
+        let store = SwiftDataStore(modelContainer: container)
+        let good = Goal(name: "Sub-20 5k", target: .time(sport: .running, distanceMeters: 5000, seconds: 1200))
+        try await store.upsert([good])
+        // A target kind a newer version might write: valid JSON, but not a case this version knows.
+        let context = ModelContext(container)
+        context.insert(GoalRecord(id: UUID(), payload: Data(#"{"id":"\#(UUID().uuidString)","name":"Future","target":{"swim":{}}}"#.utf8)))
+        try context.save()
+
+        let goals = try await store.goals()
+
+        #expect(goals == [good])
+    }
+
     @Test("RaceStore delete is a no-op for an id that doesn't exist")
     func raceStoreDeleteMissingIsNoOp() async throws {
         let store = try makeStore()

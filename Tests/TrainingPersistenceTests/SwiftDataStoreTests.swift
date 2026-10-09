@@ -683,6 +683,24 @@ struct SwiftDataStoreTests {
         #expect(try await store.templates().count == 1)
     }
 
+    @Test("a template saved before archivedDate existed decodes as not archived, and the date round-trips (MVP2-142)")
+    func templateStoreArchiveDate() async throws {
+        let container = try TrainingPersistenceContainer.make(cloudKitDatabase: .none, isStoredInMemoryOnly: true)
+        let store = SwiftDataStore(modelContainer: container)
+        let old = WorkoutTemplate(name: "Old", sport: .running, parameters: [], blocks: [])
+        var json = try JSONSerialization.jsonObject(with: JSONEncoder().encode(old)) as! [String: Any]
+        json.removeValue(forKey: "archivedDate")
+        let context = ModelContext(container)
+        context.insert(WorkoutTemplateRecord(id: old.id, payload: try JSONSerialization.data(withJSONObject: json)))
+        try context.save()
+        #expect(try await store.template(id: old.id)?.isArchived == false)
+
+        var archived = old
+        archived.archivedDate = Date(timeIntervalSince1970: 1_700_000_000)
+        try await store.upsert([archived])
+        #expect(try await store.template(id: old.id)?.archivedDate == archived.archivedDate)
+    }
+
     @Test("WorkoutTemplateStore skips a record it can't decode instead of failing the whole list (MVP2-140)")
     func templateStoreSkipsUndecodableRecord() async throws {
         let container = try TrainingPersistenceContainer.make(cloudKitDatabase: .none, isStoredInMemoryOnly: true)

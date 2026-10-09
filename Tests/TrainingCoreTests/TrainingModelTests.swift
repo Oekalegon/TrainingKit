@@ -271,6 +271,56 @@ struct TrainingModelTests {
         #expect(try await store.template(id: existing.id) == nil)
     }
 
+    @Test("deleting a template that a plan uses archives it; an unused one is removed, and archiving is sticky (MVP2-142)")
+    func deleteTemplateArchivesWhenUsed() async throws {
+        let store = InMemoryStore()
+        let stores = StoreSet(
+            activityStore: store, planStore: store, workoutStore: store,
+            cycleStore: store, raceStore: store, athleteStore: store, templateStore: store
+        )
+        let used = WorkoutTemplate(name: "Used", sport: .running, parameters: [], blocks: [])
+        let unused = WorkoutTemplate(name: "Unused", sport: .running, parameters: [], blocks: [])
+        try await store.upsert([used, unused])
+        let workout = try used.instantiate()
+        try await store.upsert([workout])
+        // An upcoming plan counts as much as a past one.
+        try await store.upsert([PlannedActivity(workoutID: workout.id, date: day(200))])
+        let model = TrainingModel(stores: stores, athlete: AthleteProfile.fixture())
+        try await model.load(in: day(0)...day(13), asOf: day(0))
+
+        #expect(try await model.deleteTemplate(id: unused.id, asOf: day(0)) == .deleted)
+        #expect(try await store.template(id: unused.id) == nil)
+
+        #expect(try await model.deleteTemplate(id: used.id, asOf: day(1)) == .archived)
+        let archived = try #require(try await store.template(id: used.id))
+        #expect(archived.archivedDate == day(1))
+        #expect(archived.isArchived)
+        #expect(model.templates.map(\.id) == [used.id])
+
+        // Again: still archived, and the date doesn't move.
+        #expect(try await model.deleteTemplate(id: used.id, asOf: day(5)) == .archived)
+        #expect(try await store.template(id: used.id)?.archivedDate == day(1))
+
+        // An id that was never there is a no-op.
+        #expect(try await model.deleteTemplate(id: UUID()) == .deleted)
+    }
+
+    @Test("a template whose workouts no plan references is removed, not archived")
+    func deleteTemplateWithOrphanWorkout() async throws {
+        let store = InMemoryStore()
+        let stores = StoreSet(
+            activityStore: store, planStore: store, workoutStore: store,
+            cycleStore: store, raceStore: store, athleteStore: store, templateStore: store
+        )
+        let template = WorkoutTemplate(name: "T", sport: .running, parameters: [], blocks: [])
+        try await store.upsert([template])
+        try await store.upsert([try template.instantiate()])
+        let model = TrainingModel(stores: stores, athlete: AthleteProfile.fixture())
+
+        #expect(try await model.deleteTemplate(id: template.id) == .deleted)
+        #expect(model.templates.isEmpty)
+    }
+
     @Test("without a WorkoutTemplateStore, templates stay empty and changing them throws notConfigured")
     func templatesWithoutStore() async throws {
         let (_, stores) = makeStores()

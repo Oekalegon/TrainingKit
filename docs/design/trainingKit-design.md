@@ -371,7 +371,7 @@ Core defines the storage contract; `TrainingPersistence` implements it with Swif
 
 A `Goal` (MVP2-139) is a non-event target with no date and no calendar presence, separate from `Race`: its `GoalTarget` is a time over a distance ("sub-20 5k"), a volume per week, month or year for a sport or all sports ("run 1500 km this year"), or free text. `GoalStore.goals()` has no range because a goal has no date, and `TrainingModel.goals` loads with the rest. Nothing reads goals yet; a management UI and plans that use them are MVP 5. `SwiftDataStore.goals()` skips and logs a record it can't decode, so a target kind written by a newer version on another device doesn't fail the whole load.
 
-The athlete's own `WorkoutTemplate`s (MVP2-140) are stored the same way: `WorkoutTemplateStore` (`templates()`, `template(id:)`, `upsert(_:)`, `deleteTemplate(id:)`), an optional `StoreSet.templateStore`, a synced `WorkoutTemplateRecord`, and `TrainingModel.templates` with `add(_:)` and `deleteTemplate(id:)`. Only custom templates are stored; the built-in ones stay in `BuiltInWorkoutTemplates`. Deleting or editing a template never touches plans already made from it, since each plan instantiated its own `StructuredWorkout`. `SwiftDataStore.templates()` skips and logs a record it can't decode, as for goals.
+The athlete's own `WorkoutTemplate`s (MVP2-140) are stored the same way: `WorkoutTemplateStore` (`templates()`, `template(id:)`, `upsert(_:)`, `deleteTemplate(id:)`), an optional `StoreSet.templateStore`, a synced `WorkoutTemplateRecord`, and `TrainingModel.templates` with `add(_:)` and `deleteTemplate(id:)`. Only custom templates are stored; the built-in ones stay in `BuiltInWorkoutTemplates`. Deleting or editing a template never touches plans already made from it, since each plan instantiated its own `StructuredWorkout`. `SwiftDataStore.templates()` skips and logs a record it can't decode, as for goals. Deleting a template that a plan's workout was made from archives it instead (MVP2-142: `WorkoutTemplate.archivedDate`, `TrainingModel.deleteTemplate(id:asOf:)` returning `TemplateRemoval`), so those plans keep their template for editing parameters and for exports; every plan counts, past or upcoming, and a template no plan uses is removed. `TrainingModel.templates` includes archived templates, so a caller offering templates filters on `isArchived`.
 
 ```swift
 protocol ActivityStore: Sendable {
@@ -477,7 +477,7 @@ Sources/
                       MacroTemplate, CycleLayoutBuilder
     Goals/            Goal, GoalTarget, GoalMeasure, GoalPeriod
     Store/            ActivityStore, PlanStore, WorkoutLibraryStore, CycleStore, RaceStore,
-                      GoalStore, WorkoutTemplateStore, WorkoutTemplateStoreError,
+                      GoalStore, WorkoutTemplateStore, WorkoutTemplateStoreError, TemplateRemoval,
                       AthleteStore, FitnessMetricsCacheStore, InMemoryStore
     TrainingModel.swift
   TrainingHealthKit/  HealthKitActivityImporter, HealthKitAthleteReader, ImportAnchor

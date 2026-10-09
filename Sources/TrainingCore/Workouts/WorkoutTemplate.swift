@@ -17,6 +17,12 @@ public struct WorkoutTemplate: Identifiable, Sendable, Codable, Hashable {
     public var parameters: [WorkoutTemplateParameter]
     /// The ordered blocks making up this template.
     public var blocks: [TemplateBlock]
+    /// When the athlete deleted this template while plans still used it (MVP2-142), or `nil` for one
+    /// in use. An archived template stays in the store so those plans can still open its parameters,
+    /// but libraries and pickers don't offer it. Absent from templates saved before this field existed.
+    public var archivedDate: Date?
+    /// Whether the template was archived instead of deleted; see ``archivedDate``.
+    public var isArchived: Bool { archivedDate != nil }
 
     /// Creates a workout template.
     ///
@@ -27,13 +33,15 @@ public struct WorkoutTemplate: Identifiable, Sendable, Codable, Hashable {
     ///   - sport: The kind of activity this template is for.
     ///   - parameters: The parameters this template's blocks may reference.
     ///   - blocks: The ordered blocks making up this template.
+    ///   - archivedDate: When the template was archived; defaults to `nil`.
     public init(
         id: UUID = UUID(),
         name: String,
         titleName: String? = nil,
         sport: Sport,
         parameters: [WorkoutTemplateParameter],
-        blocks: [TemplateBlock]
+        blocks: [TemplateBlock],
+        archivedDate: Date? = nil
     ) {
         self.id = id
         self.name = name
@@ -41,6 +49,7 @@ public struct WorkoutTemplate: Identifiable, Sendable, Codable, Hashable {
         self.sport = sport
         self.parameters = parameters
         self.blocks = blocks
+        self.archivedDate = archivedDate
     }
 }
 

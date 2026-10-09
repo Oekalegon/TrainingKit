@@ -2,9 +2,9 @@ import TrainingCore
 import Foundation
 import SwiftData
 
-/// SwiftData-backed implementation of all five Core store protocols, sharing one `ModelContainer`.
+/// SwiftData-backed implementation of the Core store protocols, sharing one `ModelContainer`.
 ///
-/// A single actor conforming to all five protocols at once, for the same reason as `InMemoryStore`:
+/// A single actor conforming to all of them at once, for the same reason as `InMemoryStore`:
 /// Swift can't satisfy identically-shaped requirements from different protocols with different
 /// implementations on one conforming type, hence the distinct `deletePlan`/`deleteWorkout`/
 /// `deleteCycle` names rather than one shared `delete(id:)`.
@@ -21,8 +21,8 @@ import SwiftData
 /// indexed date fields if profiling ever shows otherwise. `activities(in:)` is the one query that
 /// already needed this: see its doc comment below.
 @ModelActor
-public actor SwiftDataStore: ActivityStore, PlanStore, WorkoutLibraryStore, CycleStore, RaceStore, GoalStore, AthleteStore,
-    FitnessMetricsCacheStore {
+public actor SwiftDataStore: ActivityStore, PlanStore, WorkoutLibraryStore, CycleStore, RaceStore, GoalStore,
+    WorkoutTemplateStore, AthleteStore, FitnessMetricsCacheStore {
     // MARK: ActivityStore
 
     /// See `ActivityStore/activities(in:)`.
@@ -514,6 +514,60 @@ public actor SwiftDataStore: ActivityStore, PlanStore, WorkoutLibraryStore, Cycl
 
     private func fetchGoalRecord(id: UUID) throws -> GoalRecord? {
         let descriptor = FetchDescriptor<GoalRecord>(predicate: #Predicate { $0.id == id })
+        return try modelContext.fetch(descriptor).first
+    }
+
+    // MARK: WorkoutTemplateStore
+
+    /// See `WorkoutTemplateStore/templates()`.
+    ///
+    /// A record that can't be decoded is skipped and logged rather than thrown, as for goals: templates
+    /// sync, so another device on a newer version can write a step kind or goal this one doesn't know,
+    /// and one such template mustn't make `TrainingModel.load(in:asOf:)` fail for everything else. It
+    /// stays in the store untouched.
+    public func templates() async throws -> [WorkoutTemplate] {
+        try modelContext.fetch(FetchDescriptor<WorkoutTemplateRecord>()).compactMap { record in
+            do {
+                return try record.toTemplate()
+            } catch {
+                Logging.persistence.error(
+                    "Skipping template \(record.id, privacy: .public) that can't be decoded: \(String(describing: error), privacy: .public)"
+                )
+                return nil
+            }
+        }
+    }
+
+    /// See `WorkoutTemplateStore/template(id:)`.
+    public func template(id: UUID) async throws -> WorkoutTemplate? {
+        try fetchTemplateRecord(id: id)?.toTemplate()
+    }
+
+    /// See `WorkoutTemplateStore/upsert(_:)`.
+    public func upsert(_ templates: [WorkoutTemplate]) async throws {
+        var existingRecordsByID: [UUID: WorkoutTemplateRecord] = [:]
+        for record in try modelContext.fetch(FetchDescriptor<WorkoutTemplateRecord>()) {
+            existingRecordsByID[record.id] = record
+        }
+        for template in templates {
+            if let existing = existingRecordsByID[template.id] {
+                try existing.update(from: template)
+            } else {
+                modelContext.insert(try WorkoutTemplateRecord(template: template))
+            }
+        }
+        try modelContext.save()
+    }
+
+    /// See `WorkoutTemplateStore/deleteTemplate(id:)`.
+    public func deleteTemplate(id: UUID) async throws {
+        guard let record = try fetchTemplateRecord(id: id) else { return }
+        modelContext.delete(record)
+        try modelContext.save()
+    }
+
+    private func fetchTemplateRecord(id: UUID) throws -> WorkoutTemplateRecord? {
+        let descriptor = FetchDescriptor<WorkoutTemplateRecord>(predicate: #Predicate { $0.id == id })
         return try modelContext.fetch(descriptor).first
     }
 

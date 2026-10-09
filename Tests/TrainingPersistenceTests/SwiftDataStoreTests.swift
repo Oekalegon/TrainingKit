@@ -644,6 +644,60 @@ struct SwiftDataStoreTests {
         #expect(goals == [good])
     }
 
+    // MARK: WorkoutTemplateStore
+
+    @Test("WorkoutTemplateStore upsert/fetch round-trips parameters and parameterised blocks, replaces by id and deletes")
+    func templateStoreRoundTrip() async throws {
+        let store = try makeStore()
+        var intervals = WorkoutTemplate(
+            name: "Intervals", titleName: "Reps", sport: .running,
+            parameters: [
+                WorkoutTemplateParameter(key: "reps", name: "Repeats", unit: .count, defaultValue: 6, range: 2...12),
+                WorkoutTemplateParameter(key: "work", name: "Work", unit: .minutes, defaultValue: 3)
+            ],
+            blocks: [
+                TemplateBlock(steps: [TemplateStep(kind: .warmup, goal: .time(.fixed(600)), target: .heartRateZone(2))]),
+                TemplateBlock(
+                    steps: [
+                        TemplateStep(kind: .work, goal: .time(.parameter("work")), target: .heartRateZone(4)),
+                        TemplateStep(kind: .recovery, goal: .open)
+                    ],
+                    repetitions: .parameter("reps")
+                )
+            ]
+        )
+        let easy = WorkoutTemplate(name: "Easy", sport: .cycling, parameters: [], blocks: [])
+
+        try await store.upsert([intervals, easy])
+        intervals.name = "Track intervals"
+        try await store.upsert([intervals])
+
+        let stored = try await store.templates()
+        #expect(Set(stored) == [intervals, easy])
+        #expect(try await store.template(id: intervals.id) == intervals)
+
+        try await store.deleteTemplate(id: easy.id)
+        try await store.deleteTemplate(id: UUID())
+
+        #expect(try await store.template(id: easy.id) == nil)
+        #expect(try await store.templates().count == 1)
+    }
+
+    @Test("WorkoutTemplateStore skips a record it can't decode instead of failing the whole list (MVP2-140)")
+    func templateStoreSkipsUndecodableRecord() async throws {
+        let container = try TrainingPersistenceContainer.make(cloudKitDatabase: .none, isStoredInMemoryOnly: true)
+        let store = SwiftDataStore(modelContainer: container)
+        let good = WorkoutTemplate(name: "Easy", sport: .running, parameters: [], blocks: [])
+        try await store.upsert([good])
+        let context = ModelContext(container)
+        context.insert(WorkoutTemplateRecord(id: UUID(), payload: Data(#"{"name":"Future","blocks":"?"}"#.utf8)))
+        try context.save()
+
+        let templates = try await store.templates()
+
+        #expect(templates == [good])
+    }
+
     @Test("RaceStore delete is a no-op for an id that doesn't exist")
     func raceStoreDeleteMissingIsNoOp() async throws {
         let store = try makeStore()

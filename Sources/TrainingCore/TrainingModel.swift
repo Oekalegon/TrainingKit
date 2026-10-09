@@ -19,6 +19,10 @@ public final class TrainingModel {
     /// Every goal, as of the last ``load(in:asOf:)`` or goal change: goals have no date, so they aren't
     /// limited to the loaded range. Empty when the ``StoreSet`` has no ``GoalStore``.
     public private(set) var goals: [Goal] = []
+    /// The athlete's own workout templates (MVP2-140), as of the last ``load(in:asOf:)`` or template
+    /// change, in no guaranteed order. The built-in ones (``BuiltInWorkoutTemplates``) aren't stored,
+    /// so they aren't here. Empty when the ``StoreSet`` has no ``WorkoutTemplateStore``.
+    public private(set) var templates: [WorkoutTemplate] = []
     public private(set) var metrics: [FitnessMetrics] = []
     /// Advice on activities in ``activities`` whose ``Activity/dateRange``s overlap or sit close
     /// together — see ``ActivityOverlapChecker/findOverlaps(in:thresholds:)``. Recomputed on every
@@ -193,6 +197,7 @@ public final class TrainingModel {
         let newCycles = try await stores.cycleStore.cycles(in: range)
         let newRaces = try await stores.raceStore.races(in: range)
         let newGoals = try await stores.goalStore?.goals() ?? []
+        let newTemplates = try await stores.templateStore?.templates() ?? []
         let newHasEverImportedActivities = try await stores.athleteStore.importAnchor() != nil
 
         activities = newActivities
@@ -201,6 +206,7 @@ public final class TrainingModel {
         cycles = newCycles
         races = newRaces
         goals = newGoals
+        templates = newTemplates
         hasEverImportedActivities = newHasEverImportedActivities
         loadedRange = range
         await recompute(asOf: today)
@@ -348,6 +354,28 @@ public final class TrainingModel {
         guard let goalStore = stores.goalStore else { throw GoalStoreError.notConfigured }
         try await goalStore.deleteGoal(id: id)
         goals = try await goalStore.goals()
+    }
+
+    /// Upserts `template` into ``WorkoutTemplateStore`` and reloads ``templates``. Plans already made
+    /// from the template keep the workouts they were instantiated into.
+    ///
+    /// - Throws: ``WorkoutTemplateStoreError/notConfigured`` if the ``StoreSet`` has no
+    ///   ``WorkoutTemplateStore``, or whatever the store throws.
+    public func add(_ template: WorkoutTemplate) async throws {
+        guard let templateStore = stores.templateStore else { throw WorkoutTemplateStoreError.notConfigured }
+        try await templateStore.upsert([template])
+        templates = try await templateStore.templates()
+    }
+
+    /// Removes the template with id `id` and reloads ``templates``. A no-op, other than the reload, if
+    /// `id` doesn't exist in the store. Plans made from it keep their workouts.
+    ///
+    /// - Throws: ``WorkoutTemplateStoreError/notConfigured`` if the ``StoreSet`` has no
+    ///   ``WorkoutTemplateStore``, or whatever the store throws.
+    public func deleteTemplate(id: UUID) async throws {
+        guard let templateStore = stores.templateStore else { throw WorkoutTemplateStoreError.notConfigured }
+        try await templateStore.deleteTemplate(id: id)
+        templates = try await templateStore.templates()
     }
 
     /// Rebuilds ``metrics``.

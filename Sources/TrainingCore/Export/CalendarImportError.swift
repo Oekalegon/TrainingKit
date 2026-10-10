@@ -45,4 +45,31 @@ public struct CalendarImportReport: Sendable, Hashable {
     public let skippedCompleted: Int
     /// Planned entries that couldn't be imported.
     public let rejected: [Rejection]
+    /// Templates added to the library (MVP2-141), because a plan that was added uses them and the
+    /// library had nothing equal.
+    public let templatesAdded: Int
+    /// Templates in the file that the library already had in an equal form, which the added plans'
+    /// workouts were linked to instead of adding another.
+    public let templatesLinked: Int
+    /// Templates added under a new id, because the library has a different template with the same id.
+    /// Counted in addition to ``templatesAdded``'s own, not within it.
+    public let templatesCopied: Int
+    /// Templates in the file that couldn't be read, or couldn't be stored. Their workouts are rebuilt
+    /// from their steps, without a template link.
+    public let templatesRejected: Int
+
+    init(
+        added: Int, skippedDuplicates: Int, skippedPast: Int, skippedCompleted: Int, rejected: [Rejection],
+        templatesAdded: Int = 0, templatesLinked: Int = 0, templatesCopied: Int = 0, templatesRejected: Int = 0
+    ) {
+        self.added = added
+        self.skippedDuplicates = skippedDuplicates
+        self.skippedPast = skippedPast
+        self.skippedCompleted = skippedCompleted
+        self.rejected = rejected
+        self.templatesAdded = templatesAdded
+        self.templatesLinked = templatesLinked
+        self.templatesCopied = templatesCopied
+        self.templatesRejected = templatesRejected
+    }
 }

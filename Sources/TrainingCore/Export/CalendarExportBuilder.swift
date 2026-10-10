@@ -92,6 +92,7 @@ public struct CalendarExportBuilder: Sendable {
         let activityIDs = Set(activities.map(\.id))
 
         var days: [CalendarExport.Day] = []
+        var plannedTemplateIDs: Set<UUID> = []
         var day = firstStart
         while day <= lastStart {
             // Cancelled mid-build: stop early. The caller discards the partial result.
@@ -113,6 +114,7 @@ public struct CalendarExportBuilder: Sendable {
                 }
                 .compactMap { plan -> CalendarExport.Entry? in
                     guard let workout = workoutsByID[plan.workoutID] else { return nil }
+                    if let templateID = workout.templateID { plannedTemplateIDs.insert(templateID) }
                     return plannedEntry(plan, workout: workout, templateNames: templateNames, athlete: athlete)
                 }
             days.append(CalendarExport.Day(
@@ -130,8 +132,21 @@ public struct CalendarExportBuilder: Sendable {
             timeZone: athlete.timeZone.identifier,
             firstDay: Self.dayString(firstStart, calendar: calendar),
             lastDay: Self.dayString(lastStart, calendar: calendar),
-            days: days
+            days: days,
+            templates: customTemplates(usedIn: plannedTemplateIDs, from: templates)
         )
+    }
+
+    /// The definitions of the custom templates among `ids` (MVP2-141): every template in `templates`
+    /// that planned entries use and that isn't built in, archived ones included, in a fixed order
+    /// (name, then id) so the same calendar always gives the same file.
+    private func customTemplates(usedIn ids: Set<UUID>, from templates: [WorkoutTemplate]) -> [CalendarExport.Template] {
+        let builtInIDs = Set(BuiltInWorkoutTemplates.all.map(\.id))
+        var seen: Set<UUID> = []
+        return templates
+            .filter { ids.contains($0.id) && !builtInIDs.contains($0.id) && seen.insert($0.id).inserted }
+            .sorted { ($0.name, $0.id.uuidString) < ($1.name, $1.id.uuidString) }
+            .map(CalendarExport.Template.init)
     }
 
     private func completedEntry(
@@ -165,6 +180,8 @@ public struct CalendarExportBuilder: Sendable {
             name: workout?.name,
             sport: Self.sportIdentifier(activity.sport),
             template: workout?.templateID.flatMap { templateNames[$0] },
+            templateID: nil,
+            parameterValues: nil,
             intensity: intensity.map { Self.intensityIdentifier($0.category) },
             trimp: load.map { Self.finite($0.value) } ?? nil,
             trimpSource: load.map { Self.trimpSource(for: $0.method) },
@@ -188,6 +205,8 @@ public struct CalendarExportBuilder: Sendable {
             name: workout.name,
             sport: Self.sportIdentifier(workout.sport),
             template: expected.template,
+            templateID: workout.templateID?.uuidString,
+            parameterValues: workout.templateID == nil ? nil : workout.parameterValues?.compactMapValues(Self.finite),
             intensity: Self.intensityIdentifier(intensity.category),
             trimp: expected.trimp,
             trimpSource: expected.trimpSource,
@@ -224,7 +243,7 @@ public struct CalendarExportBuilder: Sendable {
         }
     }
 
-    private static func stepKindIdentifier(_ kind: StepKind) -> String {
+    static func stepKindIdentifier(_ kind: StepKind) -> String {
         switch kind {
         case .warmup: "warmup"
         case .work: "work"
@@ -233,7 +252,7 @@ public struct CalendarExportBuilder: Sendable {
         }
     }
 
-    private static func target(_ target: IntensityTarget) -> CalendarExport.Target {
+    static func target(_ target: IntensityTarget) -> CalendarExport.Target {
         switch target {
         case .heartRateZone(let zone):
             CalendarExport.Target(type: "heartRateZone", zone: zone, rpe: nil, min: nil, max: nil)

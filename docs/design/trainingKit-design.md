@@ -765,6 +765,15 @@ What's included (`CalendarExportBuilder`, a pure function):
   fulfilled, i.e. what was intended; without a plan it's empty, as activities record no laps.
 - **"Workout type"** is three fields: `sport`, the `template` a planned workout was built from, and
   the `intensity` category.
+- **Templates** (MVP2-141): a planned entry built from a template also carries `templateID` and
+  `parameterValues` (the values it was instantiated with, by parameter key; both `null` otherwise).
+  The file's top-level `templates` array holds the full definition of each **custom** template a
+  planned entry uses, once each, archived ones included (MVP2-142), sorted by name then id. Built-in
+  templates are named by id only, since every app has them. A definition is written in the file's own
+  vocabulary (`CalendarExport.Template`: parameters with `unit` `minutes`/`meters`/`count`, blocks with
+  `repetitions` or `repetitionsParameter`, steps with `kind`, `goal` and a fixed value or a
+  `…Parameter` key, and the same `target` as a step). Fields that don't apply are left out. A file
+  without `templates` still reads, as empty (the schema version stays 1: adding fields doesn't bump it).
 - **Metrics** per day: load, CTL, ATL, TSB, monotony, strain (`null` when undefined, e.g. a flat
   week), and the projected and warming-up flags.
 
@@ -785,10 +794,20 @@ without changing anything. The pure `CalendarImportPlanner` decides, so it is te
 
 What is imported:
 - **Planned entries only.** Each becomes a `PlannedActivity` on its day, read in the athlete's own
-  time zone so the day lands where it does in the app. The workout is rebuilt from the entry's
-  `steps`: steps of one `block` form a block, repeated as often as the block's highest `repetition`.
-  The template link isn't restored, so such a workout can't be re-opened with its template's
-  parameters. A step kind or goal this version doesn't know rejects the entry.
+  time zone so the day lands where it does in the app. The workout is rebuilt from the template the
+  entry names (MVP2-141) when the library has it (built-in, or custom) or the file defines it:
+  instantiated with the entry's `parameterValues`, so it keeps its template link and can be
+  re-opened with the template's parameters. Otherwise (an older file, a template that is neither in
+  the library nor the file, an unreadable definition) it is rebuilt from the entry's `steps`: steps
+  of one `block` form a block, repeated as often as the block's highest `repetition`, with no
+  template link. A step kind or goal this version doesn't know rejects such an entry.
+- **Templates in the file** are added to the library (`TrainingModel.templates`, saved to the
+  template store) only when a plan that is added uses them. A template equal to one the library has
+  (same sport, parameters and blocks; the name, id and archived state don't count) isn't added: the
+  workouts link to the existing one, a live one in preference to an archived one. One whose id the
+  library holds with a different definition is added as a copy with a new id, so neither changes.
+  Two equal templates in one file become one. Without a template store nothing is added, and the
+  entries fall back to their steps.
 - **Entries before today are skipped and counted.** Such a plan would only show as missed and never
   counts as load; the export leaves missed plans out for the same reason.
 - **Completed activities are skipped and counted.** They come from HealthKit, and the file holds no
@@ -801,17 +820,21 @@ What is imported:
   load edited outside the app survives. An untouched estimate is left to be recomputed.
 
 Duplicates: a plan is skipped when the app already has one on the same day for an equal workout
-(name, sport and blocks), so importing a file twice adds nothing. The same workout twice on one day
-is allowed: only the occurrences beyond those already stored are added. A new workout equal to one in
-the library isn't repeated; the plan refers to the existing one.
+(name, sport and blocks, whatever template it was built from), so importing a file twice adds
+nothing, and an older file imported over template-linked plans adds nothing either. The same workout
+twice on one day is allowed: only the occurrences beyond those already stored are added. A new workout
+equal to one in the library isn't repeated; the plan refers to the existing one. The exception is a
+file entry with a template link: it reuses an equal workout only if that has the same template and
+values, so a plan isn't tied to a workout without the link it should have.
 
 An entry without `steps` (a file written before MVP2-102) is rejected, since no workout can be
 rebuilt. A file with a newer `schemaVersion` than the app understands, or one that isn't an export,
 is refused with a `CalendarImportError`. The result is a `CalendarImportReport`: added, skipped as
-duplicates, skipped as past, completed skipped, and rejected entries with a reason.
+duplicates, skipped as past, completed skipped, and rejected entries with a reason, plus the
+templates added, linked to an existing one, added as copies and rejected (unreadable, or no store).
 
-New workouts are saved before the plans that use them, so a failure partway leaves at worst unused
-workouts. Afterwards the model reloads its loaded range and reconciles the plans with the activities
+Templates are saved first, then the new workouts, then the plans that use them, so a failure partway
+leaves at worst unused library entries. Afterwards the model reloads its loaded range and reconciles the plans with the activities
 loaded. The file's days are loaded only when nothing was loaded yet: widening the range for a long
 file would load and recompute a whole season of activities, and the week view loads other weeks
 when they are shown. The plans aren't scheduled in WorkoutKit: that stays

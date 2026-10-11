@@ -808,6 +808,12 @@ What is imported:
   library holds with a different definition is added as a copy with a new id, so neither changes.
   Two equal templates in one file become one. Without a template store nothing is added, and the
   entries fall back to their steps.
+- **The file isn't trusted.** A template definition is rejected (counted, its workouts keep their
+  steps) when a fixed repeat count isn't in 1...100, a fixed time or distance isn't positive, two
+  parameters share a key, a default lies outside its range, or it refers to an undeclared parameter.
+  An entry's parameter value that isn't declared, isn't a number or is outside the parameter's range
+  is dropped, so the parameter keeps its default; a workout that is still absurd (a parameter with
+  no range driving a huge repeat count) is rebuilt from the entry's steps instead.
 - **Entries before today are skipped and counted.** Such a plan would only show as missed and never
   counts as load; the export leaves missed plans out for the same reason.
 - **Completed activities are skipped and counted.** They come from HealthKit, and the file holds no

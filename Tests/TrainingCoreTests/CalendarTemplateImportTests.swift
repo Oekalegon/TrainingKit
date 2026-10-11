@@ -263,6 +263,108 @@ struct CalendarTemplateImportTests {
         #expect(result.report.templatesRejected == 1)
     }
 
+    /// The file with `edit` applied to its pretty-printed JSON text.
+    private func edited(_ file: CalendarExport, _ edit: (String) -> String) throws -> CalendarExport {
+        let json = try #require(String(data: file.jsonData(), encoding: .utf8))
+        return try CalendarExport.decode(from: Data(edit(json).utf8))
+    }
+
+    @Test("a definition with an unusable repeat count, goal, key set or default is rejected, and its workout keeps its steps",
+          arguments: [
+              ("\"repetitionsParameter\" : \"reps\"", "\"repetitions\" : 0"),
+              ("\"repetitionsParameter\" : \"reps\"", "\"repetitions\" : 100000"),
+              ("\"durationSeconds\" : 600", "\"durationSeconds\" : -5"),
+              ("\"key\" : \"far\"", "\"key\" : \"reps\""),
+              ("\"defaultValue\" : 4", "\"defaultValue\" : 40"),
+          ])
+    func unusableDefinitionRejected(find: String, replace: String) throws {
+        let template = intervals()
+        let file = try edited(
+            try roundTripped(export([try template.instantiate()], templates: [template])),
+            { $0.replacingOccurrences(of: find, with: replace) }
+        )
+
+        let result = plan(file)
+
+        #expect(result.templates.isEmpty)
+        #expect(result.report.templatesRejected == 1)
+        #expect(result.workouts.first?.templateID == nil)
+        #expect(result.report.added == 1)
+    }
+
+    @Test("a parameter value outside the parameter's range is dropped, so the parameter keeps its default")
+    func outOfRangeValueDropped() throws {
+        let template = intervals()
+        let file = try edited(
+            try roundTripped(export([try template.instantiate(values: ["reps": 6])], templates: [template])),
+            { $0.replacingOccurrences(of: "\"reps\" : 6", with: "\"reps\" : 5000") }
+        )
+
+        let workout = try #require(plan(file).workouts.first)
+
+        #expect(workout.parameterValues?["reps"] == 4)
+        #expect(workout.blocks[1].repetitions == 4)
+    }
+
+    @Test("a value that makes a workout absurd, for a parameter with no range, falls back to the steps")
+    func absurdWorkoutFallsBack() throws {
+        let template = WorkoutTemplate(
+            name: "Unbounded", sport: .running,
+            parameters: [WorkoutTemplateParameter(key: "reps", name: "Reps", unit: .count, defaultValue: 4)],
+            blocks: [TemplateBlock(steps: [TemplateStep(kind: .work, goal: .time(.fixed(60)))], repetitions: .parameter("reps"))]
+        )
+        let file = try edited(
+            try roundTripped(export([try template.instantiate(values: ["reps": 6])], templates: [template])),
+            { $0.replacingOccurrences(of: "\"reps\" : 6", with: "\"reps\" : 5000000") }
+        )
+
+        let workout = try #require(plan(file).workouts.first)
+
+        #expect(workout.templateID == nil)
+        #expect(workout.blocks[0].repetitions == 6)  // from the entry's steps
+    }
+
+    @Test("entries written without template fields (a file from before them) still import, from their steps")
+    func entriesWithoutTemplateFields() throws {
+        let template = intervals()
+        let workout = try template.instantiate()
+        var json = try #require(
+            try JSONSerialization.jsonObject(with: try export([workout], templates: [template]).jsonData()) as? [String: Any]
+        )
+        var days = try #require(json["days"] as? [[String: Any]])
+        for dayIndex in days.indices {
+            var entries = try #require(days[dayIndex]["activities"] as? [[String: Any]])
+            for entryIndex in entries.indices {
+                entries[entryIndex]["templateID"] = nil
+                entries[entryIndex]["parameterValues"] = nil
+            }
+            days[dayIndex]["activities"] = entries
+        }
+        json["days"] = days
+        json["templates"] = nil
+        let file = try CalendarExport.decode(from: try JSONSerialization.data(withJSONObject: json))
+        #expect(file.days.flatMap(\.activities).allSatisfy { $0.templateID == nil })
+
+        let result = plan(file)
+
+        #expect(result.workouts.first?.templateID == nil)
+        #expect(result.workouts.first?.blocks == workout.blocks)
+    }
+
+    @Test("an equal template that is only in the library archived is still linked to")
+    func archivedEqualLinked() throws {
+        let theirs = intervals(name: "Theirs")
+        var archived = intervals(name: "Old")
+        archived.archivedDate = day(-5)
+        let file = try roundTripped(export([try theirs.instantiate()], templates: [theirs]))
+
+        let result = plan(file, templates: BuiltInWorkoutTemplates.all + [archived])
+
+        #expect(result.templates.isEmpty)
+        #expect(result.workouts.first?.templateID == archived.id)
+        #expect(result.report.templatesLinked == 1)
+    }
+
     @Test("a stored plan counts as a duplicate even when its workout has a template link and the file's doesn't")
     func duplicateIgnoresTemplateLink() throws {
         let template = intervals()
@@ -337,5 +439,22 @@ struct CalendarTemplateImportModelTests {
         #expect(second.added == 0)
         #expect(model.templates.count == 1)
         #expect(model.workouts.count == 1)
+    }
+
+    @Test("the export's default templates include the model's own custom ones")
+    func defaultExportIncludesCustomTemplates() async throws {
+        let template = WorkoutTemplate(
+            name: "Custom", sport: .running, parameters: [],
+            blocks: [TemplateBlock(steps: [TemplateStep(kind: .work, goal: .time(.fixed(1800)))])]
+        )
+        let (_, model) = makeModel()
+        try await model.add(template)
+        let workout = try template.instantiate()
+        try await model.add(workout)
+        try await model.add(PlannedActivity(workoutID: workout.id, date: day(4)))
+
+        let file = try await model.calendarExport(from: day(0), through: day(6), asOf: day(0))
+
+        #expect(file.templates.map(\.id) == [template.id.uuidString])
     }
 }

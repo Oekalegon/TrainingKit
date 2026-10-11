@@ -28,17 +28,19 @@ extension TrainingModel {
     /// - Parameters:
     ///   - firstDay: Any time on the first day of the period, in the athlete's time zone.
     ///   - lastDay: Any time on the last day, inclusive.
-    ///   - templates: Templates to name each planned workout's template; defaults to the built-in
-    ///     library.
+    ///   - templates: Templates to name each planned workout's template and, for a custom one, to write
+    ///     its definition into the file (MVP2-141); defaults to the built-in library plus
+    ///     ``templates``. Pass the archived ones too, if plans still use them.
     ///   - today: Separates actual from expected load, and missed plans from upcoming ones.
     /// - Returns: The export, ready to encode with ``CalendarExport/jsonData()``.
     /// - Throws: Whatever the stores throw, or `CancellationError` if the calling task is cancelled.
     public func calendarExport(
         from firstDay: Date,
         through lastDay: Date,
-        templates: [WorkoutTemplate] = BuiltInWorkoutTemplates.all,
+        templates: [WorkoutTemplate]? = nil,
         asOf today: Date = .now
     ) async throws -> CalendarExport {
+        let templates = templates ?? BuiltInWorkoutTemplates.all + self.templates
         // Read once: the stores are awaited below, and an athlete or parameter change landing in
         // between must not leave the metrics and the builder working from different ones.
         let athlete = self.athlete

@@ -52,7 +52,7 @@ public struct CalendarImportReport: Sendable, Hashable {
     /// workouts were linked to instead of adding another.
     public let templatesLinked: Int
     /// Templates added under a new id, because the library has a different template with the same id.
-    /// Counted in addition to ``templatesAdded``'s own, not within it.
+    /// A copy is counted here and not in ``templatesAdded``.
     public let templatesCopied: Int
     /// Templates in the file that couldn't be read, or couldn't be stored. Their workouts are rebuilt
     /// from their steps, without a template link.

@@ -55,7 +55,8 @@ public struct CalendarExportBuilder: Sendable {
     ///   - activities: Completed activities; those outside the period are ignored.
     ///   - plans: Planned activities; those outside the period are ignored.
     ///   - workouts: The workouts the plans refer to.
-    ///   - templates: Templates, to name the one each workout was built from.
+    ///   - templates: Templates, to name the one each workout was built from and, for a custom one that
+    ///     a planned entry uses, to write its definition into the export (MVP2-141).
     ///   - metrics: Fitness metrics; days without an entry get `nil` metrics.
     ///   - athlete: Supplies the time zone, zones and pace model.
     ///   - today: Plans before this day that weren't performed are missed and left out.

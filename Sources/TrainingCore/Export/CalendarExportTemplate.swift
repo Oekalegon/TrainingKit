@@ -100,6 +100,8 @@ extension CalendarExport.Template {
     func workoutTemplate() -> WorkoutTemplate? {
         guard let templateID = UUID(uuidString: id) else { return nil }
         var parameters: [WorkoutTemplateParameter] = []
+        // A repeated key would silently resolve to the first.
+        guard Set(self.parameters.map(\.key)).count == self.parameters.count else { return nil }
         for parameter in self.parameters {
             guard let unit = Self.unit(identifier: parameter.unit), parameter.defaultValue.isFinite else { return nil }
             var range: ClosedRange<Double>?
@@ -112,6 +114,7 @@ extension CalendarExport.Template {
             default:
                 return nil
             }
+            if let range, !range.contains(parameter.defaultValue) { return nil }
             parameters.append(WorkoutTemplateParameter(
                 key: parameter.key, name: parameter.name, unit: unit, defaultValue: parameter.defaultValue, range: range
             ))
@@ -120,7 +123,9 @@ extension CalendarExport.Template {
         for block in self.blocks {
             let repetitions: TemplateValue<Int>
             switch (block.repetitions, block.repetitionsParameter) {
-            case (let count?, nil): repetitions = .fixed(count)
+            case (let count?, nil):
+                guard CalendarExport.Template.repetitionLimit.contains(count) else { return nil }
+                repetitions = .fixed(count)
             case (nil, let key?): repetitions = .parameter(key)
             default: return nil
             }
@@ -135,9 +140,28 @@ extension CalendarExport.Template {
             id: templateID, name: name, titleName: titleName, sport: CalendarExportBuilder.sport(identifier: sport),
             parameters: parameters, blocks: blocks
         )
-        // Resolves every reference, so one to an undeclared parameter is caught here.
-        guard (try? template.instantiate()) != nil else { return nil }
+        // Resolves every reference, so one to an undeclared parameter is caught here, and checks
+        // the defaults give a workout that makes sense.
+        guard let workout = try? template.instantiate(), Self.isSane(workout) else { return nil }
         return template
+    }
+
+    /// How many times a block may repeat. The file isn't trusted: a count in the billions is a few bytes
+    /// of JSON but an enormous workout once its steps are expanded.
+    static let repetitionLimit = 1...100
+
+    /// Whether `workout` is one a person could do: every block repeats a sensible number of times,
+    /// and every time and distance goal is finite and positive.
+    static func isSane(_ workout: StructuredWorkout) -> Bool {
+        workout.blocks.allSatisfy { block in
+            repetitionLimit.contains(block.repetitions) && block.steps.allSatisfy { step in
+                switch step.goal {
+                case .time(let seconds): seconds.isFinite && seconds > 0
+                case .distance(let meters): meters.isFinite && meters > 0
+                case .open: true
+                }
+            }
+        }
     }
 
     private static func step(_ step: TemplateStep) -> Step {

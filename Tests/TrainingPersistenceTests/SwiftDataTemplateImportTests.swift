@@ -86,6 +86,9 @@ struct SwiftDataTemplateImportTests {
         #expect(storedWorkout.blocks[1].repetitions == 6)
         let storedPlan = try #require(try await store.plans(in: day(0)...day(6)).first)
         #expect(storedPlan.workoutID == storedWorkout.id)
+        // The model's own copy was refreshed from the store, so the Library shows it without a reload.
+        #expect(model.templates == [original])
+        #expect(model.workouts.first?.templateID == original.id)
     }
 
     @Test("a second import of the same file adds nothing to any store")
@@ -121,6 +124,25 @@ struct SwiftDataTemplateImportTests {
         let copy = try #require(stored.first { $0.id != theirs.id })
         #expect(copy.blocks == theirs.blocks)
         #expect(try await store.workouts().first?.templateID == copy.id)
+    }
+
+    @Test("an archived template is stored with its archived date, and an equal one in a file links to it instead of adding another")
+    func archivedStoredTemplateLinked() async throws {
+        let theirs = template()
+        var archived = template(id: UUID())
+        archived.archivedDate = day(-5)
+        let file = try await export(using: theirs)
+        let (store, model) = try makeSwiftDataModel()
+        try await model.add(archived)
+        // The archived flag survives the record round trip.
+        #expect(try await store.templates() == [archived])
+
+        let report = try await model.importCalendar(file, asOf: day(0))
+
+        #expect(report.templatesLinked == 1)
+        #expect(report.templatesAdded == 0)
+        #expect(try await store.templates() == [archived])
+        #expect(try await store.workouts().first?.templateID == archived.id)
     }
 
     @Test("an equal template already stored is linked to, and no template is added")

@@ -28,6 +28,10 @@ public struct CalendarExport: Sendable, Codable, Hashable {
     /// One entry per calendar day from ``firstDay`` through ``lastDay``, in order, including days
     /// with no activities.
     public let days: [Day]
+    /// The custom templates the planned entries were built from (MVP2-141), each once, so an import
+    /// can add them to the library. A built-in template isn't repeated here: every app has it, and
+    /// an entry's ``Entry/templateID`` is enough. Empty in a file written before this was added.
+    public let templates: [Template]
 
     /// One calendar day.
     public struct Day: Sendable, Codable, Hashable {
@@ -99,6 +103,13 @@ public struct CalendarExport: Sendable, Codable, Hashable {
         public let sport: String
         /// The workout template the planned workout was built from, e.g. `Tempo Run`, if known.
         public let template: String?
+        /// The id of that template (MVP2-141). A custom template's definition is in
+        /// ``CalendarExport/templates``; a built-in one is known to every app. `nil` for a workout
+        /// not built from a template, and for a completed activity.
+        public let templateID: String?
+        /// The parameter values the planned workout was instantiated with, by parameter key, when it
+        /// has a ``templateID`` (MVP2-141).
+        public let parameterValues: [String: Double]?
         /// The intensity category: `veryLow`, `low`, `medium` or `high`. What was performed for a
         /// completed activity, what's intended for a planned one.
         public let intensity: String?
@@ -219,6 +230,25 @@ public struct CalendarExport: Sendable, Codable, Hashable {
     }
 }
 
+extension CalendarExport {
+    /// Decodes an export, reading a missing `templates` as empty so files written before templates
+    /// were added (MVP2-141) still load.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        schemaVersion = try container.decode(Int.self, forKey: .schemaVersion)
+        generatedAt = try container.decode(Date.self, forKey: .generatedAt)
+        timeZone = try container.decode(String.self, forKey: .timeZone)
+        firstDay = try container.decode(String.self, forKey: .firstDay)
+        lastDay = try container.decode(String.self, forKey: .lastDay)
+        days = try container.decode([Day].self, forKey: .days)
+        templates = try container.decodeIfPresent([Template].self, forKey: .templates) ?? []
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case schemaVersion, generatedAt, timeZone, firstDay, lastDay, days, templates
+    }
+}
+
 // Explicit encoders: the synthesized ones skip `nil` values, but the format promises `null`, so
 // every day and entry carries the same keys for tools that expect a fixed shape.
 
@@ -253,7 +283,7 @@ extension CalendarExport.Metrics {
 
 extension CalendarExport.Entry {
     private enum CodingKeys: String, CodingKey {
-        case status, start, name, sport, template, intensity, trimp, trimpSource
+        case status, start, name, sport, template, templateID, parameterValues, intensity, trimp, trimpSource
         case durationSeconds, distanceMeters, plan, steps
     }
 
@@ -266,6 +296,8 @@ extension CalendarExport.Entry {
         name = try container.decodeIfPresent(String.self, forKey: .name)
         sport = try container.decode(String.self, forKey: .sport)
         template = try container.decodeIfPresent(String.self, forKey: .template)
+        templateID = try container.decodeIfPresent(String.self, forKey: .templateID)
+        parameterValues = try container.decodeIfPresent([String: Double].self, forKey: .parameterValues)
         intensity = try container.decodeIfPresent(String.self, forKey: .intensity)
         trimp = try container.decodeIfPresent(Double.self, forKey: .trimp)
         trimpSource = try container.decodeIfPresent(CalendarExport.Entry.TRIMPSource.self, forKey: .trimpSource)
@@ -282,6 +314,8 @@ extension CalendarExport.Entry {
         try container.encode(name, forKey: .name)
         try container.encode(sport, forKey: .sport)
         try container.encode(template, forKey: .template)
+        try container.encode(templateID, forKey: .templateID)
+        try container.encode(parameterValues, forKey: .parameterValues)
         try container.encode(intensity, forKey: .intensity)
         try container.encode(trimp, forKey: .trimp)
         try container.encode(trimpSource, forKey: .trimpSource)

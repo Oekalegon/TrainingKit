@@ -23,7 +23,7 @@ public final class TrainingModel {
     /// change, in no guaranteed order. The built-in ones (``BuiltInWorkoutTemplates``) aren't stored,
     /// so they aren't here. Includes archived templates (``WorkoutTemplate/isArchived``), which a caller
     /// offering templates should leave out. Empty when the ``StoreSet`` has no ``WorkoutTemplateStore``.
-    public private(set) var templates: [WorkoutTemplate] = []
+    public internal(set) var templates: [WorkoutTemplate] = []
     public private(set) var metrics: [FitnessMetrics] = []
     /// Advice on activities in ``activities`` whose ``Activity/dateRange``s overlap or sit close
     /// together — see ``ActivityOverlapChecker/findOverlaps(in:thresholds:)``. Recomputed on every

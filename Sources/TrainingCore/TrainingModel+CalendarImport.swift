@@ -13,7 +13,7 @@ extension TrainingModel {
         try await calendarImportPlan(for: export, asOf: today).report
     }
 
-    /// Adds the planned workouts in `export` as plans, with workouts rebuilt from their steps.
+    /// Adds the planned workouts in `export` as plans, with workouts rebuilt from their template or, failing that, their steps.
     ///
     /// See ``CalendarImportPlanner`` for what is and isn't imported: completed activities and
     /// metrics aren't, plans already stored are skipped, and a TRIMP edited outside the app becomes
@@ -35,6 +35,12 @@ extension TrainingModel {
         let plan = try await calendarImportPlan(for: export, asOf: today)
         guard !plan.plans.isEmpty else { return plan.report }
 
+        // Templates first, then the workouts built from them, then the plans: a failure partway
+        // leaves at worst unused library entries, never a workout or plan without what it refers to.
+        if !plan.templates.isEmpty, let templateStore = stores.templateStore {
+            try await templateStore.upsert(plan.templates)
+            templates = try await templateStore.templates()
+        }
         if !plan.workouts.isEmpty { try await stores.workoutStore.upsert(plan.workouts) }
         try await stores.planStore.upsert(plan.plans)
 
@@ -55,8 +61,11 @@ extension TrainingModel {
         let range = (calendar.date(byAdding: .day, value: -1, to: first) ?? first)...(calendar.date(byAdding: .day, value: 2, to: last) ?? last)
         let existingPlans = try await stores.planStore.plans(in: range)
         let existingWorkouts = try await stores.workoutStore.workouts()
+        let customTemplates = try await stores.templateStore?.templates() ?? []
         return CalendarImportPlanner(estimator: estimator).plan(
-            for: export, existingPlans: existingPlans, existingWorkouts: existingWorkouts, athlete: athlete, today: today
+            for: export, existingPlans: existingPlans, existingWorkouts: existingWorkouts,
+            existingTemplates: BuiltInWorkoutTemplates.all + customTemplates,
+            canAddTemplates: stores.templateStore != nil, athlete: athlete, today: today
         )
     }
 }

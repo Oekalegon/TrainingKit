@@ -3,6 +3,9 @@ import Foundation
 /// What importing a ``CalendarExport`` would store (MVP2-103): the new workouts and plans, and the
 /// report describing them.
 public struct CalendarImportPlan: Sendable, Hashable {
+    /// Templates to add to the library (MVP2-141): those the new plans' workouts were built from,
+    /// which the library doesn't already have in an equal form.
+    public let templates: [WorkoutTemplate]
     /// Workouts to add to the library. A workout equal to one already there isn't repeated: the
     /// plans refer to the existing one instead.
     public let workouts: [StructuredWorkout]
@@ -22,16 +25,24 @@ public struct CalendarImportPlan: Sendable, Hashable {
 /// gives for the rebuilt steps, so a load edited outside the app survives. An untouched estimate is
 /// left to be recomputed.
 ///
-/// A workout is rebuilt from an entry's `steps`: steps of one `block` form one block, and the
-/// block's repetitions are its highest `repetition`. The template link isn't restored, so a
-/// workout imported this way can't be re-opened with its template's parameters.
+/// A workout is rebuilt from the template its entry names (MVP2-141) when the library has it or the
+/// file defines it: instantiated with the entry's parameter values, so it can be re-opened with its
+/// template's parameters. A template in the file is added to the library, unless the library holds
+/// an equal one (same sport, parameters and blocks; the name may differ), which the workouts are
+/// linked to instead. One whose id is already taken by a different definition is added as a copy
+/// with a new id, so neither is altered. Only templates used by a plan that is added are added.
+///
+/// An entry with no usable template (a file written before templates were exported, a template the
+/// library lacks and the file doesn't define, or a definition that can't be read) is rebuilt from its
+/// `steps` instead: steps of one `block` form one block, and the block's repetitions are its highest
+/// `repetition`. Such a workout has no template link.
 ///
 /// Entries before today are skipped: such a plan would only show as missed, and the export leaves
 /// missed plans out for the same reason.
 ///
 /// A plan counts as a duplicate when the app already has one on the same day for an equal workout
-/// (name, sport and blocks). A day can hold the same workout twice: only the occurrences beyond
-/// the ones already stored are added.
+/// (name, sport and blocks, whatever template it was built from). A day can hold the same workout
+/// twice: only the occurrences beyond the ones already stored are added.
 public struct CalendarImportPlanner: Sendable {
     /// Estimates the load of a rebuilt workout, to tell an edited TRIMP from an untouched estimate.
     public let estimator: PlannedLoadEstimator
@@ -52,6 +63,10 @@ public struct CalendarImportPlanner: Sendable {
     ///   - export: The export to import.
     ///   - existingPlans: Plans already stored for the export's period.
     ///   - existingWorkouts: The workout library.
+    ///   - existingTemplates: The templates the library offers, built-in and custom, archived ones
+    ///     included.
+    ///   - canAddTemplates: Whether templates can be stored. Without a template store, a template
+    ///     the library lacks isn't added, and its workouts are rebuilt from their steps.
     ///   - athlete: Supplies the time zone the file's days are read in (the app's own days) and the
     ///     zones the estimator uses.
     ///   - today: Plans on days before this one are skipped.
@@ -60,6 +75,8 @@ public struct CalendarImportPlanner: Sendable {
         for export: CalendarExport,
         existingPlans: [PlannedActivity],
         existingWorkouts: [StructuredWorkout],
+        existingTemplates: [WorkoutTemplate] = [],
+        canAddTemplates: Bool = true,
         athlete: AthleteProfile,
         today: Date
     ) -> CalendarImportPlan {
@@ -67,17 +84,23 @@ public struct CalendarImportPlanner: Sendable {
         calendar.timeZone = athlete.timeZone
         let todayStart = calendar.startOfDay(for: today)
 
-        var workoutIDsByKey: [WorkoutKey: UUID] = [:]
+        // Every workout the library has or this import adds, by what it is, so an entry can reuse one.
+        var workoutsByKey: [WorkoutKey: [StructuredWorkout]] = [:]
         for workout in existingWorkouts {
-            workoutIDsByKey[WorkoutKey(workout), default: workout.id] = workout.id
+            workoutsByKey[WorkoutKey(workout), default: []].append(workout)
         }
         // How many plans for each (day, workout) are already stored; the file's first occurrences
         // up to that count are duplicates.
+        let existingByID = Dictionary(existingWorkouts.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         var storedCounts: [PlanKey: Int] = [:]
         for plan in existingPlans {
-            storedCounts[PlanKey(day: calendar.startOfDay(for: plan.date), workoutID: plan.workoutID), default: 0] += 1
+            guard let workout = existingByID[plan.workoutID] else { continue }
+            storedCounts[PlanKey(day: calendar.startOfDay(for: plan.date), key: WorkoutKey(workout)), default: 0] += 1
         }
 
+        var templates = TemplateResolver(
+            fileTemplates: export.templates, library: existingTemplates, canAdd: canAddTemplates
+        )
         var newWorkouts: [StructuredWorkout] = []
         var newPlans: [PlannedActivity] = []
         var rejected: [CalendarImportReport.Rejection] = []
@@ -102,31 +125,40 @@ public struct CalendarImportPlanner: Sendable {
                     past += 1
                     continue
                 }
-                guard !entry.steps.isEmpty else {
+                let fromTemplate = templates.workout(for: entry)
+                guard fromTemplate != nil || !entry.steps.isEmpty else {
                     reject(.noSteps)
                     continue
                 }
-                guard let workout = Self.workout(from: entry) else {
+                guard let workout = fromTemplate?.workout ?? Self.workout(from: entry) else {
                     reject(.invalidStep)
                     continue
                 }
 
                 let key = WorkoutKey(workout)
-                let workoutID: UUID
-                if let known = workoutIDsByKey[key] {
-                    workoutID = known
-                } else {
-                    workoutID = workout.id
-                    workoutIDsByKey[key] = workoutID
-                    newWorkouts.append(workout)
-                }
-
-                let planKey = PlanKey(day: date, workoutID: workoutID)
+                let planKey = PlanKey(day: date, key: key)
                 if let stored = storedCounts[planKey], stored > 0 {
                     storedCounts[planKey] = stored - 1
                     duplicates += 1
                     continue
                 }
+
+                // Reuse an equal workout, but never one built from another template (or other values)
+                // when this one has a template link to keep; a workout with no link takes any.
+                let candidates = workoutsByKey[key] ?? []
+                let existing = candidates.first {
+                    workout.templateID == nil
+                        || ($0.templateID == workout.templateID && $0.parameterValues == workout.parameterValues)
+                }
+                let workoutID: UUID
+                if let existing {
+                    workoutID = existing.id
+                } else {
+                    workoutID = workout.id
+                    workoutsByKey[key, default: []].append(workout)
+                    newWorkouts.append(workout)
+                }
+                if let fromTemplate { templates.commit(fromTemplate.templateFileID) }
                 newPlans.append(PlannedActivity(
                     workoutID: workoutID, date: date, expectedLoadOverride: loadOverride(for: entry, workout: workout, athlete: athlete)
                 ))
@@ -134,11 +166,14 @@ public struct CalendarImportPlanner: Sendable {
         }
 
         return CalendarImportPlan(
+            templates: templates.added,
             workouts: newWorkouts,
             plans: newPlans,
             report: CalendarImportReport(
                 added: newPlans.count, skippedDuplicates: duplicates, skippedPast: past, skippedCompleted: completed,
-                rejected: rejected
+                rejected: rejected,
+                templatesAdded: templates.addedCount, templatesLinked: templates.linkedCount,
+                templatesCopied: templates.copiedCount, templatesRejected: templates.rejectedCount
             )
         )
     }
@@ -162,7 +197,7 @@ public struct CalendarImportPlanner: Sendable {
 
     private struct PlanKey: Hashable {
         let day: Date
-        let workoutID: UUID
+        let key: WorkoutKey
     }
 
     static func date(fromDay day: String, calendar: Calendar) -> Date? {
@@ -198,15 +233,19 @@ public struct CalendarImportPlanner: Sendable {
         )
     }
 
-    private static func workoutStep(from step: CalendarExport.Step) -> WorkoutStep? {
-        let kind: StepKind
-        switch step.kind {
-        case "warmup": kind = .warmup
-        case "work": kind = .work
-        case "recovery": kind = .recovery
-        case "cooldown": kind = .cooldown
-        default: return nil
+    /// The step kind a file's identifier names, or `nil` for one this version doesn't know.
+    static func stepKind(identifier: String) -> StepKind? {
+        switch identifier {
+        case "warmup": .warmup
+        case "work": .work
+        case "recovery": .recovery
+        case "cooldown": .cooldown
+        default: nil
         }
+    }
+
+    private static func workoutStep(from step: CalendarExport.Step) -> WorkoutStep? {
+        guard let kind = stepKind(identifier: step.kind) else { return nil }
         let goal: StepGoal
         switch step.goal {
         case "time": goal = .time(step.durationSeconds)
@@ -216,10 +255,10 @@ public struct CalendarImportPlanner: Sendable {
         case "open": goal = .open
         default: return nil
         }
-        return WorkoutStep(kind: kind, goal: goal, target: step.target.flatMap(Self.target))
+        return WorkoutStep(kind: kind, goal: goal, target: step.target.flatMap(Self.target(from:)))
     }
 
-    private static func target(from target: CalendarExport.Target) -> IntensityTarget? {
+    static func target(from target: CalendarExport.Target) -> IntensityTarget? {
         switch target.type {
         case "heartRateZone": return target.zone.map { .heartRateZone($0) }
         case "rpe": return target.rpe.map { .rpe($0) }

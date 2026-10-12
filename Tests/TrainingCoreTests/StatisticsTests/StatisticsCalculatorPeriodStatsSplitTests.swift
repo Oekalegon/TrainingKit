@@ -52,6 +52,22 @@ struct StatisticsCalculatorPeriodStatsSplitTests {
         #expect(split.planned[.running]?.distanceMeters != 8000)
     }
 
+    @Test("a plan already matched to a completed activity is not counted again as planned")
+    func excludesPlansMatchedToAnActivity() {
+        let day = Date(timeIntervalSince1970: 0)
+        let structuredWorkout = workout()
+        let realActivity = activity(sport: .running, start: day, distanceMeters: 8000, duration: 2400)
+        var plan = PlannedActivity(workoutID: structuredWorkout.id, date: day)
+        plan.completedActivityID = realActivity.id
+
+        let split = calculator.periodStatsSplit(
+            activities: [realActivity], plans: [plan], workouts: [structuredWorkout], athlete: athlete, range: day...day, asOf: day
+        )
+
+        #expect(split.actual[.running]?.activityCount == 1)
+        #expect(split.planned[.running] == nil)
+    }
+
     @Test("a completed activity with no matching plan reports only actual")
     func actualOnlyWithNoPlan() {
         let day = Date(timeIntervalSince1970: 0)

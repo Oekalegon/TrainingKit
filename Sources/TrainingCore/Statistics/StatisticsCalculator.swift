@@ -250,7 +250,8 @@ public struct StatisticsCalculator: Sendable {
     /// - Parameters:
     ///   - activities: Completed activities to summarize with `calculators`.
     ///   - plans: Planned activities to project with `estimator`/`durationEstimator`, restricted to
-    ///     `today` or later.
+    ///     `today` or later and to those not yet matched to a completed activity
+    ///     (`completedActivityID == nil`) — a matched plan is already counted as that activity.
     ///   - workouts: The library workouts `plans` reference, looked up by id.
     ///   - athlete: Supplies the timezone and zone settings used throughout.
     ///   - range: The calendar-day range to summarize, in the athlete's timezone. Both bounds are
@@ -282,7 +283,7 @@ public struct StatisticsCalculator: Sendable {
         }
         let plansInRange = plans.filter { plan in
             let day = calendar.startOfDay(for: plan.date)
-            return day >= rangeStart && day <= rangeEnd && day >= todayStart
+            return plan.completedActivityID == nil && day >= rangeStart && day <= rangeEnd && day >= todayStart
         }
 
         var actualBySport: [Sport: [StatItem]] = [:]

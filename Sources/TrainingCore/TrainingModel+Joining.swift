@@ -119,7 +119,7 @@ extension TrainingModel {
         try await stores.planStore.upsert([plan])
     }
 
-    private func reloadAfterJoinChange(from day: Date, asOf today: Date) async throws {
+    func reloadAfterJoinChange(from day: Date, asOf today: Date) async throws {
         await markCacheDirty(from: day)
         let range = loadedRange ?? (today...today)
         activities = try await stores.activityStore.activities(in: range)

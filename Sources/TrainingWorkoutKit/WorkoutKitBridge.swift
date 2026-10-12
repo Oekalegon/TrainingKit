@@ -14,7 +14,7 @@ import WorkoutKit
 /// Mapping is mechanical: `WorkoutBlock` ↔ `IntervalBlock`, `WorkoutStep` ↔ WorkoutKit's
 /// `WorkoutStep`, `StepGoal` ↔ `WorkoutGoal`, `IntensityTarget` ↔ `WorkoutAlert` (see
 /// `WorkoutKitMapping+Goals` and `WorkoutKitMapping+Alerts`), and the workout's sport onto its activity
-/// type plus its `location` (``Venue/workoutKitLocation``), so a planned indoor or outdoor run starts
+/// type plus its `location` (`Venue.workoutKitLocation`), so a planned indoor or outdoor run starts
 /// on the Watch without asking for the venue. The one non-mechanical piece is the
 /// warmup/cooldown split: `CustomWorkout` has dedicated `warmup`/`cooldown` slots holding a single
 /// step each, while `StructuredWorkout` only has `blocks`. A leading or trailing block counts as

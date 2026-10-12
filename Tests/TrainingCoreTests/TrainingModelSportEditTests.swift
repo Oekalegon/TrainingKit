@@ -74,3 +74,24 @@ struct TrainingModelSportEditTests {
         #expect(try await store.activity(id: id)?.sport == .running)
     }
 }
+
+extension TrainingModelSportEditTests {
+    @Test("editing a piece of a join rebuilds the join with the new venue, and an edit on the join survives a refresh")
+    func joinFollowsPieceEdit() async throws {
+        let (store, model) = makeModel()
+        let a = Activity(source: .healthKit(UUID()), sport: .running, venue: .outdoor(nil), start: day(0), duration: 600, perceivedExertion: 5)
+        let b = Activity(source: .healthKit(UUID()), sport: .running, venue: .outdoor(nil), start: day(0).addingTimeInterval(700), duration: 600, perceivedExertion: 5)
+        try await store.upsert([a, b])
+        try await model.load(in: day(0)...day(1), asOf: day(0))
+        try await model.joinActivities(a.id, b.id, asOf: day(0))
+        let joinID = try #require(model.activities.first?.id)
+
+        try await model.setSport(.running, venue: .indoor(.treadmill), forActivityID: a.id, asOf: day(0))
+        try await model.setSport(.running, venue: .indoor(.treadmill), forActivityID: b.id, asOf: day(0))
+        #expect(model.activities.first?.venue == .indoor(.treadmill))
+
+        try await model.setSport(.running, venue: .outdoor(.road), forActivityID: joinID, asOf: day(0))
+        _ = try await model.refreshJoins(containing: [a.id])
+        #expect(try await store.activity(id: joinID)?.venue == .outdoor(.road))
+    }
+}

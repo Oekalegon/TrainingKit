@@ -186,6 +186,8 @@ struct Activity: Identifiable, Sendable, Codable {
     var source: ActivitySource        // .healthKit(uuid), .fitFile(url), .manual, .testing
     var sport: Sport
     var venue: Venue?                 // where it happened, if known; see Venue below
+    var isSportEdited: Bool           // athlete chose sport/venue (TrainingModel.setSport); re-imports and
+                                       // join rebuilds then keep them. Call refreshPaceHistory afterwards
     var start: Date
     var duration: TimeInterval
     var distanceMeters: Double?

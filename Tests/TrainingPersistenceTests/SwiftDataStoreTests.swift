@@ -56,6 +56,22 @@ struct SwiftDataStoreTests {
         #expect(item.venue == .outdoor(.trail))
     }
 
+    @Test("an edited sport and venue round-trips, and a payload without the edit flag decodes as unedited")
+    func editedSportRoundTrip() async throws {
+        let store = try makeStore()
+        let activity = Activity(
+            source: .manual, sport: .hiking, venue: .outdoor(.trail), start: day(1), duration: 1800, isSportEdited: true
+        )
+        try await store.upsert([activity])
+        #expect(try await store.activity(id: activity.id) == activity)
+
+        let record = try ActivityRecord(activity: activity)
+        var json = try #require(JSONSerialization.jsonObject(with: record.payload) as? [String: Any])
+        json["isSportEdited"] = nil
+        record.payload = try JSONSerialization.data(withJSONObject: json)
+        #expect(try record.toActivity().isSportEdited == false)
+    }
+
     @Test("a payload saved with the old outdoorRunning sport lists as running outdoors")
     func legacyVenueListItem() throws {
         let activity = Activity(source: .manual, sport: .running, start: day(1), duration: 1800)

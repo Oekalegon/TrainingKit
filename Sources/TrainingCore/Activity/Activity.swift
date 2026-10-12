@@ -56,6 +56,9 @@ public struct Activity: Identifiable, Sendable, Codable, Hashable {
     /// a placeholder with a start, a duration, a distance and a load but no heart rate, which the real
     /// workout replaces when HealthKit imports it. `false` for every other activity.
     public var isCalendarImport: Bool
+    /// Whether the athlete chose ``sport`` and ``venue`` themselves (``TrainingModel/setSport(_:venue:forActivityID:asOf:)``),
+    /// so a re-import or a rebuilt join keeps them instead of the source's. Defaults to `false`.
+    public var isSportEdited: Bool
 
     /// The time span this activity covers, from ``start`` to `start + duration`.
     ///
@@ -87,6 +90,7 @@ public struct Activity: Identifiable, Sendable, Codable, Hashable {
     ///   - steps: The steps the Watch recorded for a plan-started workout; defaults to none.
     ///   - importedLoad: A load (TRIMP) carried in from a calendar export file; defaults to none.
     ///   - isCalendarImport: Whether the activity was made from a calendar export file; defaults to `false`.
+    ///   - isSportEdited: Whether the athlete chose the sport and venue themselves; defaults to `false`.
     public init(
         id: UUID = UUID(),
         source: ActivitySource,
@@ -105,7 +109,8 @@ public struct Activity: Identifiable, Sendable, Codable, Hashable {
         scheduledPlanID: UUID? = nil,
         steps: [ActivityStep] = [],
         importedLoad: Double? = nil,
-        isCalendarImport: Bool = false
+        isCalendarImport: Bool = false,
+        isSportEdited: Bool = false
     ) {
         self.id = id
         self.source = source
@@ -125,13 +130,14 @@ public struct Activity: Identifiable, Sendable, Codable, Hashable {
         self.steps = steps
         self.importedLoad = importedLoad
         self.isCalendarImport = isCalendarImport
+        self.isSportEdited = isSportEdited
     }
 }
 
 extension Activity {
     private enum CodingKeys: String, CodingKey {
         case id, source, sport, venue, start, duration, distanceMeters, heartRate, speed, elevation, cadence
-        case geographicBounds, perceivedExertion, linkedPlanID, scheduledPlanID, steps, importedLoad, isCalendarImport
+        case geographicBounds, perceivedExertion, linkedPlanID, scheduledPlanID, steps, importedLoad, isCalendarImport, isSportEdited
     }
 
     /// Decodes an activity, reading a missing `steps` as empty, and a missing imported load as none, so
@@ -158,5 +164,6 @@ extension Activity {
         steps = try container.decodeIfPresent([ActivityStep].self, forKey: .steps) ?? []
         importedLoad = try container.decodeIfPresent(Double.self, forKey: .importedLoad)
         isCalendarImport = try container.decodeIfPresent(Bool.self, forKey: .isCalendarImport) ?? false
+        isSportEdited = try container.decodeIfPresent(Bool.self, forKey: .isSportEdited) ?? false
     }
 }

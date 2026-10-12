@@ -91,6 +91,7 @@ public struct AthleteProfile: Sendable, Codable, Equatable {
     ///   - timeZone: Boundary for daily bucketing in the fitness series.
     ///   - weekStartsOn: Boundary for weekly statistics; defaults to Monday.
     ///   - mainSport: The athlete's primary sport; defaults to running.
+    ///   - mainVenue: Where the athlete usually does `mainSport`; defaults to `nil`.
     ///   - heartRateZoneHistory: Every ``HeartRateZoneSettings`` this athlete has recorded.
     ///   - dateOfBirth: The athlete's date of birth, if known; defaults to `nil`.
     ///   - usesHealthKitRestingHeartRate: Whether the resting heart rate follows HealthKit; defaults

@@ -110,7 +110,7 @@ extension WorkoutTemplate {
     ///
     /// - Parameters:
     ///   - name: The instantiated workout's display name; defaults to this template's name.
-    ///   - venue: The venue to give the workout, chosen from ``venueChoices``; defaults to the
+    ///   - chosenVenue: The venue to give the workout, chosen from ``venueChoices``; defaults to the
     ///     template's ``venue``. Ignored when the template doesn't allow it (see ``venueChoices``);
     ///     a venue without a surface is kept unless the template names a surface.
     ///   - values: Parameter key to value; a key declared in this template's `parameters` but

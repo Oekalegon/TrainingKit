@@ -7,8 +7,10 @@ import HealthKit
 public enum HealthKitAuthorization {
     /// The HealthKit types this package reads: workouts, heart rate (during a workout and at
     /// rest), date of birth, and biological sex, and the distance types (running and walking,
-    /// cycling, swimming, rowing), which a workout's steps summarise (MVP2-146): without them a step
-    /// has its times and heart rate but no distance or pace.
+    /// cycling, swimming, rowing), which a workout's steps summarise (MVP2-146), and the speed types
+    /// (running, cycling), whose samples draw the pace chart and feed the pace forecasts: without
+    /// distance a step has its times and heart rate but no distance or pace, and without speed an
+    /// activity has no pace chart.
     public static var readTypes: Set<HKObjectType> {
         [
             HKObjectType.workoutType(),
@@ -18,6 +20,8 @@ public enum HealthKitAuthorization {
             HKQuantityType(.distanceCycling),
             HKQuantityType(.distanceSwimming),
             HKQuantityType(.distanceRowing),
+            HKQuantityType(.runningSpeed),
+            HKQuantityType(.cyclingSpeed),
             HKCharacteristicType(.dateOfBirth),
             HKCharacteristicType(.biologicalSex),
         ]

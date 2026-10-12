@@ -23,7 +23,9 @@ public struct ActivityStep: Sendable, Codable, Hashable {
     public let start: Date
     /// When the step ended: the next step begins here.
     public let end: Date
-    /// The time spent in the step with the workout running, in seconds: `end - start` less any pause.
+    /// The step's duration in seconds as HealthKit reports it (`HKWorkoutActivity.duration`), meant to
+    /// leave out time the workout was paused. Every step inspected so far had no pause, so this has
+    /// only been seen equal to `end - start`.
     public let duration: TimeInterval
     /// Distance covered in the step, in meters, if it recorded one.
     public let distanceMeters: Double?

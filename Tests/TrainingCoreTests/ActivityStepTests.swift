@@ -147,6 +147,24 @@ struct ActivityStepTests {
         }
     }
 
+    @Test("a partial recording that fits either numbering of a workout with no warm-up is not aligned, so no step lands on the wrong planned one")
+    func partialRecordingIsAmbiguous() throws {
+        // A, then B three times; the athlete stopped after A. Numbered from 1 its key is 1.0.0, which in
+        // the other numbering is B's first repetition.
+        let workout = StructuredWorkout(name: "A then B", sport: .running, blocks: [
+            WorkoutBlock(steps: [WorkoutStep(kind: .work, goal: .time(600))]),
+            WorkoutBlock(steps: [WorkoutStep(kind: .work, goal: .time(60))], repetitions: 3),
+        ])
+        let onlyA = [step("1.0.0", from: 0, seconds: 600)]
+        #expect(ActivityStepAligner.align(onlyA, with: workout) == nil)
+
+        // The same recording with a second step is unambiguous: from 1 the second step is 2.0.0.
+        let aAndB = [step("1.0.0", from: 0, seconds: 600), step("2.0.0", from: 600, seconds: 60)]
+        let aligned = try #require(ActivityStepAligner.align(aAndB, with: workout))
+        #expect(aligned.count == 4)
+        #expect(aligned[0] == aAndB[0] && aligned[1] == aAndB[1])
+    }
+
     @Test("an edited plan that no longer fits the recording gives no alignment")
     func editedPlanDoesNotAlign() {
         // The plan now repeats the sprints three times, but five were recorded.

@@ -8,8 +8,10 @@ import Foundation
 /// and whose last is a single cool-down step (the shape `WorkoutKitBridge` sends to the Watch), the
 /// Watch's block number is simply the workout's own block index. A workout without a warm-up has
 /// been seen only on paper, so both numberings are tried (the blocks starting at 0 or at 1) and the
-/// one in which every recorded step lands on a planned step wins. When neither does, but the counts
-/// agree, the steps are paired in order; otherwise there is no alignment.
+/// one in which every recorded step lands on a planned step wins; if both do and they disagree (a
+/// partial recording can fit either), there is no alignment, so a step is never shown against the
+/// wrong planned one. When neither fits, but the counts agree, the steps are paired in order;
+/// otherwise there is no alignment.
 public enum ActivityStepAligner {
     /// The recorded step for each of `workout`'s steps, in the order they are performed with block
     /// repetitions expanded (the order of ``CalendarExport/Step``).
@@ -26,11 +28,12 @@ public enum ActivityStepAligner {
         guard !planned.isEmpty else { return nil }
         let ordered = steps.sorted { $0.start < $1.start }
 
-        for blockOffset in [0, 1] {
-            if let aligned = alignByKeyPath(ordered, planned: planned, blockOffset: blockOffset) {
-                return aligned
-            }
-        }
+        let fits = [0, 1].compactMap { alignByKeyPath(ordered, planned: planned, blockOffset: $0) }
+        if fits.count == 1 { return fits[0] }
+        // Both numberings fit, which a partial recording of a workout with no warm-up can do (the
+        // athlete stopped after the first step, and its key path reads as another planned step in the
+        // other numbering): no guess, unless they agree anyway.
+        if fits.count == 2 { return fits[0] == fits[1] ? fits[0] : nil }
         // The key paths didn't fit but each planned step has exactly one recorded step.
         if ordered.count == planned.count { return ordered }
         return nil

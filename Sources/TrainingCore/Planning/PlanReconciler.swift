@@ -59,7 +59,7 @@ public struct PlanReconciler: Sendable {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = athlete.timeZone
 
-        let sportByWorkoutID = Dictionary(uniqueKeysWithValues: workouts.map { ($0.id, $0.sport) })
+        let kindByWorkoutID = Dictionary(uniqueKeysWithValues: workouts.map { ($0.id, (sport: $0.sport, venue: $0.venue)) })
         var durationByWorkoutID: [UUID: TimeInterval] = [:]
         for workout in workouts {
             durationByWorkoutID[workout.id] = durationEstimator.duration(for: workout, athlete: athlete)
@@ -109,7 +109,9 @@ public struct PlanReconciler: Sendable {
                 let plan = plans[planIndex]
                 guard plan.completedActivityID == nil else { continue }
                 guard calendar.isDate(plan.date, inSameDayAs: activityDay) else { continue }
-                guard sportByWorkoutID[plan.workoutID]?.isSameFamily(as: activity.sport) == true else { continue }
+                guard let kind = kindByWorkoutID[plan.workoutID],
+                      kind.sport.isSameFamily(as: activity.sport, venue: kind.venue, otherVenue: activity.venue)
+                else { continue }
 
                 // Explicit targets only: a duration or distance the plan actually sets outranks one
                 // merely estimated from the other. The estimate is a last resort, for workouts that

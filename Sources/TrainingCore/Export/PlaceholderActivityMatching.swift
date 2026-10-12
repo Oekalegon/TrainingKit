@@ -12,9 +12,9 @@ enum PlaceholderActivityMatching {
     /// The least the durations may be allowed to differ by, in seconds.
     static let minimumDurationTolerance: TimeInterval = 120
 
-    /// Whether a workout of `sport` starting at `start` for `duration` is the same as `item`.
-    static func isSameWorkout(sport: Sport, start: Date, duration: TimeInterval, as item: ActivityListItem) -> Bool {
-        guard sport.isSameFamily(as: item.sport),
+    /// Whether a workout of `sport` (done at `venue`, if known) starting at `start` for `duration` is the same as `item`.
+    static func isSameWorkout(sport: Sport, venue: Venue? = nil, start: Date, duration: TimeInterval, as item: ActivityListItem) -> Bool {
+        guard sport.isSameFamily(as: item.sport, venue: venue, otherVenue: item.venue),
               abs(start.timeIntervalSince(item.start)) <= startTolerance
         else { return false }
         let tolerance = max(minimumDurationTolerance, 0.2 * max(duration, item.duration))

@@ -62,6 +62,7 @@ public struct PaceHistory: Sendable, Equatable {
         let activityID: UUID
         let start: Date
         let sport: Sport
+        let venue: Venue?
         let duration: TimeInterval
         /// Time and distance per heart-rate zone (1...5), from the speed stream binned by the heart
         /// rate at each moment.
@@ -144,14 +145,14 @@ public struct PaceHistory: Sendable, Equatable {
         guard !zones.isEmpty else { return nil }
 
         var steps: [StepObservation] = []
-        if let workout, workout.sport.isSameFamily(as: activity.sport) {
+        if let workout, workout.sport.isSameFamily(as: activity.sport, venue: workout.venue, otherVenue: activity.venue) {
             steps = stepObservations(
                 workout: workout, activity: activity, track: track, zoneModel: zoneModel
             )
         }
 
         return Observation(
-            activityID: activity.id, start: activity.start, sport: activity.sport, duration: activity.duration,
+            activityID: activity.id, start: activity.start, sport: activity.sport, venue: activity.venue, duration: activity.duration,
             zones: zones, workoutID: workout?.id, templateID: workout?.templateID, steps: steps
         )
     }

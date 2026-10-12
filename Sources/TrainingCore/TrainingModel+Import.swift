@@ -144,6 +144,12 @@ extension TrainingModel {
                 // And the streams (MVP2-146): a query that failed this run, or one the athlete has since
                 // refused access to, comes back empty, and replacing a recording with nothing would
                 // lose the pace chart, the forecasts' data and the heart-rate zones for good.
+                // The sport and venue the athlete chose win over the source's.
+                if existing.isSportEdited {
+                    toUpsert[index].sport = existing.sport
+                    toUpsert[index].venue = existing.venue
+                    toUpsert[index].isSportEdited = true
+                }
                 if toUpsert[index].speed.isEmpty { toUpsert[index].speed = existing.speed }
                 if toUpsert[index].heartRate.isEmpty { toUpsert[index].heartRate = existing.heartRate }
             } else {
@@ -163,7 +169,7 @@ extension TrainingModel {
             for activity in real {
                 for placeholder in placeholders where !removed.contains(placeholder.id) && placeholder.id != activity.id
                     && PlaceholderActivityMatching.isSameWorkout(
-                        sport: activity.sport, start: activity.start, duration: activity.duration, as: placeholder
+                        sport: activity.sport, venue: activity.venue, start: activity.start, duration: activity.duration, as: placeholder
                     ) {
                     removed.insert(placeholder.id)
                     deletedStarts.append(placeholder.start)

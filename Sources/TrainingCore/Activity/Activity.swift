@@ -14,6 +14,8 @@ public struct Activity: Identifiable, Sendable, Codable, Hashable {
     public var source: ActivitySource
     /// The kind of activity performed.
     public var sport: Sport
+    /// Where the activity took place, if known.
+    public var venue: Venue?
     /// When the activity began.
     public var start: Date
     /// How long the activity lasted.
@@ -54,6 +56,9 @@ public struct Activity: Identifiable, Sendable, Codable, Hashable {
     /// a placeholder with a start, a duration, a distance and a load but no heart rate, which the real
     /// workout replaces when HealthKit imports it. `false` for every other activity.
     public var isCalendarImport: Bool
+    /// Whether the athlete chose ``sport`` and ``venue`` themselves (``TrainingModel/setSport(_:venue:forActivityID:asOf:)``),
+    /// so a re-import or a rebuilt join keeps them instead of the source's. Defaults to `false`.
+    public var isSportEdited: Bool
 
     /// The time span this activity covers, from ``start`` to `start + duration`.
     ///
@@ -81,13 +86,16 @@ public struct Activity: Identifiable, Sendable, Codable, Hashable {
     ///   - perceivedExertion: Borg CR10 rating (1...10), if entered.
     ///   - linkedPlanID: The matched ``PlannedActivity``'s id, if already reconciled.
     ///   - scheduledPlanID: The id of the plan the workout was started from, if the source knows it.
+    ///   - venue: Where the activity took place, if known.
     ///   - steps: The steps the Watch recorded for a plan-started workout; defaults to none.
     ///   - importedLoad: A load (TRIMP) carried in from a calendar export file; defaults to none.
     ///   - isCalendarImport: Whether the activity was made from a calendar export file; defaults to `false`.
+    ///   - isSportEdited: Whether the athlete chose the sport and venue themselves; defaults to `false`.
     public init(
         id: UUID = UUID(),
         source: ActivitySource,
         sport: Sport,
+        venue: Venue? = nil,
         start: Date,
         duration: TimeInterval,
         distanceMeters: Double? = nil,
@@ -101,11 +109,13 @@ public struct Activity: Identifiable, Sendable, Codable, Hashable {
         scheduledPlanID: UUID? = nil,
         steps: [ActivityStep] = [],
         importedLoad: Double? = nil,
-        isCalendarImport: Bool = false
+        isCalendarImport: Bool = false,
+        isSportEdited: Bool = false
     ) {
         self.id = id
         self.source = source
         self.sport = sport
+        self.venue = venue
         self.start = start
         self.duration = duration
         self.distanceMeters = distanceMeters
@@ -120,22 +130,26 @@ public struct Activity: Identifiable, Sendable, Codable, Hashable {
         self.steps = steps
         self.importedLoad = importedLoad
         self.isCalendarImport = isCalendarImport
+        self.isSportEdited = isSportEdited
     }
 }
 
 extension Activity {
     private enum CodingKeys: String, CodingKey {
-        case id, source, sport, start, duration, distanceMeters, heartRate, speed, elevation, cadence
-        case geographicBounds, perceivedExertion, linkedPlanID, scheduledPlanID, steps, importedLoad, isCalendarImport
+        case id, source, sport, venue, start, duration, distanceMeters, heartRate, speed, elevation, cadence
+        case geographicBounds, perceivedExertion, linkedPlanID, scheduledPlanID, steps, importedLoad, isCalendarImport, isSportEdited
     }
 
     /// Decodes an activity, reading a missing `steps` as empty, and a missing imported load as none, so
-    /// activities saved before those fields (MVP2-146, MVP2-107) still load.
+    /// activities saved before those fields (MVP2-146, MVP2-107) still load. A missing `venue` reads the
+    /// one an older version stored inside the sport (`indoorRunning`/`outdoorRunning`).
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(UUID.self, forKey: .id)
         source = try container.decode(ActivitySource.self, forKey: .source)
-        sport = try container.decode(Sport.self, forKey: .sport)
+        let storedSport = try container.decode(StoredSport.self, forKey: .sport)
+        sport = storedSport.sport
+        venue = try container.decodeIfPresent(Venue.self, forKey: .venue) ?? storedSport.legacyVenue
         start = try container.decode(Date.self, forKey: .start)
         duration = try container.decode(TimeInterval.self, forKey: .duration)
         distanceMeters = try container.decodeIfPresent(Double.self, forKey: .distanceMeters)
@@ -150,5 +164,6 @@ extension Activity {
         steps = try container.decodeIfPresent([ActivityStep].self, forKey: .steps) ?? []
         importedLoad = try container.decodeIfPresent(Double.self, forKey: .importedLoad)
         isCalendarImport = try container.decodeIfPresent(Bool.self, forKey: .isCalendarImport) ?? false
+        isSportEdited = try container.decodeIfPresent(Bool.self, forKey: .isSportEdited) ?? false
     }
 }

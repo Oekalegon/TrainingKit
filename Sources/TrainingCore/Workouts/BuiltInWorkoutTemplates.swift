@@ -128,6 +128,7 @@ public enum BuiltInWorkoutTemplates {
         name: "Base Full-out hill sprints",
         titleName: "Hill Sprints",
         sport: .running,
+        venue: .outdoor(nil),
         parameters: [
             WorkoutTemplateParameter(key: "reps", name: "Sprints", unit: .count, defaultValue: 6, range: 3...12),
             WorkoutTemplateParameter(
@@ -205,6 +206,7 @@ public enum BuiltInWorkoutTemplates {
         id: UUID(uuidString: "8F5D6E4E-6E0E-4B8B-9C1A-9E6F9F1C1A07")!,
         name: "Short interval run (track)",
         sport: .running,
+        venue: .outdoor(.track),
         parameters: [
             WorkoutTemplateParameter(key: "reps", name: "Repetitions", unit: .count, defaultValue: 8, range: 6...12),
             WorkoutTemplateParameter(key: "distance", name: "Effort", unit: .meters, defaultValue: 400, range: 50...800),

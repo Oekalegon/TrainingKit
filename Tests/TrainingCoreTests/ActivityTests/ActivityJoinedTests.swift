@@ -87,7 +87,7 @@ struct ActivityJoinedTests {
             perceivedExertion: 4
         )
         let b = Activity(
-            source: .manual, sport: .outdoorRunning, start: t0.addingTimeInterval(110), duration: 300,
+            source: .manual, sport: .running, venue: .outdoor(.road), start: t0.addingTimeInterval(110), duration: 300,
             geographicBounds: GeographicBounds(minLatitude: 0, maxLatitude: 1.5, minLongitude: 3.5, maxLongitude: 9),
             perceivedExertion: 8
         )
@@ -96,7 +96,8 @@ struct ActivityJoinedTests {
 
         #expect(merged.perceivedExertion == 7)  // (4*100 + 8*300) / 400 = 7
         #expect(merged.geographicBounds == GeographicBounds(minLatitude: 0, maxLatitude: 2, minLongitude: 3, maxLongitude: 9))
-        #expect(merged.sport == .outdoorRunning)
+        #expect(merged.sport == .running)
+        #expect(merged.venue == .outdoor(.road))
         #expect(Activity.joined(a, Activity(source: .manual, sport: .running, start: t0.addingTimeInterval(110), duration: 300, perceivedExertion: nil)).perceivedExertion == 4)
     }
 

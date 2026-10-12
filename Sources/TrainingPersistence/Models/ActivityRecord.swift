@@ -67,7 +67,7 @@ extension ActivityRecord {
     func toListItem() throws -> ActivityListItem {
         let fields = try PersistenceCoding.decode(SummaryFields.self, from: payload)
         return ActivityListItem(
-            id: id, sport: fields.sport, start: fields.start, duration: fields.duration,
+            id: id, sport: fields.sport.sport, venue: fields.venue ?? fields.sport.legacyVenue, start: fields.start, duration: fields.duration,
             distanceMeters: fields.distanceMeters, linkedPlanID: fields.linkedPlanID,
             isCalendarImport: fields.isCalendarImport ?? false
         )
@@ -75,7 +75,8 @@ extension ActivityRecord {
 
     /// The fields of an encoded `Activity` that ``toListItem()`` reads; the decoder ignores the rest.
     private struct SummaryFields: Decodable {
-        let sport: Sport
+        let sport: StoredSport
+        let venue: Venue?
         let start: Date
         let duration: TimeInterval
         let distanceMeters: Double?

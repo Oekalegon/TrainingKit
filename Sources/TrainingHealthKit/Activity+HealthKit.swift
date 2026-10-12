@@ -40,6 +40,7 @@ extension Activity {
             id: existingID ?? workout.uuid,
             source: .healthKit(workout.uuid),
             sport: Sport(healthKitActivityType: workout.workoutActivityType),
+            venue: Venue(healthKitWorkout: workout),
             start: workout.startDate,
             duration: workout.duration,
             distanceMeters: workout.totalDistance?.doubleValue(for: .meter()),
@@ -48,6 +49,16 @@ extension Activity {
             scheduledPlanID: scheduledPlanID,
             steps: workout.workoutActivities.compactMap(ActivityStep.init(healthKitActivity:)).sorted { $0.start < $1.start }
         )
+    }
+}
+
+extension Venue {
+    /// The venue HealthKit records for `workout` in its `HKMetadataKeyIndoorWorkout` metadata, or
+    /// `nil` when the workout doesn't say. HealthKit only knows indoors versus outdoors, so there's no
+    /// surface.
+    init?(healthKitWorkout workout: HKWorkout) {
+        guard let indoor = workout.metadata?[HKMetadataKeyIndoorWorkout] as? Bool else { return nil }
+        self = indoor ? .indoor(nil) : .outdoor(nil)
     }
 }
 #endif

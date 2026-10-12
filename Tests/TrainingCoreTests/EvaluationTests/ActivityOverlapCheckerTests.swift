@@ -95,7 +95,7 @@ struct ActivityOverlapCheckerTests {
     @Test("A plain run and an indoor run with matching data are advised as a duplicate")
     func plainRunAndIndoorRunAreSameFamily() throws {
         let first = Activity(source: .manual, sport: .running, start: day(0), duration: 1800)
-        let second = Activity(source: .healthKit(UUID()), sport: .indoorRunning, start: day(0), duration: 1800)
+        let second = Activity(source: .healthKit(UUID()), sport: .running, venue: .indoor(.treadmill), start: day(0), duration: 1800)
 
         let advice = try #require(ActivityOverlapChecker.findOverlaps(in: [first, second]).first)
         guard case .duplicate = advice.recommendation else {
@@ -106,8 +106,8 @@ struct ActivityOverlapCheckerTests {
 
     @Test("An explicit outdoor run and an explicit indoor run are advised as a conflict, not merged")
     func explicitOutdoorAndIndoorRunConflict() throws {
-        let first = Activity(source: .manual, sport: .outdoorRunning, start: day(0), duration: 1800)
-        let second = Activity(source: .manual, sport: .indoorRunning, start: day(0), duration: 1800)
+        let first = Activity(source: .manual, sport: .running, venue: .outdoor(.trail), start: day(0), duration: 1800)
+        let second = Activity(source: .manual, sport: .running, venue: .indoor(.treadmill), start: day(0), duration: 1800)
 
         let advice = try #require(ActivityOverlapChecker.findOverlaps(in: [first, second]).first)
         #expect(advice.recommendation == .conflict)

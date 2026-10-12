@@ -41,9 +41,7 @@ extension Sport {
     /// hand — falls back to `.other` since there's nothing else to recover it from.
     public var workoutKitActivityType: HKWorkoutActivityType {
         switch self {
-        case .running, .indoorRunning, .outdoorRunning:
-            // HealthKit has no separate indoor/outdoor running activity type — venue is metadata,
-            // not the type itself — so both map onto the same `.running` as the plain case.
+        case .running:
             return .running
         case .cycling:
             return .cycling
@@ -61,6 +59,27 @@ extension Sport {
             return .hiking
         case .other:
             return otherRawValue.flatMap { HKWorkoutActivityType(rawValue: $0) } ?? .other
+        }
+    }
+}
+
+extension Venue {
+    /// The `HKWorkoutSessionLocationType` a `CustomWorkout` is built with for this venue.
+    ///
+    /// HealthKit has no separate indoor or outdoor activity type, but `CustomWorkout` carries the venue
+    /// as its `location`, and with it set the Watch doesn't ask "Indoor or Outdoor?" when the workout
+    /// starts. Only indoors versus outdoors survives: the surface is dropped.
+    public var workoutKitLocation: HKWorkoutSessionLocationType {
+        isIndoor ? .indoor : .outdoor
+    }
+
+    /// The venue a `CustomWorkout`'s `location` names, or `nil` for `.unknown`. Always without a
+    /// surface, since WorkoutKit doesn't carry one.
+    public init?(workoutKitLocation location: HKWorkoutSessionLocationType) {
+        switch location {
+        case .indoor: self = .indoor(nil)
+        case .outdoor: self = .outdoor(nil)
+        default: return nil
         }
     }
 }

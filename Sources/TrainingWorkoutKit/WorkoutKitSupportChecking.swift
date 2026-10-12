@@ -15,14 +15,14 @@ import WorkoutKit
 /// production code always uses ``live``.
 struct WorkoutKitSupportChecking: Sendable {
     var supportsActivity: @Sendable (HKWorkoutActivityType) -> Bool
-    var supportsGoal: @Sendable (WorkoutGoal, HKWorkoutActivityType) -> Bool
-    var supportsAlert: @Sendable (any WorkoutAlert, HKWorkoutActivityType) -> Bool
+    var supportsGoal: @Sendable (WorkoutGoal, HKWorkoutActivityType, HKWorkoutSessionLocationType) -> Bool
+    var supportsAlert: @Sendable (any WorkoutAlert, HKWorkoutActivityType, HKWorkoutSessionLocationType) -> Bool
 
     /// Delegates to `CustomWorkout`'s real static support checks.
     static let live = WorkoutKitSupportChecking(
         supportsActivity: { CustomWorkout.supportsActivity($0) },
-        supportsGoal: { CustomWorkout.supportsGoal($0, activity: $1) },
-        supportsAlert: { CustomWorkout.supportsAlert($0, activity: $1) }
+        supportsGoal: { CustomWorkout.supportsGoal($0, activity: $1, location: $2) },
+        supportsAlert: { CustomWorkout.supportsAlert($0, activity: $1, location: $2) }
     )
 }
 #endif

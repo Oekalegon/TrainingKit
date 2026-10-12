@@ -21,6 +21,31 @@ struct WorkoutKitMappingTests {
         }
     }
 
+    @Test("a venue maps to the matching location, and back without its surface")
+    func venueMapsToLocation() {
+        #expect(Venue.indoor(.treadmill).workoutKitLocation == .indoor)
+        for venue: Venue in [.outdoor(nil), .outdoor(.trail), .outdoor(.track)] {
+            #expect(venue.workoutKitLocation == .outdoor)
+        }
+        #expect(Venue(workoutKitLocation: .indoor) == .indoor(nil))
+        #expect(Venue(workoutKitLocation: .outdoor) == .outdoor(nil))
+        #expect(Venue(workoutKitLocation: .unknown) == nil)
+    }
+
+    @Test("customWorkout(from:) sets the location from the venue, and structuredWorkout(from:) reads it back")
+    func customWorkoutCarriesLocation() throws {
+        let bridge = WorkoutKitBridge()
+        let cases: [(Venue?, HKWorkoutSessionLocationType)] = [(.outdoor(.track), .outdoor), (.indoor(.treadmill), .indoor), (nil, .unknown)]
+        for (venue, location) in cases {
+            let workout = StructuredWorkout(name: "Run", sport: .running, venue: venue, blocks: [])
+            let custom = try bridge.customWorkout(from: workout)
+            #expect(custom.location == location)
+            let back = try bridge.structuredWorkout(from: WorkoutPlan(.custom(custom)))
+            #expect(back.venue?.isIndoor == venue?.isIndoor)
+            #expect((back.venue == nil) == (venue == nil))
+        }
+    }
+
     @Test("functionalStrengthTraining also maps to .strength, though .strength maps back to traditionalStrengthTraining")
     func functionalStrengthTrainingMapsToStrength() {
         #expect(Sport(workoutKitActivityType: .functionalStrengthTraining) == .strength)

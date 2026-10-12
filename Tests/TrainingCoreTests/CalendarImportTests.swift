@@ -43,6 +43,7 @@ struct CalendarImportTests {
         #expect(rebuilt.blocks == workout.blocks)
         #expect(rebuilt.name == workout.name)
         #expect(rebuilt.sport == .running)
+        #expect(rebuilt.venue == .outdoor(nil))
         #expect(result.plans.map(\.date) == [day(4)])
         #expect(result.plans.first?.workoutID == rebuilt.id)
         #expect(result.report == CalendarImportReport(added: 1, skippedDuplicates: 0, skippedPast: 0, rejected: []))

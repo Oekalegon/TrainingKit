@@ -79,7 +79,7 @@ extension TrainingModel {
         pieces.sort { $0.start < $1.start }
         guard let earliest = pieces.first, pieces.count >= 2 else { return }
 
-        guard pieces.allSatisfy({ $0.sport.isSameFamily(as: earliest.sport) }) else {
+        guard pieces.allSatisfy({ $0.sport.isSameFamily(as: earliest.sport, venue: $0.venue, otherVenue: earliest.venue) }) else {
             throw ActivityJoinError.differentSportFamilies
         }
         guard let merged = Activity.joined(pieces) else { return }

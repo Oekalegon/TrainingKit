@@ -15,25 +15,29 @@ struct SportFamilyTests {
         #expect(Sport.walking.isSameFamily(as: .hiking))
     }
 
-    @Test("Plain running is the same family as indoor or outdoor running")
+    @Test("A run with no venue is the same family as a run at any venue")
     func plainRunningMatchesEitherVenue() {
-        #expect(Sport.running.isSameFamily(as: .indoorRunning))
-        #expect(Sport.running.isSameFamily(as: .outdoorRunning))
-        #expect(Sport.indoorRunning.isSameFamily(as: .running))
-        #expect(Sport.outdoorRunning.isSameFamily(as: .running))
+        #expect(Sport.running.isSameFamily(as: .running, venue: nil, otherVenue: .indoor(.treadmill)))
+        #expect(Sport.running.isSameFamily(as: .running, venue: .outdoor(.trail), otherVenue: nil))
     }
 
-    @Test("Explicit indoor running and explicit outdoor running are NOT the same family")
+    @Test("Indoor and outdoor runs are NOT the same family, whatever the surface")
     func explicitVenuesDisagree() {
-        #expect(!Sport.indoorRunning.isSameFamily(as: .outdoorRunning))
-        #expect(!Sport.outdoorRunning.isSameFamily(as: .indoorRunning))
+        #expect(!Sport.running.isSameFamily(as: .running, venue: .indoor(.track), otherVenue: .outdoor(.track)))
+        #expect(!Sport.running.isSameFamily(as: .running, venue: .indoor(nil), otherVenue: .outdoor(.road)))
+    }
+
+    @Test("Outdoor runs on different surfaces are the same family")
+    func outdoorSurfacesAgree() {
+        #expect(Sport.running.isSameFamily(as: .running, venue: .outdoor(.trail), otherVenue: .outdoor(.road)))
+        #expect(Sport.running.isSameFamily(as: .running, venue: .indoor(.treadmill), otherVenue: .indoor(.track)))
     }
 
     @Test("Unrelated sports are never the same family")
     func unrelatedSports() {
         #expect(!Sport.running.isSameFamily(as: .cycling))
         #expect(!Sport.hiking.isSameFamily(as: .running))
-        #expect(!Sport.walking.isSameFamily(as: .indoorRunning))
+        #expect(!Sport.walking.isSameFamily(as: .running))
         #expect(!Sport.other("kayaking").isSameFamily(as: .other("canoeing")))
     }
 }

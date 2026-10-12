@@ -136,7 +136,7 @@ public struct CalendarImportPlanner: Sendable {
                     let sameSource = activity.source.hasNaturalKey && knownSources.contains(activity.source)
                     let sameWorkout = knownActivities.contains {
                         PlaceholderActivityMatching.isSameWorkout(
-                            sport: activity.sport, start: activity.start, duration: activity.duration, as: $0
+                            sport: activity.sport, venue: activity.venue, start: activity.start, duration: activity.duration, as: $0
                         )
                     }
                     guard !sameSource, !sameWorkout else {
@@ -228,7 +228,8 @@ public struct CalendarImportPlanner: Sendable {
         let load = entry.trimp.flatMap { $0.isFinite && $0 >= 0 ? $0 : nil }
         let distance = entry.distanceMeters.flatMap { $0.isFinite && $0 >= 0 ? $0 : nil }
         return Activity(
-            id: id, source: source, sport: CalendarExportBuilder.sport(identifier: entry.sport), start: start,
+            id: id, source: source, sport: CalendarExportBuilder.sport(identifier: entry.sport),
+            venue: CalendarExportBuilder.venue(identifier: entry.sport, explicit: entry.venue), start: start,
             duration: entry.durationSeconds, distanceMeters: distance, importedLoad: load, isCalendarImport: true
         )
     }
@@ -243,10 +244,11 @@ public struct CalendarImportPlanner: Sendable {
     private struct WorkoutKey: Hashable {
         let name: String
         let sport: Sport
+        let venue: Venue?
         let blocks: [WorkoutBlock]
 
         init(_ workout: StructuredWorkout) {
-            (name, sport, blocks) = (workout.name, workout.sport, workout.blocks)
+            (name, sport, venue, blocks) = (workout.name, workout.sport, workout.venue, workout.blocks)
         }
     }
 
@@ -284,6 +286,7 @@ public struct CalendarImportPlanner: Sendable {
         return StructuredWorkout(
             name: entry.name ?? entry.template ?? "Imported workout",
             sport: CalendarExportBuilder.sport(identifier: entry.sport),
+            venue: CalendarExportBuilder.venue(identifier: entry.sport, explicit: entry.venue),
             blocks: blocks
         )
     }

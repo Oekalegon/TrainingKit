@@ -8,6 +8,9 @@ public struct StructuredWorkout: Identifiable, Sendable, Codable, Hashable {
     public var name: String
     /// The kind of activity this workout is for.
     public var sport: Sport
+    /// Where the workout is done, if known. Mapped to WorkoutKit's indoor/outdoor location, so the
+    /// Watch doesn't ask.
+    public var venue: Venue?
     /// The ordered blocks making up this workout.
     public var blocks: [WorkoutBlock]
     /// Identity of a WorkoutKit plan this workout was recovered from; `nil` if none. Scheduling
@@ -28,6 +31,7 @@ public struct StructuredWorkout: Identifiable, Sendable, Codable, Hashable {
     ///   - id: A stable identifier; defaults to a new random `UUID`.
     ///   - name: The workout's display name.
     ///   - sport: The kind of activity this workout is for.
+    ///   - venue: Where the workout is done, if known.
     ///   - blocks: The ordered blocks making up this workout.
     ///   - workoutKitID: Identity of the synced WorkoutKit plan, if already synced.
     ///   - templateID: The template this workout was instantiated from, if any.
@@ -36,6 +40,7 @@ public struct StructuredWorkout: Identifiable, Sendable, Codable, Hashable {
         id: UUID = UUID(),
         name: String,
         sport: Sport,
+        venue: Venue? = nil,
         blocks: [WorkoutBlock],
         workoutKitID: UUID? = nil,
         templateID: UUID? = nil,
@@ -44,9 +49,31 @@ public struct StructuredWorkout: Identifiable, Sendable, Codable, Hashable {
         self.id = id
         self.name = name
         self.sport = sport
+        self.venue = venue
         self.blocks = blocks
         self.workoutKitID = workoutKitID
         self.templateID = templateID
         self.parameterValues = parameterValues
+    }
+}
+
+extension StructuredWorkout {
+    private enum CodingKeys: String, CodingKey {
+        case id, name, sport, venue, blocks, workoutKitID, templateID, parameterValues
+    }
+
+    /// Decodes a workout, reading the venue an older version stored inside the sport
+    /// (`indoorRunning`/`outdoorRunning`) when there's no `venue` of its own.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        let storedSport = try container.decode(StoredSport.self, forKey: .sport)
+        sport = storedSport.sport
+        venue = try container.decodeIfPresent(Venue.self, forKey: .venue) ?? storedSport.legacyVenue
+        blocks = try container.decode([WorkoutBlock].self, forKey: .blocks)
+        workoutKitID = try container.decodeIfPresent(UUID.self, forKey: .workoutKitID)
+        templateID = try container.decodeIfPresent(UUID.self, forKey: .templateID)
+        parameterValues = try container.decodeIfPresent([String: Double].self, forKey: .parameterValues)
     }
 }

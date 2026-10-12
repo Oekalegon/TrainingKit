@@ -66,11 +66,11 @@ public enum ActivityOverlapChecker {
             let gap = a.dateRange.upperBound <= b.dateRange.lowerBound
                 ? b.dateRange.lowerBound.timeIntervalSince(a.dateRange.upperBound)
                 : a.dateRange.lowerBound.timeIntervalSince(b.dateRange.upperBound)
-            if a.sport.isSameFamily(as: b.sport), gap <= thresholds.joinGapTolerance { return .join }
+            if a.sport.isSameFamily(as: b.sport, venue: a.venue, otherVenue: b.venue), gap <= thresholds.joinGapTolerance { return .join }
             return gap <= thresholds.multisportGapTolerance ? .possibleMultisport : nil
         }
 
-        let sameSession = a.sport.isSameFamily(as: b.sport)
+        let sameSession = a.sport.isSameFamily(as: b.sport, venue: a.venue, otherVenue: b.venue)
             && abs(a.dateRange.lowerBound.timeIntervalSince(b.dateRange.lowerBound)) <= thresholds.sameSessionTolerance
             && abs(a.dateRange.upperBound.timeIntervalSince(b.dateRange.upperBound)) <= thresholds.sameSessionTolerance
         if sameSession {
@@ -86,7 +86,7 @@ public enum ActivityOverlapChecker {
         // the first's padded end — a tiny overlap, but still one session in two pieces, not a
         // conflict. Containment is excluded so a short activity inside a long one isn't a join.
         let overlap = overlapEnd.timeIntervalSince(overlapStart)
-        if a.sport.isSameFamily(as: b.sport), overlap <= thresholds.joinGapTolerance, !aContainsB, !bContainsA {
+        if a.sport.isSameFamily(as: b.sport, venue: a.venue, otherVenue: b.venue), overlap <= thresholds.joinGapTolerance, !aContainsB, !bContainsA {
             return .join
         }
 

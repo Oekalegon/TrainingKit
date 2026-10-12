@@ -200,8 +200,8 @@ struct WorkoutKitBridgeSchedulingTests {
         let bridge = WorkoutKitBridge(
             support: WorkoutKitSupportChecking(
                 supportsActivity: { _ in false },
-                supportsGoal: { _, _ in true },
-                supportsAlert: { _, _ in true }
+                supportsGoal: { _, _, _ in true },
+                supportsAlert: { _, _, _ in true }
             ),
             scheduler: fake.scheduling
         )

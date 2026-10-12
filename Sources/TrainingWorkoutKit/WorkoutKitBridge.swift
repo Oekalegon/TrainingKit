@@ -13,7 +13,9 @@ import WorkoutKit
 ///
 /// Mapping is mechanical: `WorkoutBlock` ↔ `IntervalBlock`, `WorkoutStep` ↔ WorkoutKit's
 /// `WorkoutStep`, `StepGoal` ↔ `WorkoutGoal`, `IntensityTarget` ↔ `WorkoutAlert` (see
-/// `WorkoutKitMapping+Goals` and `WorkoutKitMapping+Alerts`). The one non-mechanical piece is the
+/// `WorkoutKitMapping+Goals` and `WorkoutKitMapping+Alerts`), and the workout's sport onto its activity
+/// type plus its `location` (``Venue/workoutKitLocation``), so a planned indoor or outdoor run starts
+/// on the Watch without asking for the venue. The one non-mechanical piece is the
 /// warmup/cooldown split: `CustomWorkout` has dedicated `warmup`/`cooldown` slots holding a single
 /// step each, while `StructuredWorkout` only has `blocks`. A leading or trailing block counts as
 /// warmup/cooldown only when it's exactly one step of that `StepKind` with `repetitions == 1`;
@@ -56,6 +58,7 @@ public struct WorkoutKitBridge: Sendable {
     ///   strip alerts from.
     public func customWorkout(from workout: StructuredWorkout) throws(WorkoutKitMappingError) -> CustomWorkout {
         let activity = workout.sport.workoutKitActivityType
+        let location = workout.venue?.workoutKitLocation ?? .unknown
         guard support.supportsActivity(activity) else {
             throw .unsupportedActivity(activity)
         }
@@ -66,11 +69,11 @@ public struct WorkoutKitBridge: Sendable {
 
         var warmupStep: WorkoutKit.WorkoutStep?
         if let warmupBlock {
-            warmupStep = try workoutKitStep(for: warmupBlock.steps[0], activity: activity)
+            warmupStep = try workoutKitStep(for: warmupBlock.steps[0], activity: activity, location: location)
         }
         var cooldownStep: WorkoutKit.WorkoutStep?
         if let cooldownBlock {
-            cooldownStep = try workoutKitStep(for: cooldownBlock.steps[0], activity: activity)
+            cooldownStep = try workoutKitStep(for: cooldownBlock.steps[0], activity: activity, location: location)
         }
 
         var intervalBlocks: [IntervalBlock] = []
@@ -80,13 +83,14 @@ public struct WorkoutKitBridge: Sendable {
             steps.reserveCapacity(block.steps.count)
             for step in block.steps {
                 let purpose: IntervalStep.Purpose = step.kind == .recovery ? .recovery : .work
-                steps.append(IntervalStep(purpose, step: try workoutKitStep(for: step, activity: activity)))
+                steps.append(IntervalStep(purpose, step: try workoutKitStep(for: step, activity: activity, location: location)))
             }
             intervalBlocks.append(IntervalBlock(steps: steps, iterations: block.repetitions))
         }
 
         return CustomWorkout(
             activity: activity,
+            location: location,
             displayName: workout.name,
             warmup: warmupStep,
             blocks: intervalBlocks,
@@ -131,6 +135,7 @@ public struct WorkoutKitBridge: Sendable {
         return StructuredWorkout(
             name: customWorkout.displayName ?? "Untitled Workout",
             sport: Sport(workoutKitActivityType: customWorkout.activity),
+            venue: Venue(workoutKitLocation: customWorkout.location),
             blocks: blocks,
             workoutKitID: plan.id
         )
@@ -262,13 +267,15 @@ public struct WorkoutKitBridge: Sendable {
 
     /// Maps `step`'s goal and alert onto a WorkoutKit step, checking both are supported for
     /// `activity` before handing back a step WorkoutKit is guaranteed to accept.
-    private func workoutKitStep(for step: WorkoutStep, activity: HKWorkoutActivityType) throws(WorkoutKitMappingError) -> WorkoutKit.WorkoutStep {
+    private func workoutKitStep(
+        for step: WorkoutStep, activity: HKWorkoutActivityType, location: HKWorkoutSessionLocationType
+    ) throws(WorkoutKitMappingError) -> WorkoutKit.WorkoutStep {
         let goal = WorkoutGoal(stepGoal: step.goal)
-        guard support.supportsGoal(goal, activity) else {
+        guard support.supportsGoal(goal, activity, location) else {
             throw .unsupportedGoalForActivity(goal, activity)
         }
         let alert = step.target?.workoutAlert
-        if let alert, !support.supportsAlert(alert, activity) {
+        if let alert, !support.supportsAlert(alert, activity, location) {
             throw .unsupportedAlertForActivity(activity)
         }
         return WorkoutKit.WorkoutStep(goal: goal, alert: alert)

@@ -186,6 +186,7 @@ public struct CalendarExportBuilder: Sendable {
             start: activity.start,
             name: workout?.name,
             sport: Self.sportIdentifier(activity.sport),
+            venue: activity.venue,
             template: workout?.templateID.flatMap { templateNames[$0] },
             templateID: nil,
             parameterValues: nil,
@@ -212,6 +213,7 @@ public struct CalendarExportBuilder: Sendable {
             start: nil,
             name: workout.name,
             sport: Self.sportIdentifier(workout.sport),
+            venue: workout.venue,
             template: expected.template,
             templateID: workout.templateID?.uuidString,
             parameterValues: workout.templateID == nil ? nil : workout.parameterValues?.compactMapValues(Self.finite),
@@ -326,8 +328,6 @@ public struct CalendarExportBuilder: Sendable {
     static func sportIdentifier(_ sport: Sport) -> String {
         switch sport {
         case .running: "running"
-        case .indoorRunning: "indoorRunning"
-        case .outdoorRunning: "outdoorRunning"
         case .cycling: "cycling"
         case .swimming: "swimming"
         case .strength: "strength"
@@ -339,12 +339,23 @@ public struct CalendarExportBuilder: Sendable {
         }
     }
 
+    /// The venue a file gives: `explicit` if it has one, otherwise the one an older file spelled into
+    /// its sport identifier (`indoorRunning`, `outdoorRunning`).
+    static func venue(identifier: String, explicit: Venue?) -> Venue? {
+        if let explicit { return explicit }
+        switch identifier {
+        case "indoorRunning": return .indoor(nil)
+        case "outdoorRunning": return .outdoor(nil)
+        default: return nil
+        }
+    }
+
     /// The sport written as `identifier` by ``sportIdentifier(_:)``; an unknown one is its own label.
     static func sport(identifier: String) -> Sport {
         switch identifier {
         case "running": .running
-        case "indoorRunning": .indoorRunning
-        case "outdoorRunning": .outdoorRunning
+        // Files written before venues existed spelled them as sports; see ``venue(identifier:explicit:)``.
+        case "indoorRunning", "outdoorRunning": .running
         case "cycling": .cycling
         case "swimming": .swimming
         case "strength": .strength

@@ -101,6 +101,10 @@ public struct CalendarExport: Sendable, Codable, Hashable {
         /// The sport, e.g. `running`, `cycling`, `coreStrengthTraining`; an unrecognised sport is
         /// its own label.
         public let sport: String
+        /// Where the activity happened or is planned, if known (``Venue``'s `indoor`/`outdoor`, with
+        /// an optional surface). Absent in files written before venues existed, which spelled indoor and
+        /// outdoor running as the sports `indoorRunning` and `outdoorRunning`.
+        public let venue: Venue?
         /// The workout template the planned workout was built from, e.g. `Tempo Run`, if known.
         public let template: String?
         /// The id of that template (MVP2-141). A custom template's definition is in
@@ -288,7 +292,7 @@ extension CalendarExport.Metrics {
 
 extension CalendarExport.Entry {
     private enum CodingKeys: String, CodingKey {
-        case status, start, name, sport, template, templateID, parameterValues, sourceID, intensity, trimp, trimpSource
+        case status, start, name, sport, venue, template, templateID, parameterValues, sourceID, intensity, trimp, trimpSource
         case durationSeconds, distanceMeters, plan, steps
     }
 
@@ -300,6 +304,7 @@ extension CalendarExport.Entry {
         start = try container.decodeIfPresent(Date.self, forKey: .start)
         name = try container.decodeIfPresent(String.self, forKey: .name)
         sport = try container.decode(String.self, forKey: .sport)
+        venue = try container.decodeIfPresent(Venue.self, forKey: .venue)
         template = try container.decodeIfPresent(String.self, forKey: .template)
         templateID = try container.decodeIfPresent(String.self, forKey: .templateID)
         parameterValues = try container.decodeIfPresent([String: Double].self, forKey: .parameterValues)
@@ -319,6 +324,7 @@ extension CalendarExport.Entry {
         try container.encode(start, forKey: .start)
         try container.encode(name, forKey: .name)
         try container.encode(sport, forKey: .sport)
+        try container.encode(venue, forKey: .venue)
         try container.encode(template, forKey: .template)
         try container.encode(templateID, forKey: .templateID)
         try container.encode(parameterValues, forKey: .parameterValues)

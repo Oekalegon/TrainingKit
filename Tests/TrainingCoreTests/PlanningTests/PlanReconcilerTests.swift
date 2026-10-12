@@ -183,7 +183,7 @@ struct PlanReconcilerTests {
         let workoutID = UUID()
         let workouts = [workout(id: workoutID, sport: .running, minutes: 30)]
         let plan = PlannedActivity(workoutID: workoutID, date: day(0))
-        let activity = Activity(source: .manual, sport: .outdoorRunning, start: day(0), duration: 1800)
+        let activity = Activity(source: .manual, sport: .running, venue: .outdoor(.trail), start: day(0), duration: 1800)
         let cycling = Activity(source: .manual, sport: .cycling, start: day(0), duration: 1800)
 
         let result = reconciler.reconcile(activities: [activity, cycling], plans: [plan], workouts: workouts, athlete: athlete)

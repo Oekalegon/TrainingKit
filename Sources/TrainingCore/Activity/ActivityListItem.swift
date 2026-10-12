@@ -15,6 +15,8 @@ public struct ActivityListItem: Identifiable, Sendable, Hashable {
     public let id: UUID
     /// The kind of activity performed.
     public var sport: Sport
+    /// Where the activity took place, if known.
+    public var venue: Venue?
     /// When the activity began.
     public var start: Date
     /// How long the activity lasted.
@@ -32,17 +34,19 @@ public struct ActivityListItem: Identifiable, Sendable, Hashable {
     /// - Parameters:
     ///   - id: The activity's id.
     ///   - sport: The kind of activity performed.
+    ///   - venue: Where the activity took place, if known.
     ///   - start: When the activity began.
     ///   - duration: How long it lasted, in seconds.
     ///   - distanceMeters: Total distance in meters, if known.
     ///   - linkedPlanID: The matched plan's id, if any.
     ///   - isCalendarImport: Whether the activity was made from a calendar export file; defaults to `false`.
     public init(
-        id: UUID, sport: Sport, start: Date, duration: TimeInterval,
+        id: UUID, sport: Sport, venue: Venue? = nil, start: Date, duration: TimeInterval,
         distanceMeters: Double? = nil, linkedPlanID: UUID? = nil, isCalendarImport: Bool = false
     ) {
         self.id = id
         self.sport = sport
+        self.venue = venue
         self.start = start
         self.duration = duration
         self.distanceMeters = distanceMeters
@@ -55,7 +59,7 @@ public struct ActivityListItem: Identifiable, Sendable, Hashable {
     /// - Parameter activity: The activity to read the list fields from.
     public init(_ activity: Activity) {
         self.init(
-            id: activity.id, sport: activity.sport, start: activity.start, duration: activity.duration,
+            id: activity.id, sport: activity.sport, venue: activity.venue, start: activity.start, duration: activity.duration,
             distanceMeters: activity.distanceMeters, linkedPlanID: activity.linkedPlanID,
             isCalendarImport: activity.isCalendarImport
         )

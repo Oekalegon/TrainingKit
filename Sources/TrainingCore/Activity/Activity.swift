@@ -14,6 +14,8 @@ public struct Activity: Identifiable, Sendable, Codable, Hashable {
     public var source: ActivitySource
     /// The kind of activity performed.
     public var sport: Sport
+    /// Where the activity took place, if known.
+    public var venue: Venue?
     /// When the activity began.
     public var start: Date
     /// How long the activity lasted.
@@ -81,6 +83,7 @@ public struct Activity: Identifiable, Sendable, Codable, Hashable {
     ///   - perceivedExertion: Borg CR10 rating (1...10), if entered.
     ///   - linkedPlanID: The matched ``PlannedActivity``'s id, if already reconciled.
     ///   - scheduledPlanID: The id of the plan the workout was started from, if the source knows it.
+    ///   - venue: Where the activity took place, if known.
     ///   - steps: The steps the Watch recorded for a plan-started workout; defaults to none.
     ///   - importedLoad: A load (TRIMP) carried in from a calendar export file; defaults to none.
     ///   - isCalendarImport: Whether the activity was made from a calendar export file; defaults to `false`.
@@ -88,6 +91,7 @@ public struct Activity: Identifiable, Sendable, Codable, Hashable {
         id: UUID = UUID(),
         source: ActivitySource,
         sport: Sport,
+        venue: Venue? = nil,
         start: Date,
         duration: TimeInterval,
         distanceMeters: Double? = nil,
@@ -106,6 +110,7 @@ public struct Activity: Identifiable, Sendable, Codable, Hashable {
         self.id = id
         self.source = source
         self.sport = sport
+        self.venue = venue
         self.start = start
         self.duration = duration
         self.distanceMeters = distanceMeters
@@ -125,7 +130,7 @@ public struct Activity: Identifiable, Sendable, Codable, Hashable {
 
 extension Activity {
     private enum CodingKeys: String, CodingKey {
-        case id, source, sport, start, duration, distanceMeters, heartRate, speed, elevation, cadence
+        case id, source, sport, venue, start, duration, distanceMeters, heartRate, speed, elevation, cadence
         case geographicBounds, perceivedExertion, linkedPlanID, scheduledPlanID, steps, importedLoad, isCalendarImport
     }
 
@@ -135,7 +140,9 @@ extension Activity {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(UUID.self, forKey: .id)
         source = try container.decode(ActivitySource.self, forKey: .source)
-        sport = try container.decode(Sport.self, forKey: .sport)
+        let storedSport = try container.decode(StoredSport.self, forKey: .sport)
+        sport = storedSport.sport
+        venue = try container.decodeIfPresent(Venue.self, forKey: .venue) ?? storedSport.legacyVenue
         start = try container.decode(Date.self, forKey: .start)
         duration = try container.decode(TimeInterval.self, forKey: .duration)
         distanceMeters = try container.decodeIfPresent(Double.self, forKey: .distanceMeters)

@@ -43,8 +43,8 @@ struct WorkoutKitBridgeTests {
     func workoutPlanPropagatesMappingErrors() {
         let bridge = WorkoutKitBridge(support: WorkoutKitSupportChecking(
             supportsActivity: { _ in false },
-            supportsGoal: { _, _ in true },
-            supportsAlert: { _, _ in true }
+            supportsGoal: { _, _, _ in true },
+            supportsAlert: { _, _, _ in true }
         ))
         let workout = StructuredWorkout(
             name: "Easy run", sport: .running,
@@ -70,8 +70,8 @@ struct WorkoutKitBridgeTests {
     func customWorkoutThrowsForUnsupportedActivity() {
         let bridge = WorkoutKitBridge(support: WorkoutKitSupportChecking(
             supportsActivity: { _ in false },
-            supportsGoal: { _, _ in true },
-            supportsAlert: { _, _ in true }
+            supportsGoal: { _, _, _ in true },
+            supportsAlert: { _, _, _ in true }
         ))
         let workout = StructuredWorkout(
             name: "Easy run",
@@ -88,8 +88,8 @@ struct WorkoutKitBridgeTests {
     func customWorkoutThrowsForUnsupportedGoal() {
         let bridge = WorkoutKitBridge(support: WorkoutKitSupportChecking(
             supportsActivity: { _ in true },
-            supportsGoal: { _, _ in false },
-            supportsAlert: { _, _ in true }
+            supportsGoal: { _, _, _ in false },
+            supportsAlert: { _, _, _ in true }
         ))
         let workout = StructuredWorkout(
             name: "Easy run",
@@ -106,8 +106,8 @@ struct WorkoutKitBridgeTests {
     func customWorkoutThrowsForUnsupportedAlert() {
         let bridge = WorkoutKitBridge(support: WorkoutKitSupportChecking(
             supportsActivity: { _ in true },
-            supportsGoal: { _, _ in true },
-            supportsAlert: { _, _ in false }
+            supportsGoal: { _, _, _ in true },
+            supportsAlert: { _, _, _ in false }
         ))
         let workout = StructuredWorkout(
             name: "Easy run",
@@ -124,8 +124,8 @@ struct WorkoutKitBridgeTests {
     func customWorkoutSkipsAlertCheckWhenNoTarget() throws {
         let bridge = WorkoutKitBridge(support: WorkoutKitSupportChecking(
             supportsActivity: { _ in true },
-            supportsGoal: { _, _ in true },
-            supportsAlert: { _, _ in false } // would fail every step if consulted
+            supportsGoal: { _, _, _ in true },
+            supportsAlert: { _, _, _ in false } // would fail every step if consulted
         ))
         let workout = StructuredWorkout(
             name: "Easy run",

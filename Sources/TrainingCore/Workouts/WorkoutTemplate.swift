@@ -12,6 +12,10 @@ public struct WorkoutTemplate: Identifiable, Sendable, Codable, Hashable {
     public var titleName: String?
     /// The kind of activity this template is for.
     public var sport: Sport
+    /// Where the template is done, or `nil` to leave it to the plan. A venue with a surface
+    /// (``Venue/outdoor(_:)`` with `.track`) fixes it; one without (`.outdoor(nil)`) fixes only
+    /// indoors versus outdoors. See ``venueChoices``.
+    public var venue: Venue?
     /// The parameters this template's blocks may reference. Keys must be unique within a
     /// template — a duplicate key silently resolves to whichever entry appears first.
     public var parameters: [WorkoutTemplateParameter]
@@ -31,6 +35,7 @@ public struct WorkoutTemplate: Identifiable, Sendable, Codable, Hashable {
     ///   - name: The template's display name.
     ///   - titleName: A shorter name for generated titles; defaults to `nil`, which uses `name`.
     ///   - sport: The kind of activity this template is for.
+    ///   - venue: Where the template is done; `nil` leaves it to the plan.
     ///   - parameters: The parameters this template's blocks may reference.
     ///   - blocks: The ordered blocks making up this template.
     ///   - archivedDate: When the template was archived; defaults to `nil`.
@@ -39,6 +44,7 @@ public struct WorkoutTemplate: Identifiable, Sendable, Codable, Hashable {
         name: String,
         titleName: String? = nil,
         sport: Sport,
+        venue: Venue? = nil,
         parameters: [WorkoutTemplateParameter],
         blocks: [TemplateBlock],
         archivedDate: Date? = nil
@@ -47,6 +53,7 @@ public struct WorkoutTemplate: Identifiable, Sendable, Codable, Hashable {
         self.name = name
         self.titleName = titleName
         self.sport = sport
+        self.venue = venue
         self.parameters = parameters
         self.blocks = blocks
         self.archivedDate = archivedDate
@@ -54,17 +61,43 @@ public struct WorkoutTemplate: Identifiable, Sendable, Codable, Hashable {
 }
 
 extension WorkoutTemplate {
+    /// The venues a plan editor offers for this template: ``Venue/choices(for:)`` for its sport,
+    /// narrowed to those compatible with ``venue`` (and to ``venue`` itself when it names a
+    /// surface). Empty for a sport without venue variants.
+    public var venueChoices: [Venue] {
+        let all = Venue.choices(for: sport)
+        guard let venue else { return all }
+        if venue.hasSurface { return [venue] }
+        return all.filter { Venue.isCompatible(venue, $0) }
+    }
+
+    /// Whether the template fixes its venue, so a plan editor hides or locks its venue picker:
+    /// there's at most one choice.
+    public var isVenueFixed: Bool { venueChoices.count <= 1 }
+
+    /// The venue a plan editor preselects: `preferred` if it's one of ``venueChoices``, else the
+    /// first outdoor choice, else the first choice, else the template's own ``venue``.
+    ///
+    /// - Parameter preferred: The athlete's last or usual choice, if any.
+    public func defaultVenue(preferred: Venue? = nil) -> Venue? {
+        let choices = venueChoices
+        if let preferred, choices.contains(preferred) { return preferred }
+        return choices.first { !$0.isIndoor } ?? choices.first ?? venue
+    }
+
     /// Produces a concrete workout by resolving this template's parameters.
     ///
     /// - Parameters:
     ///   - name: The instantiated workout's display name; defaults to this template's name.
+    ///   - venue: The venue to give the workout, chosen from ``venueChoices``; defaults to the
+    ///     template's ``venue``. Ignored when it isn't one of the choices.
     ///   - values: Parameter key to value; a key declared in this template's `parameters` but
     ///     missing from `values` resolves to that parameter's `defaultValue`.
     /// - Returns: A ``StructuredWorkout`` with every ``TemplateValue`` resolved to a fixed value.
     /// - Throws: ``WorkoutTemplateError/undeclaredParameter(_:)`` if a step or block references a
     ///   `.parameter(_:)` key that isn't declared in this template's `parameters` — a typo or a
     ///   stale reference, never something `values` alone can fix.
-    public func instantiate(name: String? = nil, values: [String: Double] = [:]) throws(WorkoutTemplateError) -> StructuredWorkout {
+    public func instantiate(name: String? = nil, venue chosenVenue: Venue? = nil, values: [String: Double] = [:]) throws(WorkoutTemplateError) -> StructuredWorkout {
         func resolve(_ key: String) throws(WorkoutTemplateError) -> Double {
             if let value = values[key] {
                 return value
@@ -89,7 +122,7 @@ extension WorkoutTemplate {
         // workout can later be re-instantiated with a single parameter changed.
         let resolvedValues = Dictionary(uniqueKeysWithValues: parameters.map { ($0.key, values[$0.key] ?? $0.defaultValue) })
         return StructuredWorkout(
-            name: name ?? self.name, sport: sport, blocks: resolvedBlocks,
+            name: name ?? self.name, sport: sport, venue: chosenVenue.flatMap { venueChoices.contains($0) ? $0 : nil } ?? venue, blocks: resolvedBlocks,
             templateID: id, parameterValues: resolvedValues
         )
     }
@@ -140,5 +173,26 @@ extension TemplateStepGoal {
         case .distance(let value): .distance(try value.resolve(resolve))
         case .open: .open
         }
+    }
+}
+
+extension WorkoutTemplate {
+    private enum CodingKeys: String, CodingKey {
+        case id, name, titleName, sport, venue, parameters, blocks, archivedDate
+    }
+
+    /// Decodes a template, reading the venue an older version stored inside the sport
+    /// (`indoorRunning`/`outdoorRunning`) when there's no `venue` of its own.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        titleName = try container.decodeIfPresent(String.self, forKey: .titleName)
+        let storedSport = try container.decode(StoredSport.self, forKey: .sport)
+        sport = storedSport.sport
+        venue = try container.decodeIfPresent(Venue.self, forKey: .venue) ?? storedSport.legacyVenue
+        parameters = try container.decode([WorkoutTemplateParameter].self, forKey: .parameters)
+        blocks = try container.decode([TemplateBlock].self, forKey: .blocks)
+        archivedDate = try container.decodeIfPresent(Date.self, forKey: .archivedDate)
     }
 }

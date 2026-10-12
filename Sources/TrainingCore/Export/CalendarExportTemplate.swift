@@ -16,6 +16,8 @@ extension CalendarExport {
         public let titleName: String?
         /// The sport, with the same identifiers as ``Entry/sport``.
         public let sport: String
+        /// Where the template is done, if it says (see ``Entry/venue``).
+        public let venue: Venue?
         /// The parameters the blocks may refer to.
         public let parameters: [Parameter]
         /// The template's blocks, in order.
@@ -75,6 +77,7 @@ extension CalendarExport.Template {
             name: template.name,
             titleName: template.titleName,
             sport: CalendarExportBuilder.sportIdentifier(template.sport),
+            venue: template.venue,
             parameters: template.parameters.map { parameter in
                 Parameter(
                     key: parameter.key, name: parameter.name, unit: Self.unitIdentifier(parameter.unit),
@@ -138,6 +141,7 @@ extension CalendarExport.Template {
         }
         let template = WorkoutTemplate(
             id: templateID, name: name, titleName: titleName, sport: CalendarExportBuilder.sport(identifier: sport),
+            venue: CalendarExportBuilder.venue(identifier: sport, explicit: venue),
             parameters: parameters, blocks: blocks
         )
         // Resolves every reference, so one to an undeclared parameter is caught here, and checks

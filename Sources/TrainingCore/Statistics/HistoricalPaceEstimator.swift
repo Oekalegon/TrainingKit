@@ -106,7 +106,7 @@ struct HistoricalPaceEstimator: Sendable {
         }
 
         let candidates = history.observations.filter {
-            $0.start < cutoff && $0.activityID != excludedActivityID && $0.sport.isSameFamily(as: workout.sport)
+            $0.start < cutoff && $0.activityID != excludedActivityID && $0.sport.isSameFamily(as: workout.sport, venue: $0.venue, otherVenue: workout.venue)
         }
         // Ages count from the newest usable activity, not the cutoff: for a plan weeks ahead the
         // cutoff is its date, and measuring from there would weaken all the evidence alike, so the

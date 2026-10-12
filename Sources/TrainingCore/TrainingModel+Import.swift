@@ -163,7 +163,7 @@ extension TrainingModel {
             for activity in real {
                 for placeholder in placeholders where !removed.contains(placeholder.id) && placeholder.id != activity.id
                     && PlaceholderActivityMatching.isSameWorkout(
-                        sport: activity.sport, start: activity.start, duration: activity.duration, as: placeholder
+                        sport: activity.sport, venue: activity.venue, start: activity.start, duration: activity.duration, as: placeholder
                     ) {
                     removed.insert(placeholder.id)
                     deletedStarts.append(placeholder.start)

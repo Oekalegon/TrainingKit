@@ -89,6 +89,7 @@ extension Activity {
             id: id,
             source: .manual,
             sport: weightB > weightA ? second.sport : first.sport,
+            venue: weightB > weightA ? (second.venue ?? first.venue) : (first.venue ?? second.venue),
             start: first.start,
             duration: end.timeIntervalSince(first.start),
             distanceMeters: distance,

@@ -48,7 +48,7 @@ struct TemplateResolver {
             let isCopy = libraryByID[template.id] != nil
             if isCopy {
                 template = WorkoutTemplate(
-                    name: template.name, titleName: template.titleName, sport: template.sport,
+                    name: template.name, titleName: template.titleName, sport: template.sport, venue: template.venue,
                     parameters: template.parameters, blocks: template.blocks
                 )
             }
@@ -81,7 +81,9 @@ struct TemplateResolver {
             else { continue }
             values[parameter.key] = value
         }
-        guard let workout = try? template.instantiate(name: entry.name, values: values),
+        guard let workout = try? template.instantiate(
+            name: entry.name, venue: CalendarExportBuilder.venue(identifier: entry.sport, explicit: entry.venue), values: values
+        ),
               CalendarExport.Template.isSane(workout)
         else { return nil }
         return Built(workout: workout, templateFileID: fileID)
@@ -101,6 +103,6 @@ struct TemplateResolver {
 
     /// Whether two templates do the same thing: the id, name and archived state don't count.
     private static func isEqual(_ lhs: WorkoutTemplate, _ rhs: WorkoutTemplate) -> Bool {
-        lhs.sport == rhs.sport && lhs.parameters == rhs.parameters && lhs.blocks == rhs.blocks
+        lhs.sport == rhs.sport && lhs.venue == rhs.venue && lhs.parameters == rhs.parameters && lhs.blocks == rhs.blocks
     }
 }

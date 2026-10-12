@@ -176,12 +176,23 @@ struct HealthKitWorkoutStepTests {
         #expect(ActivityStep(healthKitActivity: activity(metadata: ["WOIntervalStepKeyPath": "0.0.0"], end: nil)) == nil)
     }
 
-    @Test("the read types include the distance types a step's summary needs")
-    func readTypesIncludeDistance() {
+    @Test("the read types include the distance types a step's summary needs, and the speed types of the pace chart")
+    func readTypesIncludeDistanceAndSpeed() {
         let readTypes = HealthKitAuthorization.readTypes
         #expect(readTypes.contains(HKQuantityType(.distanceWalkingRunning)))
         #expect(readTypes.contains(HKQuantityType(.distanceCycling)))
         #expect(readTypes.contains(HKQuantityType(.heartRate)))
+        #expect(readTypes.contains(HKQuantityType(.runningSpeed)))
+        #expect(readTypes.contains(HKQuantityType(.cyclingSpeed)))
+    }
+
+    @Test("an activity made from a workout carries the speed it is given, and none by default (MVP2-146)")
+    func activityCarriesSpeed() {
+        let workout = HKWorkout(activityType: .running, start: start, end: start.addingTimeInterval(600))
+        let speed = [SpeedSample(time: start, metersPerSecond: 3)]
+
+        #expect(Activity(healthKitWorkout: workout, heartRate: [], speed: speed).speed == speed)
+        #expect(Activity(healthKitWorkout: workout, heartRate: []).speed.isEmpty)
     }
 }
 #endif

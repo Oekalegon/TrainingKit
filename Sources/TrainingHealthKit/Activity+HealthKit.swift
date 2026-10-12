@@ -6,14 +6,16 @@ import HealthKit
 extension Activity {
     /// Creates a completed activity from an `HKWorkout` and its heart-rate samples.
     ///
-    /// Distance is mapped when the workout reports one; elevation, cadence, speed, and geographic
-    /// bounds aren't — those need `HKWorkoutRoute`/`HKSeriesSample` parsing, out of scope for the
-    /// HR-TRIMP import this adapter exists for. `perceivedExertion` is never set here; HealthKit
+    /// Distance is mapped when the workout reports one, and speed when the caller passes it (MVP2-146);
+    /// elevation, cadence and geographic bounds aren't — those need `HKWorkoutRoute`/`HKSeriesSample`
+    /// parsing, out of scope for the HR-TRIMP import this adapter exists for. `perceivedExertion` is never set here; HealthKit
     /// doesn't report an RPE-equivalent, so it stays available for the user to enter by hand.
     ///
     /// - Parameters:
     ///   - workout: The HealthKit workout to import.
     ///   - heartRate: This workout's heart-rate samples, already scoped to its time range.
+    ///   - speed: This workout's speed samples (MVP2-146), already scoped to its time range and
+    ///     averaged into windows (see `HealthKitActivityImporter`); empty for a sport that records none.
     ///   - existingID: The `id` of the `Activity` already stored for this workout's source, if
     ///     this is a re-import rather than the first import of it. `Activity.source` is the stable
     ///     dedupe key across re-imports, but `ActivityStore.upsert(_:)` matches by `id`. Without
@@ -30,6 +32,7 @@ extension Activity {
     public init(
         healthKitWorkout workout: HKWorkout,
         heartRate: [HeartRateSample],
+        speed: [SpeedSample] = [],
         existingID: UUID? = nil,
         scheduledPlanID: UUID? = nil
     ) {
@@ -41,6 +44,7 @@ extension Activity {
             duration: workout.duration,
             distanceMeters: workout.totalDistance?.doubleValue(for: .meter()),
             heartRate: heartRate,
+            speed: speed,
             scheduledPlanID: scheduledPlanID,
             steps: workout.workoutActivities.compactMap(ActivityStep.init(healthKitActivity:)).sorted { $0.start < $1.start }
         )

@@ -819,9 +819,26 @@ What is imported:
   no range driving a huge repeat count) is rebuilt from the entry's steps instead.
 - **Entries before today are skipped and counted.** Such a plan would only show as missed and never
   counts as load; the export leaves missed plans out for the same reason.
-- **Completed activities are skipped and counted.** They come from HealthKit, and the file holds no
-  heart-rate data. Importing them needs the model to hold an imported load for an activity without
-  heart-rate samples: `LoadMethod.manual` exists, but `Activity` has no field for it. Left for later.
+- **Completed entries become placeholder activities (MVP2-107).** The file has no heart-rate data,
+  so a placeholder has a start, a duration, a distance and the file's TRIMP as
+  `Activity.importedLoad`, which `ImportedLoadCalculator` scores (method `.manual`, confidence 1)
+  between the heart-rate and the duration/RPE estimators. `Activity.isCalendarImport` marks it (and
+  `ActivityListItem.isCalendarImport`), so the app can say the activity has no heart rate. Both fields
+  are optional in the stored JSON, so no migration is needed. A completed entry with no start or
+  no positive duration is rejected (`.invalidActivity`).
+  - **Source id.** The export carries a HealthKit workout's id as `sourceID` (additive, within schema
+    version 1). A placeholder with one is stored under `.healthKit(id)` with that id, so
+    HealthKit's own import finds it by source and replaces it in place. Without one (a file from
+    another tool) it is `.manual`, with a new id.
+  - **Not repeated.** An entry is skipped (`activitiesSkippedDuplicates`) when its source is stored,
+    or when a stored activity is the same workout by `PlaceholderActivityMatching`: the same sport
+    family, a start within five minutes and a duration within a fifth (at least two minutes).
+  - **HealthKit replaces them.** When an import brings a new activity that matches a placeholder this
+    way, the placeholder is removed (without a tombstone, so a workout HealthKit reports still
+    imports), its plan is released and the plan is matched again to the real workout.
+  - **The import anchor isn't touched.** The placeholders are applied through the same path as an
+    import (`applyImport`, queued with it) without saving an anchor, so HealthKit still fetches
+    everything it hasn't seen.
 - **Daily metrics are never imported.** The model recomputes CTL, ATL, TSB, monotony and strain from
   the plans and activities.
 - **Expected TRIMP** becomes the plan's load override when the entry's `trimpSource` is `override`,

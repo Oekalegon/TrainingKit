@@ -45,10 +45,10 @@ struct CalendarImportTests {
         #expect(rebuilt.sport == .running)
         #expect(result.plans.map(\.date) == [day(4)])
         #expect(result.plans.first?.workoutID == rebuilt.id)
-        #expect(result.report == CalendarImportReport(added: 1, skippedDuplicates: 0, skippedPast: 0, skippedCompleted: 0, rejected: []))
+        #expect(result.report == CalendarImportReport(added: 1, skippedDuplicates: 0, skippedPast: 0, rejected: []))
     }
 
-    @Test("completed activities are skipped and counted; daily metrics aren't imported")
+    @Test("a completed activity becomes a placeholder; daily metrics aren't imported")
     func completedSkipped() throws {
         let start = day(1, hour: 7)
         let samples = (0..<360).map { HeartRateSample(time: start.addingTimeInterval(Double($0) * 5), bpm: 150) }
@@ -58,7 +58,8 @@ struct CalendarImportTests {
 
         #expect(result.plans.isEmpty)
         #expect(result.workouts.isEmpty)
-        #expect(result.report.skippedCompleted == 1)
+        #expect(result.report.activitiesAdded == 1)
+        #expect(result.activities.first?.isCalendarImport == true)
     }
 
     @Test("importing a file whose plans are already stored adds nothing, and reuses the stored workout")

@@ -175,7 +175,7 @@ public final class TrainingModel {
         parameters: LoadModelParameters = LoadModelParameters(),
         intensityParameters: IntensityClassifierParameters = IntensityClassifierParameters(),
         estimator: any PlannedLoadEstimator = TRIMPPlanEstimator(),
-        calculators: [any LoadCalculator] = [ExponentialTRIMPCalculator(), DurationRPECalculator()]
+        calculators: [any LoadCalculator] = [ExponentialTRIMPCalculator(), ImportedLoadCalculator(), DurationRPECalculator()]
     ) {
         self.stores = stores
         self.athlete = athlete

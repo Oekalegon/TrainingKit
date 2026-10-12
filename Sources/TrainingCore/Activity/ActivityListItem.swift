@@ -23,6 +23,9 @@ public struct ActivityListItem: Identifiable, Sendable, Hashable {
     public var distanceMeters: Double?
     /// The plan this activity is matched to, if any (``Activity/linkedPlanID``).
     public var linkedPlanID: UUID?
+    /// Whether the activity is a placeholder made from a calendar export file (MVP2-107); see
+    /// ``Activity/isCalendarImport``.
+    public var isCalendarImport: Bool
 
     /// Creates a list item.
     ///
@@ -33,9 +36,10 @@ public struct ActivityListItem: Identifiable, Sendable, Hashable {
     ///   - duration: How long it lasted, in seconds.
     ///   - distanceMeters: Total distance in meters, if known.
     ///   - linkedPlanID: The matched plan's id, if any.
+    ///   - isCalendarImport: Whether the activity was made from a calendar export file; defaults to `false`.
     public init(
         id: UUID, sport: Sport, start: Date, duration: TimeInterval,
-        distanceMeters: Double? = nil, linkedPlanID: UUID? = nil
+        distanceMeters: Double? = nil, linkedPlanID: UUID? = nil, isCalendarImport: Bool = false
     ) {
         self.id = id
         self.sport = sport
@@ -43,6 +47,7 @@ public struct ActivityListItem: Identifiable, Sendable, Hashable {
         self.duration = duration
         self.distanceMeters = distanceMeters
         self.linkedPlanID = linkedPlanID
+        self.isCalendarImport = isCalendarImport
     }
 
     /// The list item for `activity`.
@@ -51,7 +56,8 @@ public struct ActivityListItem: Identifiable, Sendable, Hashable {
     public init(_ activity: Activity) {
         self.init(
             id: activity.id, sport: activity.sport, start: activity.start, duration: activity.duration,
-            distanceMeters: activity.distanceMeters, linkedPlanID: activity.linkedPlanID
+            distanceMeters: activity.distanceMeters, linkedPlanID: activity.linkedPlanID,
+            isCalendarImport: activity.isCalendarImport
         )
     }
 }

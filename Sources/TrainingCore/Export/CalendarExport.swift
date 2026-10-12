@@ -110,6 +110,11 @@ public struct CalendarExport: Sendable, Codable, Hashable {
         /// The parameter values the planned workout was instantiated with, by parameter key, when it
         /// has a ``templateID`` (MVP2-141).
         public let parameterValues: [String: Double]?
+        /// For a completed activity read from HealthKit, the id of its workout there (MVP2-107): what
+        /// lets an import on another device store the activity under the same source, so that
+        /// HealthKit's own import of the workout later replaces it in place. `nil` for a planned
+        /// entry, and for an activity from any other source.
+        public let sourceID: String?
         /// The intensity category: `veryLow`, `low`, `medium` or `high`. What was performed for a
         /// completed activity, what's intended for a planned one.
         public let intensity: String?
@@ -283,7 +288,7 @@ extension CalendarExport.Metrics {
 
 extension CalendarExport.Entry {
     private enum CodingKeys: String, CodingKey {
-        case status, start, name, sport, template, templateID, parameterValues, intensity, trimp, trimpSource
+        case status, start, name, sport, template, templateID, parameterValues, sourceID, intensity, trimp, trimpSource
         case durationSeconds, distanceMeters, plan, steps
     }
 
@@ -298,6 +303,7 @@ extension CalendarExport.Entry {
         template = try container.decodeIfPresent(String.self, forKey: .template)
         templateID = try container.decodeIfPresent(String.self, forKey: .templateID)
         parameterValues = try container.decodeIfPresent([String: Double].self, forKey: .parameterValues)
+        sourceID = try container.decodeIfPresent(String.self, forKey: .sourceID)
         intensity = try container.decodeIfPresent(String.self, forKey: .intensity)
         trimp = try container.decodeIfPresent(Double.self, forKey: .trimp)
         trimpSource = try container.decodeIfPresent(CalendarExport.Entry.TRIMPSource.self, forKey: .trimpSource)
@@ -316,6 +322,7 @@ extension CalendarExport.Entry {
         try container.encode(template, forKey: .template)
         try container.encode(templateID, forKey: .templateID)
         try container.encode(parameterValues, forKey: .parameterValues)
+        try container.encode(sourceID, forKey: .sourceID)
         try container.encode(intensity, forKey: .intensity)
         try container.encode(trimp, forKey: .trimp)
         try container.encode(trimpSource, forKey: .trimpSource)

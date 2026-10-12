@@ -31,6 +31,20 @@ struct SwiftDataStoreTests {
         #expect(try await store.activity(id: outOfRange.id) == outOfRange)
     }
 
+    @Test("a calendar placeholder keeps its imported load and flag, in the list item too (MVP2-107)")
+    func calendarPlaceholderRoundTrip() async throws {
+        let store = try makeStore()
+        let placeholder = Activity(
+            source: .healthKit(UUID()), sport: .running, start: day(1), duration: 1800,
+            importedLoad: 72, isCalendarImport: true
+        )
+        try await store.upsert([placeholder])
+
+        #expect(try await store.activity(id: placeholder.id) == placeholder)
+        let item = try #require(try await store.activityListItems(in: day(0)...day(2)).first)
+        #expect(item.isCalendarImport)
+    }
+
     @Test("ActivityStore activityListItems matches activities(in:) without the samples, joins included (MVP2-129)")
     func activityStoreSummaries() async throws {
         let store = try makeStore()

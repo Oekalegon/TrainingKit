@@ -91,7 +91,19 @@ extension TrainingModel {
     private func performImport(from importer: any ActivityImporting, asOf today: Date) async throws {
         let anchor = try await stores.athleteStore.importAnchor()
         let result = try await importer.importActivities(since: anchor)
+        try await applyImport(result, savingAnchor: true, asOf: today)
+    }
 
+    /// Persists `result` and brings the model up to date: the part of an import after the importer has
+    /// run. Also how a calendar file's completed activities are added (MVP2-107), with
+    /// `savingAnchor` off, so the file doesn't move HealthKit's cursor.
+    ///
+    /// A new activity that is the same workout as a placeholder made from a calendar file (see
+    /// `PlaceholderActivityMatching`) replaces it: the placeholder is removed without a tombstone,
+    /// its plan is released, and the plan is matched again to the real workout.
+    ///
+    /// Call from inside ``runQueued(_:)``, like ``performImport(from:asOf:)``.
+    func applyImport(_ result: ImportResult, savingAnchor: Bool, asOf today: Date) async throws {
         // Captured before deleting: once an activity is gone, the store can no longer answer what
         // day it occupied, and a persisted fitness-metrics cache needs that date to know how far
         // back to invalidate.
@@ -139,6 +151,34 @@ extension TrainingModel {
             }
         }
 
+        // Placeholders the real workouts replace. One read for the whole batch, not one per activity:
+        // a full resync brings in every workout.
+        let real = newActivities.filter { !$0.isCalendarImport }
+        if let first = real.map(\.start).min(), let last = real.map(\.start).max() {
+            let slack = PlaceholderActivityMatching.startTolerance
+            let placeholders = try await stores.activityStore
+                .activityListItems(in: first.addingTimeInterval(-slack)...last.addingTimeInterval(slack))
+                .filter(\.isCalendarImport)
+            var removed: Set<UUID> = []
+            for activity in real {
+                for placeholder in placeholders where !removed.contains(placeholder.id) && placeholder.id != activity.id
+                    && PlaceholderActivityMatching.isSameWorkout(
+                        sport: activity.sport, start: activity.start, duration: activity.duration, as: placeholder
+                    ) {
+                    removed.insert(placeholder.id)
+                    deletedStarts.append(placeholder.start)
+                    try await releasePlans(heldBy: [placeholder.id])
+                    // A placeholder from a HealthKit workout id is removed by source, which leaves no
+                    // tombstone, so that workout still imports if HealthKit reports it.
+                    if let source = try await stores.activityStore.activity(id: placeholder.id)?.source, source.hasNaturalKey {
+                        try await stores.activityStore.deleteActivity(source: source)
+                    } else {
+                        try await stores.activityStore.deleteActivity(id: placeholder.id)
+                    }
+                }
+            }
+        }
+
         var refreshedJoinDays: [Date] = []
         if !toUpsert.isEmpty {
             try await stores.activityStore.upsert(toUpsert)
@@ -148,7 +188,7 @@ extension TrainingModel {
         for source in result.deletedSources {
             try await stores.activityStore.deleteActivity(source: source)
         }
-        try await stores.athleteStore.saveImportAnchor(result.anchor)
+        if savingAnchor { try await stores.athleteStore.saveImportAnchor(result.anchor) }
 
         // Only brand-new activities are auto-matched, so an activity the athlete unlinked stays
         // unlinked when it's re-imported.
@@ -167,7 +207,7 @@ extension TrainingModel {
         // `||=`, not an overwrite: a conformer without incremental-import support is allowed to
         // return a `nil` anchor even on a successful run, and a completed import shouldn't read
         // back as "never imported" just because this particular run didn't produce one.
-        hasEverImportedActivities = hasEverImportedActivities || result.anchor != nil
+        hasEverImportedActivities = hasEverImportedActivities || (savingAnchor && result.anchor != nil)
 
         // A day either side of each activity's own timestamp: a plan the reconciler just matched to
         // it can land up to a day away in absolute time (the reconciler itself widens its own plan

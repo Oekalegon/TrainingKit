@@ -25,7 +25,7 @@ public struct CalendarImportPlan: Sendable, Hashable {
 /// Planned entries become plans. Completed entries become placeholder activities (MVP2-107): a start,
 /// a duration, a distance and the file's TRIMP as a load, but no heart rate, since the file has none.
 /// An entry that is already stored isn't repeated: the same HealthKit workout id, or the same workout
-/// by its sport and times (see ``PlaceholderActivityMatching``). Daily metrics are never imported: the
+/// by its sport and times (see `PlaceholderActivityMatching`). Daily metrics are never imported: the
 /// model recomputes them. Expected load is kept in one case: a planned entry's TRIMP becomes the plan's
 /// load override when it was an override in the file, or when it differs from what the estimator
 /// gives for the rebuilt steps, so a load edited outside the app survives. An untouched estimate is

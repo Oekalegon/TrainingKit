@@ -99,7 +99,7 @@ extension TrainingModel {
     /// `savingAnchor` off, so the file doesn't move HealthKit's cursor.
     ///
     /// A new activity that is the same workout as a placeholder made from a calendar file (see
-    /// ``PlaceholderActivityMatching``) replaces it: the placeholder is removed without a tombstone,
+    /// `PlaceholderActivityMatching`) replaces it: the placeholder is removed without a tombstone,
     /// its plan is released, and the plan is matched again to the real workout.
     ///
     /// Call from inside ``runQueued(_:)``, like ``performImport(from:asOf:)``.
@@ -151,22 +151,30 @@ extension TrainingModel {
             }
         }
 
-        // Placeholders the real workouts replace.
-        for activity in newActivities where !activity.isCalendarImport {
-            let window = activity.start.addingTimeInterval(-PlaceholderActivityMatching.startTolerance)...activity.start.addingTimeInterval(PlaceholderActivityMatching.startTolerance)
-            let candidates = try await stores.activityStore.activityListItems(in: window)
-            for placeholder in candidates where placeholder.isCalendarImport && placeholder.id != activity.id
-                && PlaceholderActivityMatching.isSameWorkout(
-                    sport: activity.sport, start: activity.start, duration: activity.duration, as: placeholder
-                ) {
-                deletedStarts.append(placeholder.start)
-                try await releasePlans(heldBy: [placeholder.id])
-                // A placeholder from a HealthKit workout id is removed by source, which leaves no
-                // tombstone, so that workout still imports if HealthKit reports it.
-                if let source = try await stores.activityStore.activity(id: placeholder.id)?.source, source.hasNaturalKey {
-                    try await stores.activityStore.deleteActivity(source: source)
-                } else {
-                    try await stores.activityStore.deleteActivity(id: placeholder.id)
+        // Placeholders the real workouts replace. One read for the whole batch, not one per activity:
+        // a full resync brings in every workout.
+        let real = newActivities.filter { !$0.isCalendarImport }
+        if let first = real.map(\.start).min(), let last = real.map(\.start).max() {
+            let slack = PlaceholderActivityMatching.startTolerance
+            let placeholders = try await stores.activityStore
+                .activityListItems(in: first.addingTimeInterval(-slack)...last.addingTimeInterval(slack))
+                .filter(\.isCalendarImport)
+            var removed: Set<UUID> = []
+            for activity in real {
+                for placeholder in placeholders where !removed.contains(placeholder.id) && placeholder.id != activity.id
+                    && PlaceholderActivityMatching.isSameWorkout(
+                        sport: activity.sport, start: activity.start, duration: activity.duration, as: placeholder
+                    ) {
+                    removed.insert(placeholder.id)
+                    deletedStarts.append(placeholder.start)
+                    try await releasePlans(heldBy: [placeholder.id])
+                    // A placeholder from a HealthKit workout id is removed by source, which leaves no
+                    // tombstone, so that workout still imports if HealthKit reports it.
+                    if let source = try await stores.activityStore.activity(id: placeholder.id)?.source, source.hasNaturalKey {
+                        try await stores.activityStore.deleteActivity(source: source)
+                    } else {
+                        try await stores.activityStore.deleteActivity(id: placeholder.id)
+                    }
                 }
             }
         }

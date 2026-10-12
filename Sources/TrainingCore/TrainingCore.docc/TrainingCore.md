@@ -50,6 +50,7 @@ See `docs/design/trainingKit-design.md` in the package repository for the full m
 - ``LoadCalculator``
 - ``ExponentialTRIMPCalculator``
 - ``DurationRPECalculator``
+- ``ImportedLoadCalculator``
 
 ### Structured Workouts
 

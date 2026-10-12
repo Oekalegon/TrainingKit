@@ -12,6 +12,11 @@ extension TrainingModel {
     /// the athlete knows best. Clears any ``planMatchAmbiguities`` entry for the activity, and reloads
     /// and recomputes.
     ///
+    /// Unless the athlete chose its own (``Activity/isSportEdited``), the activity takes the sport and
+    /// venue of the plan's workout (see ``Activity/adoptingSportAndVenue(of:athlete:)``). A different
+    /// sport feeds ``paceHistory``'s observations, so call
+    /// ``refreshPaceHistory(in:gapThresholdSeconds:)`` afterwards, as after ``setSport(_:venue:forActivityID:asOf:)``.
+    ///
     /// A no-op if either id isn't in the store.
     ///
     /// - Throws: ``PlanLinkError/differentDay`` if the activity and the plan aren't on the same day
@@ -29,6 +34,9 @@ extension TrainingModel {
     ///
     /// The activity isn't re-matched automatically afterwards (only newly imported activities are),
     /// so an unlink sticks. Clears any ``planMatchAmbiguities`` entry, and reloads and recomputes.
+    ///
+    /// The sport and venue the activity took from the plan stay as they are; the source's own values
+    /// come back with the next re-import, or the athlete can set them with ``setSport(_:venue:forActivityID:asOf:)``.
     ///
     /// - Parameters:
     ///   - id: The activity to unlink.
@@ -63,9 +71,11 @@ extension TrainingModel {
         let workouts = try await stores.workoutStore.workouts()
 
         let result = PlanReconciler().reconcile(activities: candidates, plans: plans, workouts: workouts, athlete: athlete)
-        let workoutByPlanID = Dictionary(uniqueKeysWithValues: plans.compactMap { plan in
-            workouts.first { $0.id == plan.workoutID }.map { (plan.id, $0) }
-        })
+        let workoutsByID = Dictionary(workouts.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let workoutByPlanID = Dictionary(
+            plans.compactMap { plan in workoutsByID[plan.workoutID].map { (plan.id, $0) } },
+            uniquingKeysWith: { first, _ in first }
+        )
         // A linked activity takes its plan's sport and venue, unless the athlete chose its own.
         let linkedActivities = result.activities.filter { $0.linkedPlanID != nil }.map { activity in
             activity.adoptingSportAndVenue(of: activity.linkedPlanID.flatMap { workoutByPlanID[$0] }, athlete: athlete)

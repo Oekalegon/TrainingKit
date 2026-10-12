@@ -131,9 +131,11 @@ extension TrainingModel {
     /// re-imported) pieces, in place under the same id, and returns the days that need their
     /// fitness-metrics cache invalidated (the earlier of the old and rebuilt start).
     ///
-    /// The join's own ``Activity/linkedPlanID``, ``Activity/perceivedExertion`` and (when ``Activity/isSportEdited``) sport and venue survive the
-    /// rebuild when set — the reconciler or the athlete may have set them on the joined activity
-    /// itself — so a later change to a piece's own exertion doesn't override them.
+    /// The join's own ``Activity/linkedPlanID``, ``Activity/perceivedExertion`` and (when
+    /// ``Activity/isSportEdited``) sport and venue survive the rebuild when set — the reconciler or
+    /// the athlete may have set them on the joined activity itself — so a later change to a piece's
+    /// own exertion doesn't override them. Without an athlete's choice, a linked join takes its
+    /// plan's sport and venue again (see ``Activity/adoptingSportAndVenue(of:athlete:)``).
     func refreshJoins(containing pieceIDs: [UUID]) async throws -> [Date] {
         var refreshed: Set<UUID> = []
         var days: [Date] = []
@@ -149,7 +151,10 @@ extension TrainingModel {
                 rebuilt.venue = existing.venue
                 rebuilt.isSportEdited = true
             }
-            rebuilt = rebuilt.adoptingSportAndVenue(of: try await plannedWorkout(planID: rebuilt.linkedPlanID), athlete: athlete)
+            // Unless the athlete chose its own, the rebuilt activity takes its plan's sport and venue.
+            rebuilt = rebuilt.adoptingSportAndVenue(
+                of: try await plannedWorkout(planID: rebuilt.linkedPlanID), athlete: athlete
+            )
             try await stores.activityStore.saveJoin(rebuilt, components: components.map(\.id), replacing: [])
             days.append(min(existing.start, rebuilt.start))
         }

@@ -187,7 +187,10 @@ struct Activity: Identifiable, Sendable, Codable {
     var sport: Sport
     var venue: Venue?                 // where it happened, if known; see Venue below
     var isSportEdited: Bool           // athlete chose sport/venue (TrainingModel.setSport); re-imports and
-                                       // join rebuilds then keep them. Call refreshPaceHistory afterwards
+                                       // join rebuilds then keep them. Call refreshPaceHistory afterwards.
+                                       // Unedited, a linked activity takes its plan's sport and venue
+                                       // (workout venue, else athlete default, else recorded), on auto-match,
+                                       // manual link, re-import and join rebuild; unlinking leaves them
     var start: Date
     var duration: TimeInterval
     var distanceMeters: Double?

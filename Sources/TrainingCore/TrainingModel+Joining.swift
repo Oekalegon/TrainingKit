@@ -149,6 +149,7 @@ extension TrainingModel {
                 rebuilt.venue = existing.venue
                 rebuilt.isSportEdited = true
             }
+            rebuilt = rebuilt.adoptingSportAndVenue(of: try await plannedWorkout(planID: rebuilt.linkedPlanID), athlete: athlete)
             try await stores.activityStore.saveJoin(rebuilt, components: components.map(\.id), replacing: [])
             days.append(min(existing.start, rebuilt.start))
         }

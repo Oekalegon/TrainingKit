@@ -63,7 +63,13 @@ extension TrainingModel {
         let workouts = try await stores.workoutStore.workouts()
 
         let result = PlanReconciler().reconcile(activities: candidates, plans: plans, workouts: workouts, athlete: athlete)
-        let linkedActivities = result.activities.filter { $0.linkedPlanID != nil }
+        let workoutByPlanID = Dictionary(uniqueKeysWithValues: plans.compactMap { plan in
+            workouts.first { $0.id == plan.workoutID }.map { (plan.id, $0) }
+        })
+        // A linked activity takes its plan's sport and venue, unless the athlete chose its own.
+        let linkedActivities = result.activities.filter { $0.linkedPlanID != nil }.map { activity in
+            activity.adoptingSportAndVenue(of: activity.linkedPlanID.flatMap { workoutByPlanID[$0] }, athlete: athlete)
+        }
         let linkedPlans = result.plans.filter { $0.completedActivityID != nil }
         guard !linkedActivities.isEmpty else { return }
         try await stores.activityStore.upsert(linkedActivities)
@@ -121,6 +127,7 @@ extension TrainingModel {
         }
 
         activity.linkedPlanID = planID
+        activity = activity.adoptingSportAndVenue(of: try await stores.workoutStore.workout(id: plan.workoutID), athlete: athlete)
         plan.completedActivityID = activityID
 
         // Activities and plans live in two stores that can't commit together, so the order limits

@@ -150,6 +150,12 @@ extension TrainingModel {
                     toUpsert[index].venue = existing.venue
                     toUpsert[index].isSportEdited = true
                 }
+                // A re-import brings the source's sport back, so a linked activity takes its plan's again.
+                if toUpsert[index].linkedPlanID != nil, !toUpsert[index].isSportEdited {
+                    toUpsert[index] = toUpsert[index].adoptingSportAndVenue(
+                        of: try await plannedWorkout(planID: toUpsert[index].linkedPlanID), athlete: athlete
+                    )
+                }
                 if toUpsert[index].speed.isEmpty { toUpsert[index].speed = existing.speed }
                 if toUpsert[index].heartRate.isEmpty { toUpsert[index].heartRate = existing.heartRate }
             } else {

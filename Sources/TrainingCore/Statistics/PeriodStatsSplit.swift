@@ -7,14 +7,14 @@ import Foundation
 public struct PeriodStatsSplit: Sendable, Hashable {
     /// Totals from completed activities only, by sport.
     public let actual: [Sport: SportPeriodStats]
-    /// Totals from planned activities only (dated `today` or later), by sport.
+    /// Totals from planned activities only (dated `today` or later and not yet matched to a completed activity), by sport.
     public let planned: [Sport: SportPeriodStats]
 
     /// Creates a period stats split.
     ///
     /// - Parameters:
     ///   - actual: Totals from completed activities only, by sport.
-    ///   - planned: Totals from planned activities only (dated `today` or later), by sport.
+    ///   - planned: Totals from planned activities only (dated `today` or later and not yet matched to a completed activity), by sport.
     public init(actual: [Sport: SportPeriodStats], planned: [Sport: SportPeriodStats]) {
         self.actual = actual
         self.planned = planned

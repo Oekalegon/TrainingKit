@@ -68,6 +68,23 @@ struct StatisticsCalculatorPeriodStatsSplitTests {
         #expect(split.planned[.running] == nil)
     }
 
+    @Test("only the matched plan is excluded when a day has a matched and an unmatched plan")
+    func excludesOnlyTheMatchedPlan() {
+        let day = Date(timeIntervalSince1970: 0)
+        let structuredWorkout = workout()
+        let realActivity = activity(sport: .running, start: day, distanceMeters: 8000, duration: 2400)
+        var matched = PlannedActivity(workoutID: structuredWorkout.id, date: day)
+        matched.completedActivityID = realActivity.id
+        let open = PlannedActivity(workoutID: structuredWorkout.id, date: day)
+
+        let split = calculator.periodStatsSplit(
+            activities: [realActivity], plans: [matched, open], workouts: [structuredWorkout], athlete: athlete, range: day...day, asOf: day
+        )
+
+        #expect(split.actual[.running]?.activityCount == 1)
+        #expect(split.planned[.running]?.activityCount == 1)
+    }
+
     @Test("a completed activity with no matching plan reports only actual")
     func actualOnlyWithNoPlan() {
         let day = Date(timeIntervalSince1970: 0)

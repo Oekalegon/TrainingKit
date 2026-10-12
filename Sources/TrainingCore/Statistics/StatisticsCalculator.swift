@@ -243,9 +243,12 @@ public struct StatisticsCalculator: Sendable {
     /// actually happened" side by side for a day where both exist, or a still-open plan for today
     /// that hasn't been performed yet — the whole point of this method. `actual` sums every
     /// completed activity in `range` unconditionally; `planned` sums every ``PlannedActivity`` in
-    /// `range` dated `today` or later, also unconditionally — neither excludes a day just because
-    /// the other side also has something for it. Both are still at the day level, not per-workout:
-    /// nothing here attempts to match a specific plan to the specific activity that fulfilled it.
+    /// `range` dated `today` or later that has not yet been matched to a completed activity
+    /// (`completedActivityID == nil`) — a matched plan is already counted in `actual`. Neither side
+    /// excludes a day just because the other has something for it. Beyond the stored link nothing
+    /// here matches plans to activities, so an unmatched plan on a day that also has an activity
+    /// still counts as planned. Callers should pass the activities for the whole `range`: a matched
+    /// plan whose activity is not in `activities` appears on neither side.
     ///
     /// - Parameters:
     ///   - activities: Completed activities to summarize with `calculators`.
@@ -282,8 +285,9 @@ public struct StatisticsCalculator: Sendable {
             return day >= rangeStart && day <= rangeEnd && day <= todayStart
         }
         let plansInRange = plans.filter { plan in
+            guard plan.completedActivityID == nil else { return false }
             let day = calendar.startOfDay(for: plan.date)
-            return plan.completedActivityID == nil && day >= rangeStart && day <= rangeEnd && day >= todayStart
+            return day >= rangeStart && day <= rangeEnd && day >= todayStart
         }
 
         var actualBySport: [Sport: [StatItem]] = [:]

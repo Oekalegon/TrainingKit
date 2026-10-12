@@ -232,6 +232,88 @@ public enum BuiltInWorkoutTemplates {
         ]
     )
 
+    /// The maximum-heart-rate field test (MVP2-153), purpose ``WorkoutPurpose/maxHRTest``.
+    ///
+    /// The structure, with no parameters, since changing it changes the test:
+    /// 1. A 10-minute Zone 1 warmup and a 5-minute Zone 2 ramp-in.
+    /// 2. Three hard efforts of 3 minutes (RPE 9), each followed by a 1-minute Zone 1 recovery, to
+    ///    bring the heart rate up while the legs are still fresh enough to keep going.
+    /// 3. A final all-out effort of 3 minutes (RPE 10). The maximum is the highest heart rate held
+    ///    during it.
+    /// 4. A 5-minute Zone 1 cooldown.
+    ///
+    /// Best done on a steady climb or flat, rested, and with a chest strap: a wrist sensor lags and
+    /// can miss the peak. The efforts target perceived exertion, not heart-rate zones, because the
+    /// zones come from the very maximum being measured. As in ``tempoRun``, only the edge blocks are
+    /// `.warmup`/`.cooldown`, so the ramp-in is `.work`, matching what ``WorkoutKitBridge`` sends to
+    /// the Watch.
+    public static let maxHRTest = WorkoutTemplate(
+        id: UUID(uuidString: "8F5D6E4E-6E0E-4B8B-9C1A-9E6F9F1C1A08")!,
+        name: "Max heart rate test",
+        titleName: "Max HR Test",
+        sport: .running,
+        parameters: [],
+        blocks: [
+            TemplateBlock(steps: [
+                TemplateStep(kind: .warmup, goal: .time(.fixed(10 * 60)), target: .heartRateZone(1)),
+            ]),
+            TemplateBlock(steps: [
+                TemplateStep(kind: .work, goal: .time(.fixed(5 * 60)), target: .heartRateZone(2)),
+            ]),
+            TemplateBlock(
+                steps: [
+                    TemplateStep(kind: .work, goal: .time(.fixed(3 * 60)), target: .rpe(9)),
+                    TemplateStep(kind: .recovery, goal: .time(.fixed(60)), target: .heartRateZone(1)),
+                ],
+                repetitions: .fixed(3)
+            ),
+            TemplateBlock(steps: [
+                TemplateStep(kind: .work, goal: .time(.fixed(3 * 60)), target: .rpe(10)),
+            ]),
+            TemplateBlock(steps: [
+                TemplateStep(kind: .cooldown, goal: .time(.fixed(5 * 60)), target: .heartRateZone(1)),
+            ]),
+        ],
+        purpose: .maxHRTest
+    )
+
+    /// Friel's 30-minute lactate-threshold-heart-rate field test (MVP2-153), purpose
+    /// ``WorkoutPurpose/lthrTest``.
+    ///
+    /// The structure, with no parameters, since changing it changes the test:
+    /// 1. A 10-minute Zone 1 warmup and a 5-minute Zone 2 ramp-in.
+    /// 2. One 30-minute effort (RPE 9) as hard as can be held for the whole 30 minutes, paced evenly,
+    ///    not a sprint that fades. The threshold heart rate is the average over its last 20 minutes;
+    ///    the first 10 are discarded because the heart rate is still rising. It is one step so the
+    ///    10-minute mark is known to whoever reads the result.
+    /// 3. A 5-minute Zone 1 cooldown.
+    ///
+    /// Best done alone, on flat ground, with a chest strap. The effort targets perceived exertion,
+    /// not heart-rate zones, since the zones are what the test sets. Like ``maxHRTest``, only the edge
+    /// blocks are `.warmup`/`.cooldown`.
+    public static let lthrTest = WorkoutTemplate(
+        id: UUID(uuidString: "8F5D6E4E-6E0E-4B8B-9C1A-9E6F9F1C1A09")!,
+        name: "Lactate threshold test (30 min)",
+        titleName: "LTHR Test",
+        sport: .running,
+        parameters: [],
+        blocks: [
+            TemplateBlock(steps: [
+                TemplateStep(kind: .warmup, goal: .time(.fixed(10 * 60)), target: .heartRateZone(1)),
+            ]),
+            TemplateBlock(steps: [
+                TemplateStep(kind: .work, goal: .time(.fixed(5 * 60)), target: .heartRateZone(2)),
+            ]),
+            TemplateBlock(steps: [
+                TemplateStep(kind: .work, goal: .time(.fixed(30 * 60)), target: .rpe(9)),
+            ]),
+            TemplateBlock(steps: [
+                TemplateStep(kind: .cooldown, goal: .time(.fixed(5 * 60)), target: .heartRateZone(1)),
+            ]),
+        ],
+        purpose: .lthrTest
+    )
+
     /// Every built-in template, in the order they should appear in a library UI.
-    public static let all: [WorkoutTemplate] = [recoveryRun, easyRun, longRun, tempoRun, baseHillSprints, shortIntervalRun, shortIntervalRunTrack]
+    public static let all: [WorkoutTemplate] = [recoveryRun, easyRun, longRun, tempoRun, baseHillSprints, shortIntervalRun, shortIntervalRunTrack, maxHRTest, lthrTest]
 }

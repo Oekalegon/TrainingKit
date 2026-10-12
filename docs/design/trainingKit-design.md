@@ -243,7 +243,17 @@ struct StructuredWorkout: Identifiable, Sendable, Codable {
                                        // doesn't affect load calculation or WorkoutKit/FIT export.
     var blocks: [WorkoutBlock]
     var workoutKitID: UUID?           // identity of the synced WorkoutKit plan, nil if unsynced
+    var purpose: WorkoutPurpose       // .general, .maxHRTest or .lthrTest (MVP2-153); copied from the
+                                       // template on instantiate; old data decodes as .general. Doesn't
+                                       // affect load; marks a field test whose result is read from the
+                                       // activity linked to its plan (MVP2-154)
 }
+
+// The built-in field tests (MVP2-153): the max HR test is a warmup, three 3-minute RPE 9 efforts with
+// 1-minute recoveries and a 3-minute all-out effort (result: highest heart rate held); Friel's LTHR test is
+// a warmup and one 30-minute RPE 9 effort (result: average heart rate over its last 20 minutes). Both
+// target RPE, not heart-rate zones, since the zones are what they set; WorkoutKit can't send RPE alerts,
+// so the Watch just shows the steps' times.
 
 // Deliberately a small set of broad categories, used to match day preferences (§8.1).
 // Template specifics (fartlek, fast finish, the interval variants) belong to the

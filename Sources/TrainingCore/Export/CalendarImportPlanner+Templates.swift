@@ -49,7 +49,7 @@ struct TemplateResolver {
             if isCopy {
                 template = WorkoutTemplate(
                     name: template.name, titleName: template.titleName, sport: template.sport, venue: template.venue,
-                    parameters: template.parameters, blocks: template.blocks
+                    parameters: template.parameters, blocks: template.blocks, purpose: template.purpose
                 )
             }
             resolutions[fileID] = .new(template, isCopy: isCopy)
@@ -103,6 +103,6 @@ struct TemplateResolver {
 
     /// Whether two templates do the same thing: the id, name and archived state don't count.
     private static func isEqual(_ lhs: WorkoutTemplate, _ rhs: WorkoutTemplate) -> Bool {
-        lhs.sport == rhs.sport && lhs.venue == rhs.venue && lhs.parameters == rhs.parameters && lhs.blocks == rhs.blocks
+        lhs.sport == rhs.sport && lhs.venue == rhs.venue && lhs.purpose == rhs.purpose && lhs.parameters == rhs.parameters && lhs.blocks == rhs.blocks
     }
 }

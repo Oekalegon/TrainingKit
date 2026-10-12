@@ -235,6 +235,9 @@ struct StructuredWorkout: Identifiable, Sendable, Codable {
     var workoutKitID: UUID?           // identity of the synced WorkoutKit plan, nil if unsynced
 }
 
+// Deliberately a small set of broad categories, used to match day preferences (§8.1).
+// Template specifics (fartlek, fast finish, the interval variants) belong to the
+// StructuredWorkout, not to a new case.
 enum SessionType: String, Sendable, Codable {
     case easy, long, interval, tempo, hillRepeats, recovery, race
 }

@@ -129,6 +129,11 @@ extension TrainingModel {
                 if toUpsert[index].linkedPlanID == nil { toUpsert[index].linkedPlanID = existing.linkedPlanID }
                 // Likewise the hint, in case this run's WorkoutKit lookup failed.
                 if toUpsert[index].scheduledPlanID == nil { toUpsert[index].scheduledPlanID = existing.scheduledPlanID }
+                // And the streams (MVP2-146): a query that failed this run, or one the athlete has since
+                // refused access to, comes back empty, and replacing a recording with nothing would
+                // lose the pace chart, the forecasts' data and the heart-rate zones for good.
+                if toUpsert[index].speed.isEmpty { toUpsert[index].speed = existing.speed }
+                if toUpsert[index].heartRate.isEmpty { toUpsert[index].heartRate = existing.heartRate }
             } else {
                 newActivities.append(toUpsert[index])
             }

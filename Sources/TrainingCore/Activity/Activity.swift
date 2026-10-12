@@ -41,6 +41,11 @@ public struct Activity: Identifiable, Sendable, Codable, Hashable {
     /// A hint, not a link: ``PlanReconciler`` turns it into ``linkedPlanID`` when that plan still
     /// exists, is unmatched and falls on the activity's day, and otherwise ignores it.
     public var scheduledPlanID: UUID?
+    /// The steps of the plan this workout was started from, as the Watch recorded them (MVP2-146), in
+    /// order; empty for a workout that wasn't started from a plan, for one imported before steps were
+    /// read, and for a joined activity (its pieces' steps belong to different workouts). See
+    /// ``ActivityStepAligner`` for laying them over the plan.
+    public var steps: [ActivityStep]
 
     /// The time span this activity covers, from ``start`` to `start + duration`.
     ///
@@ -68,6 +73,7 @@ public struct Activity: Identifiable, Sendable, Codable, Hashable {
     ///   - perceivedExertion: Borg CR10 rating (1...10), if entered.
     ///   - linkedPlanID: The matched ``PlannedActivity``'s id, if already reconciled.
     ///   - scheduledPlanID: The id of the plan the workout was started from, if the source knows it.
+    ///   - steps: The steps the Watch recorded for a plan-started workout; defaults to none.
     public init(
         id: UUID = UUID(),
         source: ActivitySource,
@@ -82,7 +88,8 @@ public struct Activity: Identifiable, Sendable, Codable, Hashable {
         geographicBounds: GeographicBounds? = nil,
         perceivedExertion: Int? = nil,
         linkedPlanID: UUID? = nil,
-        scheduledPlanID: UUID? = nil
+        scheduledPlanID: UUID? = nil,
+        steps: [ActivityStep] = []
     ) {
         self.id = id
         self.source = source
@@ -98,5 +105,34 @@ public struct Activity: Identifiable, Sendable, Codable, Hashable {
         self.perceivedExertion = perceivedExertion
         self.linkedPlanID = linkedPlanID
         self.scheduledPlanID = scheduledPlanID
+        self.steps = steps
+    }
+}
+
+extension Activity {
+    private enum CodingKeys: String, CodingKey {
+        case id, source, sport, start, duration, distanceMeters, heartRate, speed, elevation, cadence
+        case geographicBounds, perceivedExertion, linkedPlanID, scheduledPlanID, steps
+    }
+
+    /// Decodes an activity, reading a missing `steps` as empty so activities saved before steps were
+    /// recorded (MVP2-146) still load.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        source = try container.decode(ActivitySource.self, forKey: .source)
+        sport = try container.decode(Sport.self, forKey: .sport)
+        start = try container.decode(Date.self, forKey: .start)
+        duration = try container.decode(TimeInterval.self, forKey: .duration)
+        distanceMeters = try container.decodeIfPresent(Double.self, forKey: .distanceMeters)
+        heartRate = try container.decode([HeartRateSample].self, forKey: .heartRate)
+        speed = try container.decode([SpeedSample].self, forKey: .speed)
+        elevation = try container.decodeIfPresent(ElevationStats.self, forKey: .elevation)
+        cadence = try container.decodeIfPresent(CadenceStats.self, forKey: .cadence)
+        geographicBounds = try container.decodeIfPresent(GeographicBounds.self, forKey: .geographicBounds)
+        perceivedExertion = try container.decodeIfPresent(Int.self, forKey: .perceivedExertion)
+        linkedPlanID = try container.decodeIfPresent(UUID.self, forKey: .linkedPlanID)
+        scheduledPlanID = try container.decodeIfPresent(UUID.self, forKey: .scheduledPlanID)
+        steps = try container.decodeIfPresent([ActivityStep].self, forKey: .steps) ?? []
     }
 }

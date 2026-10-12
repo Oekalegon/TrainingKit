@@ -131,3 +131,57 @@ struct HealthKitMappingTests {
     }
 }
 #endif
+
+#if canImport(HealthKit)
+@Suite("HealthKit workout steps (MVP2-146)")
+struct HealthKitWorkoutStepTests {
+    private let start = Date(timeIntervalSince1970: 1_699_920_000)
+
+    private func activity(
+        metadata: [String: Any]?, end: Date? = Date(timeIntervalSince1970: 1_699_920_300)
+    ) -> HKWorkoutActivity {
+        HKWorkoutActivity(workoutConfiguration: HKWorkoutConfiguration(), start: start, end: end, metadata: metadata)
+    }
+
+    @Test("a workout activity with the Watch's key path becomes a step with its position, times, goal flag and elevation")
+    func stepFromActivity() throws {
+        let step = try #require(ActivityStep(healthKitActivity: activity(metadata: [
+            "WOIntervalStepKeyPath": "2.3.1",
+            "WOIntervalStepSuccessful": NSNumber(value: true),
+            HKMetadataKeyElevationAscended: HKQuantity(unit: .meter(), doubleValue: 12.5),
+        ])))
+
+        #expect(step.block == 2 && step.repetition == 3 && step.step == 1)
+        #expect(step.start == start)
+        #expect(step.end == Date(timeIntervalSince1970: 1_699_920_300))
+        #expect(step.wasGoalMet == true)
+        #expect(step.elevationAscendedMeters == 12.5)
+        // No statistics were recorded for this activity, so no distance or heart rate, and no pace.
+        #expect(step.distanceMeters == nil)
+        #expect(step.averageHeartRateBPM == nil)
+        #expect(step.averagePaceSecondsPerKilometer == nil)
+    }
+
+    @Test("a step the Watch didn't flag as successful has no goal flag, as the cool-down doesn't")
+    func goalFlagAbsent() throws {
+        let step = try #require(ActivityStep(healthKitActivity: activity(metadata: ["WOIntervalStepKeyPath": "4.0.0"])))
+
+        #expect(step.wasGoalMet == nil)
+    }
+
+    @Test("a workout activity that isn't a plan step, has an unreadable key path, or hasn't ended is not a step")
+    func notAStep() {
+        #expect(ActivityStep(healthKitActivity: activity(metadata: nil)) == nil)
+        #expect(ActivityStep(healthKitActivity: activity(metadata: ["WOIntervalStepKeyPath": "x"])) == nil)
+        #expect(ActivityStep(healthKitActivity: activity(metadata: ["WOIntervalStepKeyPath": "0.0.0"], end: nil)) == nil)
+    }
+
+    @Test("the read types include the distance types a step's summary needs")
+    func readTypesIncludeDistance() {
+        let readTypes = HealthKitAuthorization.readTypes
+        #expect(readTypes.contains(HKQuantityType(.distanceWalkingRunning)))
+        #expect(readTypes.contains(HKQuantityType(.distanceCycling)))
+        #expect(readTypes.contains(HKQuantityType(.heartRate)))
+    }
+}
+#endif

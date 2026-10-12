@@ -34,6 +34,7 @@ See `docs/design/trainingKit-design.md` in the package repository for the full m
 - ``Activity``
 - ``HeartRateSample``
 - ``SpeedSample``
+- ``ActivityStep``
 - ``ElevationStats``
 - ``CadenceStats``
 - ``GeographicBounds``
@@ -67,6 +68,7 @@ See `docs/design/trainingKit-design.md` in the package repository for the full m
 - ``PlannedLoadEstimator``
 - ``TRIMPPlanEstimator``
 - ``PlanReconciler``
+- ``ActivityStepAligner``
 - ``WorkoutDurationEstimator``
 
 ### Fitness Series

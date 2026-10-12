@@ -135,7 +135,8 @@ extension Activity {
     }
 
     /// Decodes an activity, reading a missing `steps` as empty, and a missing imported load as none, so
-    /// activities saved before those fields (MVP2-146, MVP2-107) still load.
+    /// activities saved before those fields (MVP2-146, MVP2-107) still load. A missing `venue` reads the
+    /// one an older version stored inside the sport (`indoorRunning`/`outdoorRunning`).
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(UUID.self, forKey: .id)

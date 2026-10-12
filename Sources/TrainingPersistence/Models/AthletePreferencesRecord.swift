@@ -3,7 +3,7 @@ import SwiftData
 import TrainingCore
 
 /// The athlete's own preferences, the only part of the profile that syncs through CloudKit
-/// (MVP2-131): name, picture, time zone, week start, main sport, the pace history and the
+/// (MVP2-131): name, picture, time zone, week start, main sport and venue, the pace history and the
 /// HealthKit resting-heart-rate switch. All of it is typed or chosen by the athlete.
 ///
 /// The rest of the profile (sex, date of birth, the heart-rate settings, which come from HealthKit)
@@ -27,6 +27,7 @@ struct AthletePreferences: Codable, Equatable {
     var timeZone: TimeZone
     var weekStartsOn: Weekday
     var mainSport: Sport
+    var mainVenue: Venue?
     var paceHistory: [PaceSettings]
     var usesHealthKitRestingHeartRate: Bool
 
@@ -37,6 +38,7 @@ struct AthletePreferences: Codable, Equatable {
         timeZone = profile.timeZone
         weekStartsOn = profile.weekStartsOn
         mainSport = profile.mainSport
+        mainVenue = profile.mainVenue
         paceHistory = profile.paceHistory
         usesHealthKitRestingHeartRate = profile.usesHealthKitRestingHeartRate
     }
@@ -49,6 +51,7 @@ struct AthletePreferences: Codable, Equatable {
         merged.timeZone = timeZone
         merged.weekStartsOn = weekStartsOn
         merged.mainSport = mainSport
+        merged.mainVenue = mainVenue
         merged.paceHistory = paceHistory
         merged.usesHealthKitRestingHeartRate = usesHealthKitRestingHeartRate
         return merged

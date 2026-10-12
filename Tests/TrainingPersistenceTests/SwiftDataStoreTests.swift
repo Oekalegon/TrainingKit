@@ -45,6 +45,32 @@ struct SwiftDataStoreTests {
         #expect(item.isCalendarImport)
     }
 
+    @Test("an activity's venue round-trips, in the list item too")
+    func venueRoundTrip() async throws {
+        let store = try makeStore()
+        let activity = Activity(source: .manual, sport: .running, venue: .outdoor(.trail), start: day(1), duration: 1800)
+        try await store.upsert([activity])
+
+        #expect(try await store.activity(id: activity.id)?.venue == .outdoor(.trail))
+        let item = try #require(try await store.activityListItems(in: day(0)...day(2)).first)
+        #expect(item.venue == .outdoor(.trail))
+    }
+
+    @Test("a payload saved with the old outdoorRunning sport lists as running outdoors")
+    func legacyVenueListItem() throws {
+        let activity = Activity(source: .manual, sport: .running, start: day(1), duration: 1800)
+        let record = try ActivityRecord(activity: activity)
+        var json = try #require(JSONSerialization.jsonObject(with: record.payload) as? [String: Any])
+        json["sport"] = ["outdoorRunning": [String: Any]()]
+        json["venue"] = nil
+        record.payload = try JSONSerialization.data(withJSONObject: json)
+
+        let item = try record.toListItem()
+        #expect(item.sport == .running)
+        #expect(item.venue == .outdoor(nil))
+        #expect(try record.toActivity().venue == .outdoor(nil))
+    }
+
     @Test("ActivityStore activityListItems matches activities(in:) without the samples, joins included (MVP2-129)")
     func activityStoreSummaries() async throws {
         let store = try makeStore()

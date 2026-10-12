@@ -80,6 +80,8 @@ struct AthleteProfile: Sendable, Codable {
     var mainSport: Sport                            // primary sport, e.g. for a weekly overview
                                                        // highlighting one sport's duration/distance/
                                                        // TRIMP change above the rest; default .running
+    var mainVenue: Venue?                           // where the athlete usually does mainSport; nil = none.
+                                                       // Preselects a plan's venue (only for mainSport)
     var heartRateZoneHistory: [HeartRateZoneSettings] // resting/max HR + zone method, dated so
                                                        // recomputing an old activity's load uses the
                                                        // settings effective on its date, not today's
@@ -183,6 +185,7 @@ struct Activity: Identifiable, Sendable, Codable {
     let id: UUID
     var source: ActivitySource        // .healthKit(uuid), .fitFile(url), .manual, .testing
     var sport: Sport
+    var venue: Venue?                 // where it happened, if known; see Venue below
     var start: Date
     var duration: TimeInterval
     var distanceMeters: Double?
@@ -228,6 +231,8 @@ struct StructuredWorkout: Identifiable, Sendable, Codable {
     let id: UUID
     var name: String
     var sport: Sport
+    var venue: Venue?                 // mapped to CustomWorkout.location, so the Watch doesn't ask
+                                       // "Indoor or Outdoor?"; nil = unspecified (the Watch asks)
     var sessionType: SessionType?     // e.g. .long, .interval, .hillRepeats; nil = unclassified.
                                        // Used by PlanGenerator (§8.1) to match day preferences —
                                        // doesn't affect load calculation or WorkoutKit/FIT export.
@@ -240,6 +245,19 @@ struct StructuredWorkout: Identifiable, Sendable, Codable {
 // StructuredWorkout, not to a new case.
 enum SessionType: String, Sendable, Codable {
     case easy, long, interval, tempo, hillRepeats, recovery, race
+}
+
+// Sport says what is done; Venue says where, and is separate so every sport doesn't need an
+// indoor/outdoor/trail/track case (MVP2-151). Stats group by Sport alone, so all runs count as running.
+// A nil venue is compatible with any venue; two venues must agree on indoor vs outdoor (surfaces
+// don't count) for activities to be "the same kind" (joins, overlaps, plan matching, pace history).
+// WorkoutKit only carries indoor/outdoor (CustomWorkout.location), so the surface is dropped there.
+// A WorkoutTemplate.venue is a constraint: nil lets the plan choose, .outdoor(nil) allows only outdoor
+// surfaces, and a venue with a surface fixes it. Data written before Venue (Sport cases indoorRunning /
+// outdoorRunning) decodes as .running plus .indoor(nil) / .outdoor(nil).
+enum Venue: Sendable, Codable, Hashable {
+    case indoor(IndoorSurface?)       // .treadmill, .track
+    case outdoor(OutdoorSurface?)     // .track, .road, .trail, .offtrail
 }
 
 struct WorkoutBlock: Sendable, Codable {
@@ -532,7 +550,8 @@ struct PlanPreferences: Sendable, Codable {
 
 struct DayPreference: Sendable, Codable {
     var sport: Sport?              // defaults to the athlete's primary sport if nil
-    var surface: RunSurface?       // .road, .trail, .track, .indoor; nil = no preference
+    var surface: RunSurface?       // .road, .trail, .track, .indoor; nil = no preference.
+                                    // Overlaps Venue (MVP2-151): derive it from Venue, or replace it, when built
     var sessionType: SessionType?  // e.g. .long on Sunday, .interval on Tuesday, .hillRepeats on Thursday;
                                     // nil = generator picks freely (typically .easy)
 }

@@ -601,6 +601,7 @@ struct TrainingModelAthleteEditCacheTests {
             changed.usesHealthKitRestingHeartRate = false
             changed.dateOfBirth = Date(timeIntervalSince1970: 631_152_000)
             changed.mainSport = .cycling
+            changed.mainVenue = .indoor(.treadmill)
             return changed
         }
 

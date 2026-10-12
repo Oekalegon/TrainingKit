@@ -85,12 +85,34 @@ extension WorkoutTemplate {
         return choices.first { !$0.isIndoor } ?? choices.first ?? venue
     }
 
+    /// The venue a plan editor preselects for `athlete`: their usual venue for the template's sport
+    /// (``AthleteProfile/defaultVenue(for:)``) if the template allows it, else ``defaultVenue(preferred:)``'s
+    /// own default.
+    ///
+    /// - Parameter athlete: The athlete planning the workout.
+    public func defaultVenue(for athlete: AthleteProfile) -> Venue? {
+        defaultVenue(preferred: athlete.defaultVenue(for: sport))
+    }
+
+    /// `chosen` if the template allows it, otherwise the template's own ``venue``.
+    ///
+    /// A venue is allowed when it's one of ``venueChoices`` or compatible with the template's
+    /// constraint, so one without a surface (what WorkoutKit, HealthKit and older files give) is kept
+    /// for a template that leaves its venue open. A template naming a surface keeps its own.
+    private func resolvedVenue(_ chosen: Venue?) -> Venue? {
+        guard let chosen else { return venue }
+        if venueChoices.contains(chosen) { return chosen }
+        guard let venue else { return chosen }
+        return !venue.hasSurface && Venue.isCompatible(venue, chosen) ? chosen : venue
+    }
+
     /// Produces a concrete workout by resolving this template's parameters.
     ///
     /// - Parameters:
     ///   - name: The instantiated workout's display name; defaults to this template's name.
     ///   - venue: The venue to give the workout, chosen from ``venueChoices``; defaults to the
-    ///     template's ``venue``. Ignored when it isn't one of the choices.
+    ///     template's ``venue``. Ignored when the template doesn't allow it (see ``venueChoices``);
+    ///     a venue without a surface is kept unless the template names a surface.
     ///   - values: Parameter key to value; a key declared in this template's `parameters` but
     ///     missing from `values` resolves to that parameter's `defaultValue`.
     /// - Returns: A ``StructuredWorkout`` with every ``TemplateValue`` resolved to a fixed value.
@@ -122,7 +144,7 @@ extension WorkoutTemplate {
         // workout can later be re-instantiated with a single parameter changed.
         let resolvedValues = Dictionary(uniqueKeysWithValues: parameters.map { ($0.key, values[$0.key] ?? $0.defaultValue) })
         return StructuredWorkout(
-            name: name ?? self.name, sport: sport, venue: chosenVenue.flatMap { venueChoices.contains($0) ? $0 : nil } ?? venue, blocks: resolvedBlocks,
+            name: name ?? self.name, sport: sport, venue: resolvedVenue(chosenVenue), blocks: resolvedBlocks,
             templateID: id, parameterValues: resolvedValues
         )
     }

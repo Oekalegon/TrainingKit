@@ -49,6 +49,29 @@ struct CalendarImportTests {
         #expect(result.report == CalendarImportReport(added: 1, skippedDuplicates: 0, skippedPast: 0, rejected: []))
     }
 
+    @Test("a file written before venues, with sport indoorRunning, imports as running indoors, even on an open template")
+    func legacyIndoorRunningFile() throws {
+        let workout = try BuiltInWorkoutTemplates.easyRun.instantiate()
+        let file = export(plans: [PlannedActivity(workoutID: workout.id, date: day(4))], workouts: [workout])
+        var json = try #require(JSONSerialization.jsonObject(with: file.jsonData()) as? [String: Any])
+        var days = try #require(json["days"] as? [[String: Any]])
+        for dayIndex in days.indices {
+            var entries = try #require(days[dayIndex]["activities"] as? [[String: Any]])
+            for index in entries.indices {
+                entries[index]["sport"] = "indoorRunning"
+                entries[index]["venue"] = nil
+            }
+            days[dayIndex]["activities"] = entries
+        }
+        json["days"] = days
+
+        let legacy = try CalendarExport.decode(from: JSONSerialization.data(withJSONObject: json))
+        let rebuilt = try #require(plan(legacy).workouts.first)
+
+        #expect(rebuilt.sport == .running)
+        #expect(rebuilt.venue == .indoor(nil))
+    }
+
     @Test("a completed activity becomes a placeholder; daily metrics aren't imported")
     func completedSkipped() throws {
         let start = day(1, hour: 7)

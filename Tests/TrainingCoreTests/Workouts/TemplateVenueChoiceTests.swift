@@ -17,6 +17,7 @@ struct TemplateVenueChoiceTests {
         #expect(t.defaultVenue(preferred: .indoor(.treadmill)) == .indoor(.treadmill))
         #expect(try t.instantiate(venue: .outdoor(.trail)).venue == .outdoor(.trail))
         #expect(try t.instantiate().venue == nil)
+        #expect(try t.instantiate(venue: .indoor(.treadmill)).venue == .indoor(.treadmill))
     }
 
     @Test("an outdoor template without a surface offers only outdoor surfaces")
@@ -25,6 +26,13 @@ struct TemplateVenueChoiceTests {
         #expect(!t.isVenueFixed)
         #expect(t.venueChoices.allSatisfy { !$0.isIndoor })
         #expect(try t.instantiate(venue: .indoor(.treadmill)).venue == .outdoor(nil))
+    }
+
+    @Test("a venue without a surface is kept by a template that leaves its venue open")
+    func surfaceLessVenueIsKept() throws {
+        #expect(try template(.running).instantiate(venue: .indoor(nil)).venue == .indoor(nil))
+        #expect(try template(.running, venue: .outdoor(nil)).instantiate(venue: .outdoor(nil)).venue == .outdoor(nil))
+        #expect(try template(.running, venue: .outdoor(nil)).instantiate(venue: .indoor(nil)).venue == .outdoor(nil))
     }
 
     @Test("a template naming a surface fixes the venue")

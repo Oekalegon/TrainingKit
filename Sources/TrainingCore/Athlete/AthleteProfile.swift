@@ -53,6 +53,9 @@ public struct AthleteProfile: Sendable, Codable, Equatable {
     /// The athlete's primary sport, e.g. for a weekly overview that highlights one sport's
     /// duration/distance/TRIMP change above the rest. Defaults to running.
     public var mainSport: Sport
+    /// Where the athlete usually does ``mainSport``, e.g. outdoors on the road; `nil` for no usual
+    /// venue. Preselects a plan's venue in the plan editor (see ``defaultVenue(for:)``).
+    public var mainVenue: Venue?
     /// Every ``HeartRateZoneSettings`` this athlete has recorded, in any order. Recomputing an
     /// activity's load looks up the settings effective on that activity's date via
     /// ``heartRateZoneSettings(asOf:)`` rather than always using the latest entry, so that
@@ -104,6 +107,7 @@ public struct AthleteProfile: Sendable, Codable, Equatable {
         timeZone: TimeZone,
         weekStartsOn: Weekday = .monday,
         mainSport: Sport = .running,
+        mainVenue: Venue? = nil,
         heartRateZoneHistory: [HeartRateZoneSettings],
         dateOfBirth: Date? = nil,
         usesHealthKitRestingHeartRate: Bool = true,
@@ -119,6 +123,7 @@ public struct AthleteProfile: Sendable, Codable, Equatable {
         self.timeZone = timeZone
         self.weekStartsOn = weekStartsOn
         self.mainSport = mainSport
+        self.mainVenue = mainVenue
         self.heartRateZoneHistory = heartRateZoneHistory
         self.dateOfBirth = dateOfBirth
         self.usesHealthKitRestingHeartRate = usesHealthKitRestingHeartRate
@@ -126,7 +131,7 @@ public struct AthleteProfile: Sendable, Codable, Equatable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, name, sex, paceModel, paceHistory, timeZone, weekStartsOn, mainSport, heartRateZoneHistory
+        case id, name, sex, paceModel, paceHistory, timeZone, weekStartsOn, mainSport, mainVenue, heartRateZoneHistory
         case dateOfBirth, usesHealthKitRestingHeartRate, avatarImageData
     }
 
@@ -149,7 +154,9 @@ public struct AthleteProfile: Sendable, Codable, Equatable {
         }
         timeZone = try container.decode(TimeZone.self, forKey: .timeZone)
         weekStartsOn = try container.decode(Weekday.self, forKey: .weekStartsOn)
-        mainSport = try container.decodeIfPresent(Sport.self, forKey: .mainSport) ?? .running
+        let storedSport = try container.decodeIfPresent(StoredSport.self, forKey: .mainSport)
+        mainSport = storedSport?.sport ?? .running
+        mainVenue = try container.decodeIfPresent(Venue.self, forKey: .mainVenue) ?? storedSport?.legacyVenue
         heartRateZoneHistory = try container.decode([HeartRateZoneSettings].self, forKey: .heartRateZoneHistory)
         dateOfBirth = try container.decodeIfPresent(Date.self, forKey: .dateOfBirth)
         usesHealthKitRestingHeartRate = try container.decodeIfPresent(Bool.self, forKey: .usesHealthKitRestingHeartRate) ?? true
@@ -168,10 +175,19 @@ public struct AthleteProfile: Sendable, Codable, Equatable {
         try container.encode(timeZone, forKey: .timeZone)
         try container.encode(weekStartsOn, forKey: .weekStartsOn)
         try container.encode(mainSport, forKey: .mainSport)
+        try container.encodeIfPresent(mainVenue, forKey: .mainVenue)
         try container.encode(heartRateZoneHistory, forKey: .heartRateZoneHistory)
         try container.encodeIfPresent(dateOfBirth, forKey: .dateOfBirth)
         try container.encode(usesHealthKitRestingHeartRate, forKey: .usesHealthKitRestingHeartRate)
         try container.encodeIfPresent(avatarImageData, forKey: .avatarImageData)
+    }
+
+    /// The venue to preselect for a plan of `sport`: ``mainVenue`` when `sport` is ``mainSport``,
+    /// otherwise `nil`, since a usual venue says nothing about another sport.
+    ///
+    /// - Parameter sport: The sport being planned.
+    public func defaultVenue(for sport: Sport) -> Venue? {
+        sport == mainSport ? mainVenue : nil
     }
 
     /// The ``PaceModel`` in effect on `date`: the latest ``paceHistory`` entry whose effective date is

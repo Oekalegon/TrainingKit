@@ -5,14 +5,14 @@ import Testing
 struct SportFamilyTests {
     @Test("A sport is always the same family as itself")
     func sameCaseIsSameFamily() {
-        #expect(Sport.running.isSameFamily(as: .running))
-        #expect(Sport.other("kayaking").isSameFamily(as: .other("kayaking")))
+        #expect(Sport.running.isSameFamily(as: .running, venue: nil, otherVenue: nil))
+        #expect(Sport.other("kayaking").isSameFamily(as: .other("kayaking"), venue: nil, otherVenue: nil))
     }
 
     @Test("Hiking and walking are the same family")
     func hikingAndWalking() {
-        #expect(Sport.hiking.isSameFamily(as: .walking))
-        #expect(Sport.walking.isSameFamily(as: .hiking))
+        #expect(Sport.hiking.isSameFamily(as: .walking, venue: nil, otherVenue: nil))
+        #expect(Sport.walking.isSameFamily(as: .hiking, venue: nil, otherVenue: nil))
     }
 
     @Test("A run with no venue is the same family as a run at any venue")
@@ -35,9 +35,9 @@ struct SportFamilyTests {
 
     @Test("Unrelated sports are never the same family")
     func unrelatedSports() {
-        #expect(!Sport.running.isSameFamily(as: .cycling))
-        #expect(!Sport.hiking.isSameFamily(as: .running))
-        #expect(!Sport.walking.isSameFamily(as: .running))
-        #expect(!Sport.other("kayaking").isSameFamily(as: .other("canoeing")))
+        #expect(!Sport.running.isSameFamily(as: .cycling, venue: nil, otherVenue: nil))
+        #expect(!Sport.hiking.isSameFamily(as: .running, venue: nil, otherVenue: nil))
+        #expect(!Sport.walking.isSameFamily(as: .running, venue: nil, otherVenue: nil))
+        #expect(!Sport.other("kayaking").isSameFamily(as: .other("canoeing"), venue: nil, otherVenue: nil))
     }
 }

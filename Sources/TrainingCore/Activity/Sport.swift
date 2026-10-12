@@ -28,7 +28,7 @@ public enum Sport: Sendable, Hashable {
     ///   - other: The sport to compare with.
     ///   - venue: `self`'s venue, if known.
     ///   - otherVenue: `other`'s venue, if known.
-    public func isSameFamily(as other: Sport, venue: Venue? = nil, otherVenue: Venue? = nil) -> Bool {
+    public func isSameFamily(as other: Sport, venue: Venue?, otherVenue: Venue?) -> Bool {
         guard Venue.isCompatible(venue, otherVenue) else { return false }
         if self == other { return true }
         let hikingOrWalking: Set<Sport> = [.hiking, .walking]
@@ -105,17 +105,5 @@ extension Sport: Codable {
             return
         }
         _ = container.nestedContainer(keyedBy: OtherKey.self, forKey: Key(stringValue: name))
-    }
-}
-
-/// A sport read from saved data together with the venue an older version stored inside it.
-public struct StoredSport: Decodable, Sendable {
-    /// The sport.
-    public let sport: Sport
-    /// The venue a pre-``Venue`` case implied, or `nil`.
-    public let legacyVenue: Venue?
-
-    public init(from decoder: Decoder) throws {
-        (sport, legacyVenue) = try Sport.decodeLegacy(from: decoder)
     }
 }

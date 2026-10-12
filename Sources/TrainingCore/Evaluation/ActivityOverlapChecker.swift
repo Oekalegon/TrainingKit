@@ -4,7 +4,7 @@ import Foundation
 /// together, rather than just flagging that they do.
 ///
 /// Five outcomes, checked in this order for each pair — see ``OverlapRecommendation``:
-/// 1. Same time span (within tolerance) and sport family (``Sport/isSameFamily(as:)``), identical
+/// 1. Same time span (within tolerance) and sport family (``Sport/isSameFamily(as:venue:otherVenue:)``), identical
 ///    data → ``OverlapRecommendation/duplicate(keep:remove:)``.
 /// 2. Same time span and sport family, differing data → ``OverlapRecommendation/merge``.
 /// 3. Overlapping with a different time span or sport family, and neither contains the other →

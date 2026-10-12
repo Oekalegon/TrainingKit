@@ -136,6 +136,8 @@ extension TrainingModel {
         var toUpsert: [Activity] = untombstoned
         var newActivities: [Activity] = []
         let existingByID = try await stores.activityStore.activities(ids: toUpsert.map(\.id))
+        // Plan → workout, read once per plan however many linked activities share a re-import.
+        var plannedWorkouts: [UUID: StructuredWorkout?] = [:]
         for index in toUpsert.indices {
             if let existing = existingByID[toUpsert[index].id] {
                 if toUpsert[index].linkedPlanID == nil { toUpsert[index].linkedPlanID = existing.linkedPlanID }
@@ -149,6 +151,11 @@ extension TrainingModel {
                     toUpsert[index].sport = existing.sport
                     toUpsert[index].venue = existing.venue
                     toUpsert[index].isSportEdited = true
+                }
+                // A re-import brings the source's sport back, so a linked activity takes its plan's again.
+                if let planID = toUpsert[index].linkedPlanID, !toUpsert[index].isSportEdited {
+                    if plannedWorkouts[planID] == nil { plannedWorkouts[planID] = .some(try await plannedWorkout(planID: planID)) }
+                    toUpsert[index] = toUpsert[index].adoptingSportAndVenue(of: plannedWorkouts[planID] ?? nil, athlete: athlete)
                 }
                 if toUpsert[index].speed.isEmpty { toUpsert[index].speed = existing.speed }
                 if toUpsert[index].heartRate.isEmpty { toUpsert[index].heartRate = existing.heartRate }

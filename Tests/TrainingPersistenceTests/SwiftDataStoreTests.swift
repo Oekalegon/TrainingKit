@@ -803,4 +803,34 @@ struct SwiftDataStoreTests {
         try await store.clearDirtyWatermark()
         #expect(try await store.dirtyWatermark() == nil)
     }
+
+    @Test("an activity's recorded steps survive the store with their times, and a payload saved before steps decodes with none (MVP2-146)")
+    func activityStepsRoundTrip() async throws {
+        let store = try makeStore()
+        let steps = [
+            ActivityStep(
+                block: 0, repetition: 0, step: 0, start: day(1), end: day(1).addingTimeInterval(300), duration: 298,
+                distanceMeters: 801.65, averageHeartRateBPM: 112.98, elevationAscendedMeters: 4.11, wasGoalMet: true
+            ),
+            ActivityStep(
+                block: 2, repetition: 3, step: 1, start: day(1).addingTimeInterval(300), end: day(1).addingTimeInterval(600)
+            ),
+        ]
+        let activity = Activity(source: .manual, sport: .running, start: day(1), duration: 600, steps: steps)
+
+        try await store.upsert([activity])
+
+        let fetched = try #require(try await store.activity(id: activity.id))
+        #expect(fetched.steps == steps)
+        #expect(fetched == activity)
+
+        // A payload written before steps existed has no `steps` key.
+        var json = try #require(try JSONSerialization.jsonObject(with: PersistenceCoding.encode(activity)) as? [String: Any])
+        json["steps"] = nil
+        let legacy = ActivityRecord(
+            id: activity.id, sourceKey: activity.source.persistenceKey, start: activity.start,
+            payload: try JSONSerialization.data(withJSONObject: json)
+        )
+        #expect(try legacy.toActivity().steps.isEmpty)
+    }
 }

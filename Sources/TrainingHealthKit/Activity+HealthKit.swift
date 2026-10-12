@@ -24,6 +24,9 @@ extension Activity {
     ///     there would make a *second* row for the workout.
     ///   - scheduledPlanID: The id of the `WorkoutPlan` the workout was started from, if any (see
     ///     `Activity.scheduledPlanID`); `HealthKitActivityImporter` reads it from WorkoutKit.
+    ///
+    /// The workout's own `workoutActivities` that are steps of a plan become ``Activity/steps`` (MVP2-146),
+    /// in the order they were performed.
     public init(
         healthKitWorkout workout: HKWorkout,
         heartRate: [HeartRateSample],
@@ -38,7 +41,8 @@ extension Activity {
             duration: workout.duration,
             distanceMeters: workout.totalDistance?.doubleValue(for: .meter()),
             heartRate: heartRate,
-            scheduledPlanID: scheduledPlanID
+            scheduledPlanID: scheduledPlanID,
+            steps: workout.workoutActivities.compactMap(ActivityStep.init(healthKitActivity:)).sorted { $0.start < $1.start }
         )
     }
 }

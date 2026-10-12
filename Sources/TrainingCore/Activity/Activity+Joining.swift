@@ -84,6 +84,7 @@ extension Activity {
         case (nil, nil): nil
         }
 
+        // No `steps`: each piece's steps belong to its own workout (see ``Activity/steps``).
         return Activity(
             id: id,
             source: .manual,

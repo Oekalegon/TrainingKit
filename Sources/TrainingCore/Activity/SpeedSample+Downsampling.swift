@@ -4,7 +4,7 @@ extension Array where Element == SpeedSample {
     /// The samples averaged over consecutive windows of `seconds`, one sample per window that has any.
     ///
     /// A Watch records running speed every second or so; an hour-long run is thousands of samples that
-    /// ``DistanceTrack`` and the pace chart gain nothing from, and that every stored activity would
+    /// `DistanceTrack` and the pace chart gain nothing from, and that every stored activity would
     /// carry. A window's sample sits at the mean of its times and holds the mean of its speeds, so the
     /// distance integrated from the result stays close to the original's, and a pause (a window with
     /// no samples) stays a gap.

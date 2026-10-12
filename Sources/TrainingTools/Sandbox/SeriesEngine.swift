@@ -28,7 +28,7 @@ public struct DefaultSeriesEngine: SeriesEngine {
 
     public init(
         estimator: PlannedLoadEstimator = TRIMPPlanEstimator(),
-        loadCalculators: [any LoadCalculator] = [ExponentialTRIMPCalculator(), DurationRPECalculator()],
+        loadCalculators: [any LoadCalculator] = [ExponentialTRIMPCalculator(), ImportedLoadCalculator(), DurationRPECalculator()],
         parameters: LoadModelParameters = LoadModelParameters()
     ) {
         self.estimator = estimator

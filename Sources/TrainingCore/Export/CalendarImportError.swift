@@ -20,6 +20,8 @@ public struct CalendarImportReport: Sendable, Hashable {
         case invalidStep
         /// The day isn't a valid `yyyy-MM-dd` date.
         case invalidDate
+        /// A completed entry has no start, or a duration that isn't a positive number (MVP2-107).
+        case invalidActivity
     }
 
     /// A planned entry that couldn't be imported.
@@ -40,9 +42,11 @@ public struct CalendarImportReport: Sendable, Hashable {
     /// Planned entries skipped because their day is before today. Such a plan would only show as
     /// missed and never counts as load, and the export leaves missed plans out for the same reason.
     public let skippedPast: Int
-    /// Completed activities in the file, which aren't imported: they come from HealthKit, and the
-    /// model can't yet hold an imported load for one without heart-rate data.
-    public let skippedCompleted: Int
+    /// Completed activities added as placeholders (MVP2-107).
+    public let activitiesAdded: Int
+    /// Completed entries skipped because the same workout is already stored: under the same HealthKit
+    /// id, or the same sport at about the same time and length.
+    public let activitiesSkippedDuplicates: Int
     /// Planned entries that couldn't be imported.
     public let rejected: [Rejection]
     /// Templates added to the library (MVP2-141), because a plan that was added uses them and the
@@ -59,13 +63,15 @@ public struct CalendarImportReport: Sendable, Hashable {
     public let templatesRejected: Int
 
     init(
-        added: Int, skippedDuplicates: Int, skippedPast: Int, skippedCompleted: Int, rejected: [Rejection],
+        added: Int, skippedDuplicates: Int, skippedPast: Int, activitiesAdded: Int = 0, activitiesSkippedDuplicates: Int = 0,
+        rejected: [Rejection],
         templatesAdded: Int = 0, templatesLinked: Int = 0, templatesCopied: Int = 0, templatesRejected: Int = 0
     ) {
         self.added = added
         self.skippedDuplicates = skippedDuplicates
         self.skippedPast = skippedPast
-        self.skippedCompleted = skippedCompleted
+        self.activitiesAdded = activitiesAdded
+        self.activitiesSkippedDuplicates = activitiesSkippedDuplicates
         self.rejected = rejected
         self.templatesAdded = templatesAdded
         self.templatesLinked = templatesLinked

@@ -3,6 +3,10 @@ import Foundation
 /// What importing a ``CalendarExport`` would store (MVP2-103): the new workouts and plans, and the
 /// report describing them.
 public struct CalendarImportPlan: Sendable, Hashable {
+    /// Completed activities to add (MVP2-107): placeholders made from the file's completed entries, with
+    /// a start, duration, distance and load but no heart rate. An entry already stored (same source,
+    /// or the same workout by its sport and times) isn't repeated.
+    public let activities: [Activity]
     /// Templates to add to the library (MVP2-141): those the new plans' workouts were built from,
     /// which the library doesn't already have in an equal form.
     public let templates: [WorkoutTemplate]
@@ -18,9 +22,11 @@ public struct CalendarImportPlan: Sendable, Hashable {
 /// Works out how to import a ``CalendarExport`` without touching any store, so it can be tested on
 /// its own and used for a preview.
 ///
-/// Only planned entries are imported. Completed activities are skipped (they come from HealthKit,
-/// and the file holds no heart-rate data), and daily metrics are never imported: the model
-/// recomputes them. Expected load is kept in one case: a planned entry's TRIMP becomes the plan's
+/// Planned entries become plans. Completed entries become placeholder activities (MVP2-107): a start,
+/// a duration, a distance and the file's TRIMP as a load, but no heart rate, since the file has none.
+/// An entry that is already stored isn't repeated: the same HealthKit workout id, or the same workout
+/// by its sport and times (see ``PlaceholderActivityMatching``). Daily metrics are never imported: the
+/// model recomputes them. Expected load is kept in one case: a planned entry's TRIMP becomes the plan's
 /// load override when it was an override in the file, or when it differs from what the estimator
 /// gives for the rebuilt steps, so a load edited outside the app survives. An untouched estimate is
 /// left to be recomputed.
@@ -67,6 +73,10 @@ public struct CalendarImportPlanner: Sendable {
     ///     included.
     ///   - canAddTemplates: Whether templates can be stored. Without a template store, a template
     ///     the library lacks isn't added, and its workouts are rebuilt from their steps.
+    ///   - existingActivities: The activities already stored around the file's period, to tell a
+    ///     completed entry that is the same workout as one of them (MVP2-107).
+    ///   - existingSources: The sources among the file's completed entries that are already stored
+    ///     (an activity from HealthKit under the same workout id).
     ///   - athlete: Supplies the time zone the file's days are read in (the app's own days) and the
     ///     zones the estimator uses.
     ///   - today: Plans on days before this one are skipped.
@@ -77,6 +87,8 @@ public struct CalendarImportPlanner: Sendable {
         existingWorkouts: [StructuredWorkout],
         existingTemplates: [WorkoutTemplate] = [],
         canAddTemplates: Bool = true,
+        existingActivities: [ActivityListItem] = [],
+        existingSources: Set<ActivitySource> = [],
         athlete: AthleteProfile,
         today: Date
     ) -> CalendarImportPlan {
@@ -105,17 +117,36 @@ public struct CalendarImportPlanner: Sendable {
         var newPlans: [PlannedActivity] = []
         var rejected: [CalendarImportReport.Rejection] = []
         var duplicates = 0
-        var completed = 0
+        var newActivities: [Activity] = []
+        var activityDuplicates = 0
+        var knownActivities = existingActivities
+        var knownSources = existingSources
         var past = 0
 
         for day in export.days {
             for entry in day.activities {
-                guard entry.status == .planned else {
-                    completed += 1
-                    continue
-                }
                 func reject(_ reason: CalendarImportReport.RejectionReason) {
                     rejected.append(.init(date: day.date, name: entry.name, reason: reason))
+                }
+                guard entry.status == .planned else {
+                    guard let activity = Self.activity(from: entry) else {
+                        reject(.invalidActivity)
+                        continue
+                    }
+                    let sameSource = activity.source.hasNaturalKey && knownSources.contains(activity.source)
+                    let sameWorkout = knownActivities.contains {
+                        PlaceholderActivityMatching.isSameWorkout(
+                            sport: activity.sport, start: activity.start, duration: activity.duration, as: $0
+                        )
+                    }
+                    guard !sameSource, !sameWorkout else {
+                        activityDuplicates += 1
+                        continue
+                    }
+                    newActivities.append(activity)
+                    knownActivities.append(ActivityListItem(activity))
+                    if activity.source.hasNaturalKey { knownSources.insert(activity.source) }
+                    continue
                 }
                 guard let date = Self.date(fromDay: day.date, calendar: calendar) else {
                     reject(.invalidDate)
@@ -166,15 +197,39 @@ public struct CalendarImportPlanner: Sendable {
         }
 
         return CalendarImportPlan(
+            activities: newActivities,
             templates: templates.added,
             workouts: newWorkouts,
             plans: newPlans,
             report: CalendarImportReport(
-                added: newPlans.count, skippedDuplicates: duplicates, skippedPast: past, skippedCompleted: completed,
+                added: newPlans.count, skippedDuplicates: duplicates, skippedPast: past, activitiesAdded: newActivities.count, activitiesSkippedDuplicates: activityDuplicates,
                 rejected: rejected,
                 templatesAdded: templates.addedCount, templatesLinked: templates.linkedCount,
                 templatesCopied: templates.copiedCount, templatesRejected: templates.rejectedCount
             )
+        )
+    }
+
+    /// The placeholder activity for a completed `entry`, or `nil` when it has no start or a duration
+    /// that isn't a positive number.
+    ///
+    /// Stored under the HealthKit workout the entry came from when the file says which, with that id,
+    /// so HealthKit's own import of the workout finds it by source and replaces it in place; without
+    /// one, under a `.manual` source and a new id. Its load is the file's TRIMP, kept as
+    /// ``Activity/importedLoad`` for ``ImportedLoadCalculator``.
+    static func activity(from entry: CalendarExport.Entry) -> Activity? {
+        guard let start = entry.start, entry.durationSeconds.isFinite, entry.durationSeconds > 0 else { return nil }
+        var id = UUID()
+        var source = ActivitySource.manual
+        if let sourceID = entry.sourceID.flatMap(UUID.init(uuidString:)) {
+            id = sourceID
+            source = .healthKit(sourceID)
+        }
+        let load = entry.trimp.flatMap { $0.isFinite && $0 >= 0 ? $0 : nil }
+        let distance = entry.distanceMeters.flatMap { $0.isFinite && $0 >= 0 ? $0 : nil }
+        return Activity(
+            id: id, source: source, sport: CalendarExportBuilder.sport(identifier: entry.sport), start: start,
+            duration: entry.durationSeconds, distanceMeters: distance, importedLoad: load, isCalendarImport: true
         )
     }
 

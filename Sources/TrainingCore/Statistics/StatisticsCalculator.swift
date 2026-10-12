@@ -41,6 +41,7 @@ public struct StatisticsCalculator: Sendable {
     ) {
         self.calculators = calculators ?? [
             ExponentialTRIMPCalculator(gapThresholdSeconds: gapThresholdSeconds),
+            ImportedLoadCalculator(),
             DurationRPECalculator(),
         ]
         self.estimator = estimator

@@ -150,6 +150,12 @@ public struct CalendarExportBuilder: Sendable {
             .map(CalendarExport.Template.init)
     }
 
+    /// The HealthKit workout id of `activity`, if that is where it came from (MVP2-107).
+    static func sourceID(of activity: Activity) -> String? {
+        if case .healthKit(let id) = activity.source { return id.uuidString }
+        return nil
+    }
+
     private func completedEntry(
         _ activity: Activity, plan: PlannedActivity?, workout: StructuredWorkout?,
         templateNames: [UUID: String], athlete: AthleteProfile
@@ -183,6 +189,7 @@ public struct CalendarExportBuilder: Sendable {
             template: workout?.templateID.flatMap { templateNames[$0] },
             templateID: nil,
             parameterValues: nil,
+            sourceID: Self.sourceID(of: activity),
             intensity: intensity.map { Self.intensityIdentifier($0.category) },
             trimp: load.map { Self.finite($0.value) } ?? nil,
             trimpSource: load.map { Self.trimpSource(for: $0.method) },
@@ -208,6 +215,7 @@ public struct CalendarExportBuilder: Sendable {
             template: expected.template,
             templateID: workout.templateID?.uuidString,
             parameterValues: workout.templateID == nil ? nil : workout.parameterValues?.compactMapValues(Self.finite),
+            sourceID: nil,
             intensity: Self.intensityIdentifier(intensity.category),
             trimp: expected.trimp,
             trimpSource: expected.trimpSource,

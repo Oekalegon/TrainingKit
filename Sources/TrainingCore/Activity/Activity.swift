@@ -46,6 +46,14 @@ public struct Activity: Identifiable, Sendable, Codable, Hashable {
     /// read, and for a joined activity (its pieces' steps belong to different workouts). See
     /// ``ActivityStepAligner`` for laying them over the plan.
     public var steps: [ActivityStep]
+    /// A training load carried in from outside (MVP2-107), in TRIMP: the figure a calendar export file
+    /// gave for an activity whose heart rate the file doesn't hold. ``ImportedLoadCalculator`` uses it
+    /// when there are no heart-rate samples to score. `nil` for every other activity.
+    public var importedLoad: Double?
+    /// Whether this activity was made from a calendar export file (MVP2-107), not read from its source:
+    /// a placeholder with a start, a duration, a distance and a load but no heart rate, which the real
+    /// workout replaces when HealthKit imports it. `false` for every other activity.
+    public var isCalendarImport: Bool
 
     /// The time span this activity covers, from ``start`` to `start + duration`.
     ///
@@ -74,6 +82,8 @@ public struct Activity: Identifiable, Sendable, Codable, Hashable {
     ///   - linkedPlanID: The matched ``PlannedActivity``'s id, if already reconciled.
     ///   - scheduledPlanID: The id of the plan the workout was started from, if the source knows it.
     ///   - steps: The steps the Watch recorded for a plan-started workout; defaults to none.
+    ///   - importedLoad: A load (TRIMP) carried in from a calendar export file; defaults to none.
+    ///   - isCalendarImport: Whether the activity was made from a calendar export file; defaults to `false`.
     public init(
         id: UUID = UUID(),
         source: ActivitySource,
@@ -89,7 +99,9 @@ public struct Activity: Identifiable, Sendable, Codable, Hashable {
         perceivedExertion: Int? = nil,
         linkedPlanID: UUID? = nil,
         scheduledPlanID: UUID? = nil,
-        steps: [ActivityStep] = []
+        steps: [ActivityStep] = [],
+        importedLoad: Double? = nil,
+        isCalendarImport: Bool = false
     ) {
         self.id = id
         self.source = source
@@ -106,17 +118,19 @@ public struct Activity: Identifiable, Sendable, Codable, Hashable {
         self.linkedPlanID = linkedPlanID
         self.scheduledPlanID = scheduledPlanID
         self.steps = steps
+        self.importedLoad = importedLoad
+        self.isCalendarImport = isCalendarImport
     }
 }
 
 extension Activity {
     private enum CodingKeys: String, CodingKey {
         case id, source, sport, start, duration, distanceMeters, heartRate, speed, elevation, cadence
-        case geographicBounds, perceivedExertion, linkedPlanID, scheduledPlanID, steps
+        case geographicBounds, perceivedExertion, linkedPlanID, scheduledPlanID, steps, importedLoad, isCalendarImport
     }
 
-    /// Decodes an activity, reading a missing `steps` as empty so activities saved before steps were
-    /// recorded (MVP2-146) still load.
+    /// Decodes an activity, reading a missing `steps` as empty, and a missing imported load as none, so
+    /// activities saved before those fields (MVP2-146, MVP2-107) still load.
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(UUID.self, forKey: .id)
@@ -134,5 +148,7 @@ extension Activity {
         linkedPlanID = try container.decodeIfPresent(UUID.self, forKey: .linkedPlanID)
         scheduledPlanID = try container.decodeIfPresent(UUID.self, forKey: .scheduledPlanID)
         steps = try container.decodeIfPresent([ActivityStep].self, forKey: .steps) ?? []
+        importedLoad = try container.decodeIfPresent(Double.self, forKey: .importedLoad)
+        isCalendarImport = try container.decodeIfPresent(Bool.self, forKey: .isCalendarImport) ?? false
     }
 }

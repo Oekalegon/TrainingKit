@@ -68,7 +68,8 @@ extension ActivityRecord {
         let fields = try PersistenceCoding.decode(SummaryFields.self, from: payload)
         return ActivityListItem(
             id: id, sport: fields.sport, start: fields.start, duration: fields.duration,
-            distanceMeters: fields.distanceMeters, linkedPlanID: fields.linkedPlanID
+            distanceMeters: fields.distanceMeters, linkedPlanID: fields.linkedPlanID,
+            isCalendarImport: fields.isCalendarImport ?? false
         )
     }
 
@@ -79,6 +80,7 @@ extension ActivityRecord {
         let duration: TimeInterval
         let distanceMeters: Double?
         let linkedPlanID: UUID?
+        let isCalendarImport: Bool?
     }
 
     /// Replaces this record's `sourceKey`/`start`/`payload` with `activity`'s, leaving `id`

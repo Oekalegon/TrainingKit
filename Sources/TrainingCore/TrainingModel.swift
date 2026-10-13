@@ -63,6 +63,17 @@ public final class TrainingModel {
     /// after a newer one started doesn't overwrite the newer result.
     @ObservationIgnored
     var paceHistoryRefreshCount = 0
+    /// The refined planned-load estimator built from the stores, kept until the next
+    /// ``recompute(asOf:)`` (see ``loadRefinedEstimator()``); `epoch` is the invalidation count it was
+    /// started under.
+    @ObservationIgnored
+    var refinedEstimatorBuild: (epoch: Int, task: Task<any PlannedLoadEstimator, Error>)?
+    /// Bumped by every invalidation, so a build that was running when something changed isn't kept.
+    @ObservationIgnored
+    var refinedEstimatorEpoch = 0
+    /// How many times the refined estimator was built from the stores, for tests of the cache.
+    @ObservationIgnored
+    var refinedEstimatorBuildCount = 0
     /// The athlete this model reflects: the profile passed to `init`, then whatever
     /// ``updateAthlete(asOf:_:)`` last saved.
     ///
@@ -437,6 +448,9 @@ public final class TrainingModel {
     }
 
     private func performRecompute(asOf today: Date) async {
+        // Everything that changes the activities, plans, workouts or athlete recomputes, so this is where
+        // the kept refined estimator goes stale; the build below is shared with a host app's next call.
+        invalidateRefinedEstimator()
         let estimator = await refinedEstimator()
         guard let cache = stores.fitnessMetricsCacheStore else {
             metrics = await Self.buildMetricsWithoutCache(

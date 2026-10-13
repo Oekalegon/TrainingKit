@@ -437,6 +437,7 @@ public final class TrainingModel {
     }
 
     private func performRecompute(asOf today: Date) async {
+        let estimator = await refinedEstimator()
         guard let cache = stores.fitnessMetricsCacheStore else {
             metrics = await Self.buildMetricsWithoutCache(
                 activities: activities,

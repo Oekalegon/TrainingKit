@@ -118,6 +118,21 @@ struct RefinedEstimatorCacheTests {
         #expect(model.refinedEstimatorBuildCount == afterChange)
     }
 
+    @Test("an import that finds nothing new keeps the estimator, one that finds an activity rebuilds it (MVP2-161)")
+    func emptyImportKeepsEstimator() async throws {
+        let (_, _, model) = makeModel()
+        try await model.load(in: day(0)...day(1), asOf: day(0))
+        let built = model.refinedEstimatorBuildCount
+
+        try await model.importActivities(from: StubImporter(activities: []), asOf: day(0))
+        try await model.importActivities(from: StubImporter(activities: []), asOf: day(0))
+        #expect(model.refinedEstimatorBuildCount == built)
+
+        let activity = Activity(source: .healthKit(UUID()), sport: .running, start: day(0), duration: 1800, importedLoad: 50)
+        try await model.importActivities(from: StubImporter(activities: [activity]), asOf: day(0))
+        #expect(model.refinedEstimatorBuildCount == built + 1)
+    }
+
     @Test("a completed plan imported through the model shows up in the next call")
     func importInvalidates() async throws {
         let (store, _, model) = makeModel()

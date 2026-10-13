@@ -235,7 +235,11 @@ extension TrainingModel {
         )
         try await reloadActivitiesAndPlans(in: range, bestEffortPlans: true)
         loadedRange = range
-        await recompute(asOf: today)
+        // A pull-to-refresh that finds nothing new changes nothing the refined estimator is built from
+        // (MVP2-161), so it keeps the one it has instead of reading every plan and activity again.
+        let changedAnything = !toUpsert.isEmpty || !deletedStarts.isEmpty || !refreshedJoinDays.isEmpty
+            || !result.deletedSources.isEmpty
+        await recompute(asOf: today, refinedEstimatorIsCurrent: !changedAnything)
     }
 
     /// Reloads ``activities`` and ``plans`` from their stores for `range`.

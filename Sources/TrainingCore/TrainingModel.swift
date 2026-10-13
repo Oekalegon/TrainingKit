@@ -438,19 +438,28 @@ public final class TrainingModel {
     /// ``pendingCacheInvalidation``/the cache's dirty watermark before either has cleared it, and
     /// the second's completion could drop an invalidation the first was still working through.
     public func recompute(asOf today: Date = .now) async {
+        await recompute(asOf: today, refinedEstimatorIsCurrent: false)
+    }
+
+    /// ``recompute(asOf:)``, optionally keeping the refined estimator it built last time.
+    ///
+    /// Pass `refinedEstimatorIsCurrent: true` only when nothing the estimator is built from (the
+    /// activities, plans, workouts or athlete) changed since: an import that found nothing new, for
+    /// instance, where rebuilding it only repeats the work (MVP2-161).
+    func recompute(asOf today: Date, refinedEstimatorIsCurrent: Bool) async {
         let previous = pendingRecompute
         let task = Task {
             await previous?.value
-            await self.performRecompute(asOf: today)
+            await self.performRecompute(asOf: today, refinedEstimatorIsCurrent: refinedEstimatorIsCurrent)
         }
         pendingRecompute = task
         await task.value
     }
 
-    private func performRecompute(asOf today: Date) async {
+    private func performRecompute(asOf today: Date, refinedEstimatorIsCurrent: Bool) async {
         // Everything that changes the activities, plans, workouts or athlete recomputes, so this is where
         // the kept refined estimator goes stale; the build below is shared with a host app's next call.
-        invalidateRefinedEstimator()
+        if !refinedEstimatorIsCurrent { invalidateRefinedEstimator() }
         let estimator = await refinedEstimator()
         guard let cache = stores.fitnessMetricsCacheStore else {
             metrics = await Self.buildMetricsWithoutCache(

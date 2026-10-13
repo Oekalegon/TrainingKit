@@ -160,6 +160,174 @@ struct BuiltInWorkoutTemplatesTests {
         #expect(estimator.duration(for: short, athlete: athlete) == expectedShort)
     }
 
+    @Test("fast finish run: Zone 1 warmup, Zone 2 run, then a Zone 3 finish of about a third of it")
+    func fastFinishRunInstantiates() throws {
+        let workout = try BuiltInWorkoutTemplates.fastFinishRun.instantiate()
+
+        #expect(workout.blocks == [
+            WorkoutBlock(steps: [WorkoutStep(kind: .warmup, goal: .time(5 * 60), target: .heartRateZone(1))]),
+            WorkoutBlock(steps: [WorkoutStep(kind: .work, goal: .time(30 * 60), target: .heartRateZone(2))]),
+            WorkoutBlock(steps: [WorkoutStep(kind: .work, goal: .time(10 * 60), target: .heartRateZone(3))]),
+        ])
+    }
+
+    @Test("cruise interval runs: N × (Zone 3 effort, 3 min Zone 1) between Zone 1/2 ramps and a Zone 2/1 finish")
+    func cruiseIntervalRunInstantiates() throws {
+        let workout = try BuiltInWorkoutTemplates.cruiseIntervalRun.instantiate(values: ["reps": 5, "work": 8 * 60.0])
+
+        #expect(workout.blocks == [
+            WorkoutBlock(steps: [WorkoutStep(kind: .warmup, goal: .time(5 * 60), target: .heartRateZone(1))]),
+            WorkoutBlock(steps: [WorkoutStep(kind: .work, goal: .time(5 * 60), target: .heartRateZone(2))]),
+            WorkoutBlock(
+                steps: [
+                    WorkoutStep(kind: .work, goal: .time(8 * 60), target: .heartRateZone(3)),
+                    WorkoutStep(kind: .recovery, goal: .time(3 * 60), target: .heartRateZone(1)),
+                ],
+                repetitions: 5
+            ),
+            WorkoutBlock(steps: [WorkoutStep(kind: .work, goal: .time(5 * 60), target: .heartRateZone(2))]),
+            WorkoutBlock(steps: [WorkoutStep(kind: .cooldown, goal: .time(5 * 60), target: .heartRateZone(1))]),
+        ])
+    }
+
+    @Test("fartlek long run: N × (0.5 km Zone 3, 1.5 km Zone 2) between a Zone 1/2 start and a Zone 1 cooldown")
+    func longFartlekRunInstantiates() throws {
+        let workout = try BuiltInWorkoutTemplates.longFartlekRun.instantiate(values: ["reps": 10])
+
+        #expect(workout.blocks == [
+            WorkoutBlock(steps: [WorkoutStep(kind: .warmup, goal: .time(5 * 60), target: .heartRateZone(1))]),
+            WorkoutBlock(steps: [WorkoutStep(kind: .work, goal: .time(5 * 60), target: .heartRateZone(2))]),
+            WorkoutBlock(
+                steps: [
+                    WorkoutStep(kind: .work, goal: .distance(500), target: .heartRateZone(3)),
+                    WorkoutStep(kind: .recovery, goal: .distance(1_500), target: .heartRateZone(2)),
+                ],
+                repetitions: 10
+            ),
+            WorkoutBlock(steps: [WorkoutStep(kind: .cooldown, goal: .time(5 * 60), target: .heartRateZone(1))]),
+        ])
+    }
+
+    @Test("long run with fast finish: Zone 1 warmup, Zone 2 distance, then a Zone 3 distance finish")
+    func longRunFastFinishInstantiates() throws {
+        let workout = try BuiltInWorkoutTemplates.longRunFastFinish.instantiate(values: ["distance": 20_000, "finish": 3_000])
+
+        #expect(workout.blocks == [
+            WorkoutBlock(steps: [WorkoutStep(kind: .warmup, goal: .time(5 * 60), target: .heartRateZone(1))]),
+            WorkoutBlock(steps: [WorkoutStep(kind: .work, goal: .distance(20_000), target: .heartRateZone(2))]),
+            WorkoutBlock(steps: [WorkoutStep(kind: .work, goal: .distance(3_000), target: .heartRateZone(3))]),
+        ])
+    }
+
+    @Test("fartlek: N × (Zone 4 or 5 effort, 2 min Zone 1) between Zone 1/2 ramps and a Zone 1 cooldown")
+    func fartlekInstantiates() throws {
+        for (template, zone) in [(BuiltInWorkoutTemplates.fartlekZone4, 4), (BuiltInWorkoutTemplates.fartlekZone5, 5)] {
+            let workout = try template.instantiate(values: ["reps": 4, "work": 3 * 60.0])
+
+            #expect(workout.blocks == [
+                WorkoutBlock(steps: [WorkoutStep(kind: .warmup, goal: .time(5 * 60), target: .heartRateZone(1))]),
+                WorkoutBlock(steps: [WorkoutStep(kind: .work, goal: .time(5 * 60), target: .heartRateZone(2))]),
+                WorkoutBlock(
+                    steps: [
+                        WorkoutStep(kind: .work, goal: .time(3 * 60), target: .heartRateZone(zone)),
+                        WorkoutStep(kind: .recovery, goal: .time(2 * 60), target: .heartRateZone(1)),
+                    ],
+                    repetitions: 4
+                ),
+                WorkoutBlock(steps: [WorkoutStep(kind: .cooldown, goal: .time(5 * 60), target: .heartRateZone(1))]),
+            ])
+        }
+    }
+
+    @Test("hill repetition runs: warmup, open Zone 2 run, N × (RPE 10 uphill, Zone 1 recovery), cooldown")
+    func hillRepetitionRunInstantiates() throws {
+        let workout = try BuiltInWorkoutTemplates.hillRepetitionRun.instantiate(values: ["reps": 10, "work": 45, "rest": 100])
+
+        #expect(workout.blocks == [
+            WorkoutBlock(steps: [WorkoutStep(kind: .warmup, goal: .time(5 * 60), target: .heartRateZone(1))]),
+            WorkoutBlock(steps: [WorkoutStep(kind: .work, goal: .open, target: .heartRateZone(2))]),
+            WorkoutBlock(
+                steps: [
+                    WorkoutStep(kind: .work, goal: .time(45), target: .rpe(10)),
+                    WorkoutStep(kind: .recovery, goal: .time(100), target: .heartRateZone(1)),
+                ],
+                repetitions: 10
+            ),
+            WorkoutBlock(steps: [WorkoutStep(kind: .cooldown, goal: .time(5 * 60), target: .heartRateZone(1))]),
+        ])
+    }
+
+    @Test("long interval runs: N × (Zone 4 effort, Zone 1 recovery) between Zone 1/2 ramps and a Zone 1 cooldown")
+    func longIntervalRunInstantiates() throws {
+        let workout = try BuiltInWorkoutTemplates.longIntervalRun.instantiate(values: ["reps": 6, "work": 3 * 60.0, "rest": 2 * 60.0])
+
+        #expect(workout.blocks == [
+            WorkoutBlock(steps: [WorkoutStep(kind: .warmup, goal: .time(5 * 60), target: .heartRateZone(1))]),
+            WorkoutBlock(steps: [WorkoutStep(kind: .work, goal: .time(5 * 60), target: .heartRateZone(2))]),
+            WorkoutBlock(
+                steps: [
+                    WorkoutStep(kind: .work, goal: .time(3 * 60), target: .heartRateZone(4)),
+                    WorkoutStep(kind: .recovery, goal: .time(2 * 60), target: .heartRateZone(1)),
+                ],
+                repetitions: 6
+            ),
+            WorkoutBlock(steps: [WorkoutStep(kind: .cooldown, goal: .time(5 * 60), target: .heartRateZone(1))]),
+        ])
+    }
+
+    @Test("mixed interval runs: Zone 5 and Zone 4 blocks mirrored around a 10 min Zone 3 run")
+    func mixedIntervalRunInstantiates() throws {
+        let workout = try BuiltInWorkoutTemplates.mixedIntervalRun.instantiate(values: ["reps": 2, "hard": 90, "moderate": 4 * 60.0])
+        let zone5 = WorkoutBlock(
+            steps: [
+                WorkoutStep(kind: .work, goal: .time(90), target: .heartRateZone(5)),
+                WorkoutStep(kind: .recovery, goal: .time(3 * 60), target: .heartRateZone(1)),
+            ],
+            repetitions: 2
+        )
+        let zone4 = WorkoutBlock(
+            steps: [
+                WorkoutStep(kind: .work, goal: .time(4 * 60), target: .heartRateZone(4)),
+                WorkoutStep(kind: .recovery, goal: .time(2 * 60), target: .heartRateZone(1)),
+            ],
+            repetitions: 2
+        )
+
+        #expect(workout.blocks == [
+            WorkoutBlock(steps: [WorkoutStep(kind: .warmup, goal: .time(5 * 60), target: .heartRateZone(1))]),
+            WorkoutBlock(steps: [WorkoutStep(kind: .work, goal: .time(5 * 60), target: .heartRateZone(2))]),
+            zone5,
+            zone4,
+            WorkoutBlock(steps: [WorkoutStep(kind: .work, goal: .time(10 * 60), target: .heartRateZone(3))]),
+            zone4,
+            zone5,
+            WorkoutBlock(steps: [WorkoutStep(kind: .cooldown, goal: .time(5 * 60), target: .heartRateZone(1))]),
+        ])
+    }
+
+    @Test("sarcomere runs match the hill repetition runs, except the downhill effort is RPE 8 rather than RPE 10")
+    func sarcomereRunMatchesHillRepetitionRun() throws {
+        let sarcomere = BuiltInWorkoutTemplates.sarcomereRun
+        let hill = BuiltInWorkoutTemplates.hillRepetitionRun
+
+        #expect(sarcomere.parameters == hill.parameters)
+        #expect(sarcomere.id != hill.id)
+
+        let workout = try sarcomere.instantiate(values: ["reps": 10, "work": 45, "rest": 100])
+        #expect(workout.blocks == [
+            WorkoutBlock(steps: [WorkoutStep(kind: .warmup, goal: .time(5 * 60), target: .heartRateZone(1))]),
+            WorkoutBlock(steps: [WorkoutStep(kind: .work, goal: .open, target: .heartRateZone(2))]),
+            WorkoutBlock(
+                steps: [
+                    WorkoutStep(kind: .work, goal: .time(45), target: .rpe(8)),
+                    WorkoutStep(kind: .recovery, goal: .time(100), target: .heartRateZone(1)),
+                ],
+                repetitions: 10
+            ),
+            WorkoutBlock(steps: [WorkoutStep(kind: .cooldown, goal: .time(5 * 60), target: .heartRateZone(1))]),
+        ])
+    }
+
     @Test("every built-in template has a positive estimated load with its default parameters")
     func builtInsHavePositiveLoad() throws {
         let athlete = AthleteProfile.fixture()

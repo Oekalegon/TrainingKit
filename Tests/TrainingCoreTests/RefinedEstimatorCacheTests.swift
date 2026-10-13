@@ -133,6 +133,41 @@ struct RefinedEstimatorCacheTests {
         #expect(model.refinedEstimatorBuildCount == built + 1)
     }
 
+    @Test("an import that removes an activity, or re-imports one, rebuilds the estimator (MVP2-161)")
+    func deleteAndReimportInvalidate() async throws {
+        let (_, _, model) = makeModel()
+        let source = ActivitySource.healthKit(UUID())
+        let activity = Activity(source: source, sport: .running, start: day(0), duration: 1800, importedLoad: 50)
+        try await model.importActivities(from: StubImporter(activities: [activity]), asOf: day(0))
+        let built = model.refinedEstimatorBuildCount
+
+        try await model.importActivities(from: StubImporter(activities: [activity]), asOf: day(0))
+        #expect(model.refinedEstimatorBuildCount == built + 1)
+
+        struct Remover: ActivityImporting {
+            let source: ActivitySource
+            func importActivities(since anchor: ImportAnchor?) async throws -> ImportResult {
+                ImportResult(upserted: [], deletedSources: [source], anchor: nil)
+            }
+        }
+        try await model.importActivities(from: Remover(source: source), asOf: day(0))
+        #expect(model.refinedEstimatorBuildCount == built + 2)
+    }
+
+    @Test("an import of only tombstoned activities changes nothing, so it keeps the estimator (MVP2-161)")
+    func tombstonedOnlyImportKeepsEstimator() async throws {
+        let (store, _, model) = makeModel()
+        let activity = Activity(source: .healthKit(UUID()), sport: .running, start: day(0), duration: 1800, importedLoad: 50)
+        try await model.importActivities(from: StubImporter(activities: [activity]), asOf: day(0))
+        try await model.deleteActivity(id: activity.id, asOf: day(0))
+        let built = model.refinedEstimatorBuildCount
+
+        try await model.importActivities(from: StubImporter(activities: [activity]), asOf: day(0))
+
+        #expect(model.refinedEstimatorBuildCount == built)
+        #expect(try await store.activity(id: activity.id) == nil)
+    }
+
     @Test("a completed plan imported through the model shows up in the next call")
     func importInvalidates() async throws {
         let (store, _, model) = makeModel()

@@ -14,7 +14,8 @@ extension TrainingModel {
     /// instead of the base estimator's figure beside a refined one. Building it reads every plan and each
     /// completed plan's activity and scores them, so the result is kept (see ``loadRefinedEstimator()``):
     /// calling this after an import, link or any other change that went through the model costs
-    /// nothing, as ``recompute(asOf:)`` has just built it.
+    /// nothing, as ``recompute(asOf:)`` has just built it, and after an import that found nothing new
+    /// it is the one already kept.
     ///
     /// - Returns: A ``LinkedActivityRefinedEstimator`` around the base estimator, or the base estimator
     ///   itself when no plan has been completed or the stores can't be read.
@@ -31,9 +32,10 @@ extension TrainingModel {
     /// estimator, so a host app can keep the refinement it already shows through a transient failure
     /// and retry, rather than mistake the failure for "no plan has been completed".
     ///
-    /// The estimator is built once and kept until the next ``recompute(asOf:)``, which every mutation
-    /// of the activities, plans, workouts or athlete goes through: an import, link, join, delete,
-    /// resync, edit or profile change. Concurrent callers share one build. A failed build isn't kept,
+    /// The estimator is built once and kept until the next ``recompute(asOf:)`` that follows a change,
+    /// which every mutation of the activities, plans, workouts or athlete goes through: an import that
+    /// brought or removed something, a link, join, delete, edit or profile change. An import that found
+    /// nothing new keeps it (MVP2-161). Concurrent callers share one build. A failed build isn't kept,
     /// so the next call tries again. Changes made to the stores without going through this model (an
     /// iCloud sync, say) aren't seen until then, as with ``metrics``.
     ///

@@ -237,8 +237,9 @@ extension TrainingModel {
         loadedRange = range
         // A pull-to-refresh that finds nothing new changes nothing the refined estimator is built from
         // (MVP2-161), so it keeps the one it has instead of reading every plan and activity again.
-        let changedAnything = !toUpsert.isEmpty || !deletedStarts.isEmpty || !refreshedJoinDays.isEmpty
-            || !result.deletedSources.isEmpty
+        // Edits made to the stores without going through this model (an iCloud sync) are therefore
+        // picked up by the estimator at the next change that does, not by an empty refresh.
+        let changedAnything = !affectedDates.isEmpty || !result.deletedSources.isEmpty
         await recompute(asOf: today, refinedEstimatorIsCurrent: !changedAnything)
     }
 

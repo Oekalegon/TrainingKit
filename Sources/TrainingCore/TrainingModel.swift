@@ -63,8 +63,8 @@ public final class TrainingModel {
     /// after a newer one started doesn't overwrite the newer result.
     @ObservationIgnored
     var paceHistoryRefreshCount = 0
-    /// The refined planned-load estimator built from the stores, kept until the next
-    /// ``recompute(asOf:)`` (see ``loadRefinedEstimator()``); `epoch` is the invalidation count it was
+    /// The refined planned-load estimator built from the stores, kept until a ``recompute(asOf:)``
+    /// that follows a change (see ``loadRefinedEstimator()``); `epoch` is the invalidation count it was
     /// started under.
     @ObservationIgnored
     var refinedEstimatorBuild: (epoch: Int, task: Task<any PlannedLoadEstimator, Error>)?
@@ -443,9 +443,11 @@ public final class TrainingModel {
 
     /// ``recompute(asOf:)``, optionally keeping the refined estimator it built last time.
     ///
-    /// Pass `refinedEstimatorIsCurrent: true` only when nothing the estimator is built from (the
-    /// activities, plans, workouts or athlete) changed since: an import that found nothing new, for
-    /// instance, where rebuilding it only repeats the work (MVP2-161).
+    /// - Parameters:
+    ///   - today: Passed through to ``recompute(asOf:)``.
+    ///   - refinedEstimatorIsCurrent: `true` only when nothing the estimator is built from (the
+    ///     activities, plans, workouts or athlete) changed since it was built: an import that found
+    ///     nothing new, for instance, where rebuilding it only repeats the work (MVP2-161).
     func recompute(asOf today: Date, refinedEstimatorIsCurrent: Bool) async {
         let previous = pendingRecompute
         let task = Task {

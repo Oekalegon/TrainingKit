@@ -21,6 +21,10 @@ public struct WorkoutTemplate: Identifiable, Sendable, Codable, Hashable {
     public var parameters: [WorkoutTemplateParameter]
     /// The ordered blocks making up this template.
     public var blocks: [TemplateBlock]
+    /// What workouts made from this template are for; each instantiated ``StructuredWorkout`` gets it
+    /// (MVP2-153). Absent from templates saved before this field existed, which decode as
+    /// ``WorkoutPurpose/general``.
+    public var purpose: WorkoutPurpose
     /// When the athlete deleted this template while plans still used it (MVP2-142), or `nil` for one
     /// in use. An archived template stays in the store so those plans can still open its parameters,
     /// but libraries and pickers don't offer it. Absent from templates saved before this field existed.
@@ -38,6 +42,7 @@ public struct WorkoutTemplate: Identifiable, Sendable, Codable, Hashable {
     ///   - venue: Where the template is done; `nil` leaves it to the plan.
     ///   - parameters: The parameters this template's blocks may reference.
     ///   - blocks: The ordered blocks making up this template.
+    ///   - purpose: What workouts made from it are for; defaults to ``WorkoutPurpose/general``.
     ///   - archivedDate: When the template was archived; defaults to `nil`.
     public init(
         id: UUID = UUID(),
@@ -47,6 +52,7 @@ public struct WorkoutTemplate: Identifiable, Sendable, Codable, Hashable {
         venue: Venue? = nil,
         parameters: [WorkoutTemplateParameter],
         blocks: [TemplateBlock],
+        purpose: WorkoutPurpose = .general,
         archivedDate: Date? = nil
     ) {
         self.id = id
@@ -56,6 +62,7 @@ public struct WorkoutTemplate: Identifiable, Sendable, Codable, Hashable {
         self.venue = venue
         self.parameters = parameters
         self.blocks = blocks
+        self.purpose = purpose
         self.archivedDate = archivedDate
     }
 }
@@ -115,7 +122,8 @@ extension WorkoutTemplate {
     ///     a venue without a surface is kept unless the template names a surface.
     ///   - values: Parameter key to value; a key declared in this template's `parameters` but
     ///     missing from `values` resolves to that parameter's `defaultValue`.
-    /// - Returns: A ``StructuredWorkout`` with every ``TemplateValue`` resolved to a fixed value.
+    /// - Returns: A ``StructuredWorkout`` with every ``TemplateValue`` resolved to a fixed value and
+    ///   this template's ``purpose``.
     /// - Throws: ``WorkoutTemplateError/undeclaredParameter(_:)`` if a step or block references a
     ///   `.parameter(_:)` key that isn't declared in this template's `parameters` — a typo or a
     ///   stale reference, never something `values` alone can fix.
@@ -145,7 +153,7 @@ extension WorkoutTemplate {
         let resolvedValues = Dictionary(uniqueKeysWithValues: parameters.map { ($0.key, values[$0.key] ?? $0.defaultValue) })
         return StructuredWorkout(
             name: name ?? self.name, sport: sport, venue: resolvedVenue(chosenVenue), blocks: resolvedBlocks,
-            templateID: id, parameterValues: resolvedValues
+            templateID: id, parameterValues: resolvedValues, purpose: purpose
         )
     }
 
@@ -200,11 +208,12 @@ extension TemplateStepGoal {
 
 extension WorkoutTemplate {
     private enum CodingKeys: String, CodingKey {
-        case id, name, titleName, sport, venue, parameters, blocks, archivedDate
+        case id, name, titleName, sport, venue, parameters, blocks, purpose, archivedDate
     }
 
     /// Decodes a template, reading the venue an older version stored inside the sport
-    /// (`indoorRunning`/`outdoorRunning`) when there's no `venue` of its own.
+    /// (`indoorRunning`/`outdoorRunning`) when there's no `venue` of its own, and treating a missing
+    /// `purpose` as ``WorkoutPurpose/general``.
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(UUID.self, forKey: .id)
@@ -215,6 +224,7 @@ extension WorkoutTemplate {
         venue = try container.decodeIfPresent(Venue.self, forKey: .venue) ?? storedSport.legacyVenue
         parameters = try container.decode([WorkoutTemplateParameter].self, forKey: .parameters)
         blocks = try container.decode([TemplateBlock].self, forKey: .blocks)
+        purpose = try container.decodeIfPresent(WorkoutPurpose.self, forKey: .purpose) ?? .general
         archivedDate = try container.decodeIfPresent(Date.self, forKey: .archivedDate)
     }
 }

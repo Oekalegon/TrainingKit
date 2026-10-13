@@ -24,6 +24,14 @@ public struct StructuredWorkout: Identifiable, Sendable, Codable, Hashable {
     /// `nil` exactly when ``templateID`` is. Stored rather than re-derived from `blocks`, since
     /// several parameters can collapse into the same step values.
     public var parameterValues: [String: Double]?
+    /// What the workout is for: ``WorkoutPurpose/general`` for an ordinary one, or a field test
+    /// whose result is measured from the activity linked to its plan (MVP2-153). Taken from the
+    /// template when instantiated and fixed from then on: a later change to the template's purpose,
+    /// or to this workout's ``blocks``, doesn't change it, and a copy of the workout keeps it. Not
+    /// kept by a calendar file entry without a template, nor by a workout recovered from WorkoutKit,
+    /// which read as ``WorkoutPurpose/general``. Absent from workouts saved before this field
+    /// existed, which decode the same way. A value this version doesn't know fails to decode.
+    public var purpose: WorkoutPurpose
 
     /// Creates a structured workout.
     ///
@@ -36,6 +44,7 @@ public struct StructuredWorkout: Identifiable, Sendable, Codable, Hashable {
     ///   - workoutKitID: Identity of the synced WorkoutKit plan, if already synced.
     ///   - templateID: The template this workout was instantiated from, if any.
     ///   - parameterValues: The resolved parameter values it was instantiated with, if any.
+    ///   - purpose: What the workout is for; defaults to ``WorkoutPurpose/general``.
     public init(
         id: UUID = UUID(),
         name: String,
@@ -44,7 +53,8 @@ public struct StructuredWorkout: Identifiable, Sendable, Codable, Hashable {
         blocks: [WorkoutBlock],
         workoutKitID: UUID? = nil,
         templateID: UUID? = nil,
-        parameterValues: [String: Double]? = nil
+        parameterValues: [String: Double]? = nil,
+        purpose: WorkoutPurpose = .general
     ) {
         self.id = id
         self.name = name
@@ -54,16 +64,18 @@ public struct StructuredWorkout: Identifiable, Sendable, Codable, Hashable {
         self.workoutKitID = workoutKitID
         self.templateID = templateID
         self.parameterValues = parameterValues
+        self.purpose = purpose
     }
 }
 
 extension StructuredWorkout {
     private enum CodingKeys: String, CodingKey {
-        case id, name, sport, venue, blocks, workoutKitID, templateID, parameterValues
+        case id, name, sport, venue, blocks, workoutKitID, templateID, parameterValues, purpose
     }
 
     /// Decodes a workout, reading the venue an older version stored inside the sport
-    /// (`indoorRunning`/`outdoorRunning`) when there's no `venue` of its own.
+    /// (`indoorRunning`/`outdoorRunning`) when there's no `venue` of its own, and treating a missing
+    /// `purpose` as ``WorkoutPurpose/general``.
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(UUID.self, forKey: .id)
@@ -75,5 +87,6 @@ extension StructuredWorkout {
         workoutKitID = try container.decodeIfPresent(UUID.self, forKey: .workoutKitID)
         templateID = try container.decodeIfPresent(UUID.self, forKey: .templateID)
         parameterValues = try container.decodeIfPresent([String: Double].self, forKey: .parameterValues)
+        purpose = try container.decodeIfPresent(WorkoutPurpose.self, forKey: .purpose) ?? .general
     }
 }

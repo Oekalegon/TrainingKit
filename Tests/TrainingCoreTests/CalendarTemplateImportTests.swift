@@ -144,6 +144,24 @@ struct CalendarTemplateImportTests {
         #expect(result.report.added == 1)
     }
 
+    @Test("a custom test template keeps its purpose through export and import, and differs from one that doesn't have it")
+    func importKeepsPurpose() throws {
+        var test = intervals()
+        test.purpose = .lthrTest
+        let file = try roundTripped(export([try test.instantiate()], templates: [test]))
+
+        let result = plan(file)
+        #expect(result.templates.first?.purpose == .lthrTest)
+        #expect(result.workouts.first?.purpose == .lthrTest)
+
+        // The same blocks without the purpose are a different template, so it isn't taken for the library's.
+        var ordinary = test
+        ordinary.purpose = .general
+        let again = plan(file, templates: BuiltInWorkoutTemplates.all + [ordinary])
+        #expect(again.templates.first?.purpose == .lthrTest)
+        #expect(again.workouts.first?.purpose == .lthrTest)
+    }
+
     @Test("an equal template already in the library is linked to, whatever its name or id")
     func equalTemplateLinked() throws {
         let theirs = intervals(name: "Theirs")

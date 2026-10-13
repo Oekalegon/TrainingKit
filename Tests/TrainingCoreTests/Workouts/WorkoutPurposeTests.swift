@@ -68,7 +68,9 @@ struct WorkoutPurposeTests {
 
         #expect(workout.blocks == expected)
         #expect(workout.purpose == .maxHRTest)
-        #expect(try duration(BuiltInWorkoutTemplates.maxHRTest) == 600 + 300 + 3 * 240 + 180 + 300)
+        let expectedDuration: TimeInterval = 600 + 300 + 3 * 240 + 180 + 300
+        let actualDuration = try duration(BuiltInWorkoutTemplates.maxHRTest)
+        #expect(actualDuration == expectedDuration)
     }
 
     @Test("the LTHR test is a warmup, one 30-minute effort, and a cooldown")
@@ -83,7 +85,9 @@ struct WorkoutPurposeTests {
 
         #expect(workout.blocks == expected)
         #expect(workout.purpose == .lthrTest)
-        #expect(try duration(BuiltInWorkoutTemplates.lthrTest) == 600 + 300 + 30 * 60 + 300)
+        let expectedDuration: TimeInterval = 600 + 300 + 30 * 60 + 300
+        let actualDuration = try duration(BuiltInWorkoutTemplates.lthrTest)
+        #expect(actualDuration == expectedDuration)
     }
 
     @Test("editing a workout's blocks, or its template's purpose later, leaves the instantiated purpose alone")

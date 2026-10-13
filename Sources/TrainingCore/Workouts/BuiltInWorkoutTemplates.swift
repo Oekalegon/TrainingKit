@@ -249,7 +249,7 @@ public enum BuiltInWorkoutTemplates {
     /// Best done on a steady climb or flat, rested, and with a chest strap: a wrist sensor lags and
     /// can miss the peak. The efforts target perceived exertion, not heart-rate zones, because the
     /// zones come from the very maximum being measured. As in ``tempoRun``, only the edge blocks are
-    /// `.warmup`/`.cooldown`, so the ramp-in is `.work`, matching what ``WorkoutKitBridge`` sends to
+    /// `.warmup`/`.cooldown`, so the ramp-in is `.work`, matching what `WorkoutKitBridge` sends to
     /// the Watch.
     public static let maxHRTest = WorkoutTemplate(
         id: UUID(uuidString: "8F5D6E4E-6E0E-4B8B-9C1A-9E6F9F1C1A08")!,

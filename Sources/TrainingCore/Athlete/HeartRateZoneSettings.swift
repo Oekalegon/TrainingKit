@@ -12,10 +12,12 @@ public struct HeartRateZoneSettings: Sendable, Codable, Hashable {
     public var restingHeartRateBPM: Double
     /// Maximum heart rate, in beats per minute.
     public var maxHeartRateBPM: Double
-    /// Where ``maxHeartRateBPM`` came from: an age formula or a workout.
+    /// Where ``maxHeartRateBPM`` came from: an age formula, a workout, a field test or the athlete.
     public var maxHeartRateSource: MaxHeartRateSource
     /// Used when `zoneMethod` is `.lactateThreshold`.
     public var lactateThresholdHeartRateBPM: Double?
+    /// Where ``lactateThresholdHeartRateBPM`` came from (MVP2-154). Meaningless while it is `nil`.
+    public var lactateThresholdSource: LactateThresholdSource
     /// How zone boundaries are determined; see ``HeartRateZoneMethod``.
     public var zoneMethod: HeartRateZoneMethod
 
@@ -27,6 +29,7 @@ public struct HeartRateZoneSettings: Sendable, Codable, Hashable {
     ///   - maxHeartRateBPM: Maximum heart rate, in beats per minute.
     ///   - maxHeartRateSource: Where `maxHeartRateBPM` came from; defaults to `.formula`.
     ///   - lactateThresholdHeartRateBPM: Lactate threshold heart rate, if known.
+    ///   - lactateThresholdSource: Where `lactateThresholdHeartRateBPM` came from; defaults to `.manual`.
     ///   - zoneMethod: How zone boundaries are determined; defaults to `.karvonen`.
     public init(
         effectiveDate: Date,
@@ -34,6 +37,7 @@ public struct HeartRateZoneSettings: Sendable, Codable, Hashable {
         maxHeartRateBPM: Double,
         maxHeartRateSource: MaxHeartRateSource = .formula,
         lactateThresholdHeartRateBPM: Double? = nil,
+        lactateThresholdSource: LactateThresholdSource = .manual,
         zoneMethod: HeartRateZoneMethod = .karvonen
     ) {
         self.effectiveDate = effectiveDate
@@ -41,16 +45,18 @@ public struct HeartRateZoneSettings: Sendable, Codable, Hashable {
         self.maxHeartRateBPM = maxHeartRateBPM
         self.maxHeartRateSource = maxHeartRateSource
         self.lactateThresholdHeartRateBPM = lactateThresholdHeartRateBPM
+        self.lactateThresholdSource = lactateThresholdSource
         self.zoneMethod = zoneMethod
     }
 
     private enum CodingKeys: String, CodingKey {
         case effectiveDate, restingHeartRateBPM, maxHeartRateBPM, maxHeartRateSource
-        case lactateThresholdHeartRateBPM, zoneMethod
+        case lactateThresholdHeartRateBPM, lactateThresholdSource, zoneMethod
     }
 
     /// Custom decoding so settings persisted before ``maxHeartRateSource`` existed still decode.
     /// Those values all came from the age formula, so the missing field defaults to `.formula`.
+    /// Likewise a missing ``lactateThresholdSource`` is `.manual`: only the athlete could enter one.
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         effectiveDate = try container.decode(Date.self, forKey: .effectiveDate)
@@ -59,6 +65,8 @@ public struct HeartRateZoneSettings: Sendable, Codable, Hashable {
         maxHeartRateSource = try container.decodeIfPresent(MaxHeartRateSource.self, forKey: .maxHeartRateSource)
             ?? .formula
         lactateThresholdHeartRateBPM = try container.decodeIfPresent(Double.self, forKey: .lactateThresholdHeartRateBPM)
+        lactateThresholdSource = try container.decodeIfPresent(LactateThresholdSource.self, forKey: .lactateThresholdSource)
+            ?? .manual
         zoneMethod = try container.decode(HeartRateZoneMethod.self, forKey: .zoneMethod)
     }
 }

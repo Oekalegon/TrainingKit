@@ -8,7 +8,10 @@ extension TrainingModel {
     /// visible range, so a workout done months ago still refines next week's. If the stores can't be
     /// read, the failure is logged and the unrefined ``estimator`` is returned: a projection without
     /// the refinement beats none.
-    func refinedEstimator() async -> any PlannedLoadEstimator {
+    ///
+    /// Public so a host app shows the same planned load as the load series and the calendar export do,
+    /// instead of the base ``estimator``'s figure beside a refined one.
+    public func refinedEstimator() async -> any PlannedLoadEstimator {
         do {
             let plans = try await stores.planStore.plans(in: Date.distantPast...Date.distantFuture)
             let completed = plans.filter { $0.completedActivityID != nil }

@@ -120,4 +120,28 @@ struct SourceRankingTests {
         #expect(overFormula?.replacesMoreReliableSource == false)
         #expect(overWorkout?.replacesMoreReliableSource == false)
     }
+
+    @Test("a lab-test source keeps its date when a later entry copies it forward, and a field test takes over from the test day")
+    func labTestCarriedForward() {
+        let measured = day.addingTimeInterval(-300 * dayLength)
+        var athlete = AthleteProfile.fixture(maxHeartRateBPM: 185)
+        athlete.heartRateZoneHistory[0].maxHeartRateSource = .labTest(measuredOn: measured)
+        var copy = athlete.heartRateZoneHistory[0]
+        copy.effectiveDate = day.addingTimeInterval(10 * dayLength)
+        copy.restingHeartRateBPM = 47
+        athlete.heartRateZoneHistory.append(copy)
+
+        // The copied entry still names the original test date, so it doesn't look newer than it is.
+        #expect(athlete.heartRateZoneSettings(asOf: copy.effectiveDate)?.maxHeartRateSource == .labTest(measuredOn: measured))
+
+        let updated = athlete.settingMaxHeartRate(
+            to: 180, from: day.addingTimeInterval(5 * dayLength), source: .fieldTest(activityID: id)
+        )
+
+        #expect(updated.heartRateZoneSettings(asOf: day.addingTimeInterval(4 * dayLength))?.maxHeartRateBPM == 185)
+        #expect(updated.heartRateZoneSettings(asOf: day.addingTimeInterval(5 * dayLength))?.maxHeartRateBPM == 180)
+        // The copy carried the lab value and source, so it follows the new measurement.
+        #expect(updated.heartRateZoneSettings(asOf: copy.effectiveDate)?.maxHeartRateSource == .fieldTest(activityID: id))
+        #expect(updated.heartRateZoneSettings(asOf: copy.effectiveDate)?.restingHeartRateBPM == 47)
+    }
 }

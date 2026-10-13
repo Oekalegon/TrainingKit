@@ -14,7 +14,7 @@ struct SwiftDataStoreTests {
     /// per-test isolation, but backed by a real `ModelContainer`/`ModelContext` so this exercises
     /// actual SwiftData behavior (predicates, save semantics) rather than a hand-rolled dictionary.
     private func makeStore() throws -> SwiftDataStore {
-        let container = try TrainingPersistenceContainer.make(cloudKitDatabase: .none, isStoredInMemoryOnly: true)
+        let container = try TestContainers.make(cloudKitDatabase: .none, isStoredInMemoryOnly: true)
         return SwiftDataStore(modelContainer: container)
     }
 
@@ -686,7 +686,7 @@ struct SwiftDataStoreTests {
 
     @Test("GoalStore skips a record it can't decode instead of failing the whole list (MVP2-139)")
     func goalStoreSkipsUndecodableRecord() async throws {
-        let container = try TrainingPersistenceContainer.make(cloudKitDatabase: .none, isStoredInMemoryOnly: true)
+        let container = try TestContainers.make(cloudKitDatabase: .none, isStoredInMemoryOnly: true)
         let store = SwiftDataStore(modelContainer: container)
         let good = Goal(name: "Sub-20 5k", target: .time(sport: .running, distanceMeters: 5000, seconds: 1200))
         try await store.upsert([good])
@@ -741,7 +741,7 @@ struct SwiftDataStoreTests {
 
     @Test("a template saved before archivedDate existed decodes as not archived, and the date round-trips (MVP2-142)")
     func templateStoreArchiveDate() async throws {
-        let container = try TrainingPersistenceContainer.make(cloudKitDatabase: .none, isStoredInMemoryOnly: true)
+        let container = try TestContainers.make(cloudKitDatabase: .none, isStoredInMemoryOnly: true)
         let store = SwiftDataStore(modelContainer: container)
         let old = WorkoutTemplate(name: "Old", sport: .running, parameters: [], blocks: [])
         var json = try JSONSerialization.jsonObject(with: JSONEncoder().encode(old)) as! [String: Any]
@@ -759,7 +759,7 @@ struct SwiftDataStoreTests {
 
     @Test("WorkoutTemplateStore skips a record it can't decode instead of failing the whole list (MVP2-140)")
     func templateStoreSkipsUndecodableRecord() async throws {
-        let container = try TrainingPersistenceContainer.make(cloudKitDatabase: .none, isStoredInMemoryOnly: true)
+        let container = try TestContainers.make(cloudKitDatabase: .none, isStoredInMemoryOnly: true)
         let store = SwiftDataStore(modelContainer: container)
         let good = WorkoutTemplate(name: "Easy", sport: .running, parameters: [], blocks: [])
         try await store.upsert([good])
@@ -774,7 +774,7 @@ struct SwiftDataStoreTests {
 
     @Test("a template with a step kind this version doesn't know is skipped by both templates() and template(id:)")
     func templateStoreSkipsUnknownStepKind() async throws {
-        let container = try TrainingPersistenceContainer.make(cloudKitDatabase: .none, isStoredInMemoryOnly: true)
+        let container = try TestContainers.make(cloudKitDatabase: .none, isStoredInMemoryOnly: true)
         let store = SwiftDataStore(modelContainer: container)
         let good = WorkoutTemplate(name: "Easy", sport: .running, parameters: [], blocks: [])
         try await store.upsert([good])

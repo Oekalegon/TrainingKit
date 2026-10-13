@@ -7,7 +7,7 @@ import TrainingCore
 struct SwiftDataWorkoutPurposeTests {
     @Test("a workout and a template keep their purpose through the records (MVP2-153)")
     func purposeSurvivesRecords() async throws {
-        let container = try TrainingPersistenceContainer.make(cloudKitDatabase: .none, isStoredInMemoryOnly: true)
+        let container = try TestContainers.make(cloudKitDatabase: .none, isStoredInMemoryOnly: true)
         let store = SwiftDataStore(modelContainer: container)
         let template = BuiltInWorkoutTemplates.maxHRTest
         let workout = try template.instantiate()
@@ -24,7 +24,7 @@ struct SwiftDataWorkoutPurposeTests {
 struct SwiftDataFieldTestSourceTests {
     @Test("an athlete profile keeps the field-test sources of its heart-rate settings (MVP2-154)")
     func sourcesSurviveProfileRecord() async throws {
-        let container = try TrainingPersistenceContainer.make(cloudKitDatabase: .none, isStoredInMemoryOnly: true)
+        let container = try TestContainers.make(cloudKitDatabase: .none, isStoredInMemoryOnly: true)
         let store = SwiftDataStore(modelContainer: container)
         let id = UUID()
         var profile = AthleteProfile.fixture()
@@ -44,7 +44,7 @@ struct SwiftDataFieldTestSourceTests {
 
     @Test("a lab-test source survives the profile record")
     func labTestSurvivesProfileRecord() async throws {
-        let container = try TrainingPersistenceContainer.make(cloudKitDatabase: .none, isStoredInMemoryOnly: true)
+        let container = try TestContainers.make(cloudKitDatabase: .none, isStoredInMemoryOnly: true)
         let store = SwiftDataStore(modelContainer: container)
         var profile = AthleteProfile.fixture()
         profile.heartRateZoneHistory[0].maxHeartRateSource = .labTest(measuredOn: Date(timeIntervalSince1970: 1_690_000_000))

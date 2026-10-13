@@ -60,6 +60,26 @@ struct TrainingModelMaxHeartRateTests {
         #expect(suggestion?.activityStart == day(2))
     }
 
+    @Test("a suggestion flags that it would replace a max from a more reliable source, but not an old lab test or a formula")
+    func suggestionFlagsLabTestedMax() {
+        let activity = run(on: day(400), peak: 189)
+        func suggestion(_ source: MaxHeartRateSource) -> MaxHeartRateSuggestion? {
+            var athlete = AthleteProfile.fixture(maxHeartRateBPM: 178)
+            athlete.heartRateZoneHistory[0].maxHeartRateSource = source
+            let model = TrainingModel(stores: StoreSet(
+                activityStore: InMemoryStore(), planStore: InMemoryStore(), workoutStore: InMemoryStore(),
+                cycleStore: InMemoryStore(), raceStore: InMemoryStore(), athleteStore: InMemoryStore()
+            ), athlete: athlete)
+            return model.maxHeartRateSuggestion(among: [activity])
+        }
+
+        #expect(suggestion(.labTest(measuredOn: day(300)))?.replacesMoreReliableSource == true)
+        #expect(suggestion(.labTest(measuredOn: day(-400)))?.replacesMoreReliableSource == false)
+        #expect(suggestion(.formula)?.replacesMoreReliableSource == false)
+        #expect(suggestion(.fieldTest(activityID: UUID()))?.replacesMoreReliableSource == true)
+        #expect(suggestion(.workout(activityID: UUID()))?.replacesMoreReliableSource == false)
+    }
+
     @Test("a peak must be at least 1 bpm above an unrounded current max")
     func roundingNeedsWholeBeatAboveMax() {
         let (_, model) = makeModel(maxHeartRateBPM: 178.4)

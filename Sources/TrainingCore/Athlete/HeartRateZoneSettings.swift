@@ -12,11 +12,13 @@ public struct HeartRateZoneSettings: Sendable, Codable, Hashable {
     public var restingHeartRateBPM: Double
     /// Maximum heart rate, in beats per minute.
     public var maxHeartRateBPM: Double
-    /// Where ``maxHeartRateBPM`` came from: an age formula, a workout, a field test or the athlete.
+    /// Where ``maxHeartRateBPM`` came from: an age formula, a workout, a field test, a lab test or the
+    /// athlete. The sources are ranked by reliability (``MaxHeartRateSource/reliabilityRank(asOf:)``).
     public var maxHeartRateSource: MaxHeartRateSource
     /// Used when `zoneMethod` is `.lactateThreshold`.
     public var lactateThresholdHeartRateBPM: Double?
-    /// Where ``lactateThresholdHeartRateBPM`` came from (MVP2-154). Meaningless while it is `nil`.
+    /// Where ``lactateThresholdHeartRateBPM`` came from (MVP2-154): the athlete, a field test or a lab test,
+    /// ranked by ``LactateThresholdSource/reliabilityRank(asOf:)``. Meaningless while it is `nil`.
     public var lactateThresholdSource: LactateThresholdSource
     /// How zone boundaries are determined; see ``HeartRateZoneMethod``.
     public var zoneMethod: HeartRateZoneMethod

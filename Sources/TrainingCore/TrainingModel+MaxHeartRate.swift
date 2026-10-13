@@ -27,7 +27,8 @@ extension TrainingModel {
     public func maxHeartRateSuggestion(
         among activities: [Activity], detector: PeakHeartRateDetector = PeakHeartRateDetector()
     ) -> MaxHeartRateSuggestion? {
-        guard let currentMax = athlete.currentHeartRateZoneSettings?.maxHeartRateBPM else { return nil }
+        guard let current = athlete.currentHeartRateZoneSettings else { return nil }
+        let currentMax = current.maxHeartRateBPM
         var best: MaxHeartRateSuggestion?
         for activity in activities {
             guard let peak = detector.sustainedPeak(in: activity.heartRate) else { continue }
@@ -39,7 +40,10 @@ extension TrainingModel {
             if isBetter {
                 best = MaxHeartRateSuggestion(
                     activityID: activity.id, sport: activity.sport, activityStart: activity.start,
-                    peakBPM: peakBPM, currentMaxBPM: currentMax
+                    peakBPM: peakBPM, currentMaxBPM: currentMax,
+                    replacesMoreReliableSource: !current.maxHeartRateSource.isReplaceable(
+                        by: .workout(activityID: activity.id), asOf: activity.start
+                    )
                 )
             }
         }

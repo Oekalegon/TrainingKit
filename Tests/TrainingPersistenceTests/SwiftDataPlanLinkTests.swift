@@ -21,7 +21,7 @@ struct SwiftDataPlanLinkTests {
 
     @Test("a plan completed on another device is freed for the exact match, but not for a same-day guess")
     func planHeldByUnknownActivity() async throws {
-        let container = try TrainingPersistenceContainer.make(cloudKitDatabase: .none, isStoredInMemoryOnly: true)
+        let container = try TestContainers.make(cloudKitDatabase: .none, isStoredInMemoryOnly: true)
         let store = SwiftDataStore(modelContainer: container)
         let stores = StoreSet(
             activityStore: store, planStore: store, workoutStore: store, cycleStore: store,

@@ -4,6 +4,10 @@ import Foundation
 ///
 /// Like ``MaxHeartRateSource``, this lets a host app show how trustworthy the number is and avoid
 /// replacing a measured value with an estimate.
+///
+/// Only a ``labTest(measuredOn:)`` ages today (see ``labTestFreshness``). A field test's LTHR drifts with
+/// fitness too, so a host app may want to treat an old one as a prompt to retest; the ranking doesn't
+/// do that yet.
 public enum LactateThresholdSource: Sendable, Codable, Hashable {
     /// Entered by the athlete without saying how it was found, e.g. a watch's estimate. The default for
     /// settings recorded before sources were tracked, since the athlete was then the only source. Ranks

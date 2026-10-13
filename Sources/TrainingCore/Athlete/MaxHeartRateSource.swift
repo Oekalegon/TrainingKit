@@ -7,6 +7,12 @@ import Foundation
 /// 10 bpm for an individual, so a measured value should take precedence over the formula once one
 /// exists. Recording the source lets a host app avoid overwriting a measured max with a fresh
 /// formula estimate, and lets the athlete see how trustworthy the number is.
+///
+/// The sources are ranked (``reliabilityRank(asOf:)``) and ``isReplaceable(by:asOf:)`` is the guard for
+/// automatic updates. Only a ``labTest(measuredOn:)`` ages today: it drops a step below a field test
+/// after ``labTestFreshness``. A field test or workout peak doesn't age yet, since max heart rate
+/// changes slowly and a held peak stays a lower bound; LTHR does drift faster (see
+/// ``LactateThresholdSource``).
 public enum MaxHeartRateSource: Sendable, Codable, Hashable {
     /// Estimated from age, e.g. by ``TanakaHRMaxEstimator``. The default for settings recorded
     /// before sources were tracked.

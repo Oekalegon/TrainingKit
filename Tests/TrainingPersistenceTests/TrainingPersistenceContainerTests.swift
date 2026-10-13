@@ -8,13 +8,13 @@ import TrainingCore
 struct TrainingPersistenceContainerTests {
     @Test("make(cloudKitDatabase: .none) builds a usable in-memory container")
     func makeLocalOnlyContainer() throws {
-        let container = try TrainingPersistenceContainer.make(cloudKitDatabase: .none, isStoredInMemoryOnly: true)
+        let container = try TestContainers.make(cloudKitDatabase: .none, isStoredInMemoryOnly: true)
         _ = SwiftDataStore(modelContainer: container)
     }
 
     @Test("backfillActivityStartIfNeeded re-derives start for a record left at the migration sentinel")
     func backfillCorrectsRecordsLeftAtSentinelByLightweightMigration() async throws {
-        let container = try TrainingPersistenceContainer.make(cloudKitDatabase: .none, isStoredInMemoryOnly: true)
+        let container = try TestContainers.make(cloudKitDatabase: .none, isStoredInMemoryOnly: true)
         let context = ModelContext(container)
 
         // Simulates what SwiftData's automatic lightweight migration actually does to a row that
@@ -45,7 +45,7 @@ struct TrainingPersistenceContainerTests {
 
     @Test("backfillActivityStartIfNeeded leaves an already-correct record untouched")
     func backfillIsANoOpForRecordsAlreadyCorrect() async throws {
-        let container = try TrainingPersistenceContainer.make(cloudKitDatabase: .none, isStoredInMemoryOnly: true)
+        let container = try TestContainers.make(cloudKitDatabase: .none, isStoredInMemoryOnly: true)
         let store = SwiftDataStore(modelContainer: container)
         let activity = Activity(source: .manual, sport: .running, start: Date(timeIntervalSince1970: 1_700_000_000), duration: 1800)
         try await store.upsert([activity])
@@ -65,7 +65,7 @@ struct TrainingPersistenceContainerTests {
         // silent/logged sync failure once SwiftData actually attempts to talk to CloudKit -- not
         // as a thrown error from this call. This test exists to keep that documented claim honest;
         // actual CloudKit sync itself needs a real device/entitlement and isn't exercised here.
-        let container = try TrainingPersistenceContainer.make(cloudKitDatabase: .automatic, isStoredInMemoryOnly: true)
+        let container = try TestContainers.make(cloudKitDatabase: .automatic, isStoredInMemoryOnly: true)
         _ = SwiftDataStore(modelContainer: container)
     }
 

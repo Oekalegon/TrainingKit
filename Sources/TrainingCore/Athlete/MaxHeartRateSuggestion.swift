@@ -17,6 +17,11 @@ public struct MaxHeartRateSuggestion: Sendable, Hashable {
     public let peakBPM: Double
     /// The max heart rate currently on record, in beats per minute.
     public let currentMaxBPM: Double
+    /// Whether the max on record comes from a more reliable source than a workout on the day of the
+    /// activity: a field test, or a lab test still fresh then (see ``MaxHeartRateSource/labTestFreshness``). The peak is still
+    /// evidence that the record is too low, so it is offered, but a host app should say that it would
+    /// replace a lab-tested value.
+    public let replacesMoreReliableSource: Bool
 
     /// Creates a suggestion.
     ///
@@ -26,11 +31,17 @@ public struct MaxHeartRateSuggestion: Sendable, Hashable {
     ///   - activityStart: The activity's start.
     ///   - peakBPM: The held peak, in beats per minute.
     ///   - currentMaxBPM: The max heart rate currently on record, in beats per minute.
-    public init(activityID: UUID, sport: Sport, activityStart: Date, peakBPM: Double, currentMaxBPM: Double) {
+    ///   - replacesMoreReliableSource: Whether the max on record is from a more reliable source than a
+    ///     workout; defaults to `false`.
+    public init(
+        activityID: UUID, sport: Sport, activityStart: Date, peakBPM: Double, currentMaxBPM: Double,
+        replacesMoreReliableSource: Bool = false
+    ) {
         self.activityID = activityID
         self.sport = sport
         self.activityStart = activityStart
         self.peakBPM = peakBPM
         self.currentMaxBPM = currentMaxBPM
+        self.replacesMoreReliableSource = replacesMoreReliableSource
     }
 }

@@ -155,8 +155,11 @@ Raising is **raise-only** and **date-effective**:
   unchanged; that activity and everything after it are rescored. Later entries below the new value
   are raised too, so a later resting-HR update can't bring the old max back.
 
-A host app that merges in fresh formula estimates (TrainingApp's HealthKit merge) must not overwrite
-a `.workout` or `.fieldTest` max with a lower estimate.
+A host app that merges in fresh formula estimates (TrainingApp's HealthKit merge) must check
+`current.maxHeartRateSource.isReplaceable(by: .formula, asOf: today)` before writing one, so an age
+estimate never replaces a manual, workout, field-test or lab-test max (see the ranking above). Only a
+lab test ages today; a field test's LTHR drifts too and doesn't yet. `MaxHeartRateSuggestion.replacesMoreReliableSource`
+flags a workout peak that would replace a fresh lab-tested max, like the field test result's flag.
 
 #### Field tests (MVP2-154)
 

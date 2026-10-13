@@ -328,6 +328,30 @@ struct BuiltInWorkoutTemplatesTests {
         ])
     }
 
+    @Test("the MVP2-106 templates offer the ticket's parameter ranges, with defaults inside them")
+    func mvp2106ParameterRanges() throws {
+        let expected: [(WorkoutTemplate, [String: ClosedRange<Double>])] = [
+            (BuiltInWorkoutTemplates.fastFinishRun, ["duration": 900...5_400, "finish": 300...1_800]),
+            (BuiltInWorkoutTemplates.longRunFastFinish, ["distance": 12_000...25_000, "finish": 1_000...4_000]),
+            (BuiltInWorkoutTemplates.cruiseIntervalRun, ["reps": 3...6, "work": 300...900]),
+            (BuiltInWorkoutTemplates.longIntervalRun, ["reps": 3...8, "work": 180...300, "rest": 120...240]),
+            (BuiltInWorkoutTemplates.mixedIntervalRun, ["reps": 1...3, "hard": 30...120, "moderate": 90...360]),
+            (BuiltInWorkoutTemplates.longFartlekRun, ["reps": 8...20]),
+            (BuiltInWorkoutTemplates.fartlekZone4, ["reps": 3...12, "work": 60...300]),
+            (BuiltInWorkoutTemplates.fartlekZone5, ["reps": 3...12, "work": 60...300]),
+            (BuiltInWorkoutTemplates.hillRepetitionRun, ["reps": 6...12, "work": 30...90, "rest": 90...150]),
+            (BuiltInWorkoutTemplates.sarcomereRun, ["reps": 6...12, "work": 30...90, "rest": 90...150]),
+        ]
+
+        for (template, ranges) in expected {
+            #expect(Set(template.parameters.map(\.key)) == Set(ranges.keys), "\(template.name)")
+            for parameter in template.parameters {
+                #expect(parameter.range == ranges[parameter.key], "\(template.name) \(parameter.key)")
+                #expect(parameter.range?.contains(parameter.defaultValue) == true, "\(template.name) \(parameter.key) default")
+            }
+        }
+    }
+
     @Test("every built-in template has a positive estimated load with its default parameters")
     func builtInsHavePositiveLoad() throws {
         let athlete = AthleteProfile.fixture()

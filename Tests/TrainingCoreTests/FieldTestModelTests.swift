@@ -41,6 +41,18 @@ struct FieldTestModelTests {
         return plan
     }
 
+    /// An activity on `date` linked to a plan of `template`, in the store, for applying a result to.
+    private func linkedActivity(
+        _ store: InMemoryStore, _ model: TrainingModel, template: WorkoutTemplate, on date: Date
+    ) async throws -> Activity {
+        let plan = try await planned(model, template: template, on: date)
+        let activity = Activity(
+            source: .healthKit(UUID()), sport: .running, start: date, duration: 600, linkedPlanID: plan.id
+        )
+        try await store.upsert([activity])
+        return activity
+    }
+
     // MARK: Reading the result
 
     @Test("a linked max HR test activity gives a result, read from the store")
@@ -82,14 +94,47 @@ struct FieldTestModelTests {
         await #expect(throws: FieldTestError.noHeartRate) { try await model.fieldTestResult(forActivity: activity.id) }
     }
 
+    @Test("a linked LTHR test activity gives a result through the store, using the recorded steps")
+    func lthrResultForLinkedTest() async throws {
+        let (store, model) = makeModel()
+        let plan = try await planned(model, template: BuiltInWorkoutTemplates.lthrTest, on: day(2))
+        let begin = day(2)
+        var samples: [HeartRateSample] = []
+        var second = 0.0
+        while second <= 3000 {
+            let bpm: Double = second >= 900 && second < 2700 ? 168 : 140
+            samples.append(HeartRateSample(time: begin.addingTimeInterval(second), bpm: bpm))
+            second += 5
+        }
+        let bounds: [(Double, Double)] = [(0, 600), (600, 900), (900, 2700), (2700, 3000)]
+        var steps: [ActivityStep] = []
+        for (block, bound) in bounds.enumerated() {
+            steps.append(ActivityStep(
+                block: block, repetition: 0, step: 0,
+                start: begin.addingTimeInterval(bound.0), end: begin.addingTimeInterval(bound.1)
+            ))
+        }
+        let activity = Activity(
+            source: .healthKit(UUID()), sport: .running, start: begin, duration: 3000,
+            heartRate: samples, linkedPlanID: plan.id, steps: steps
+        )
+        try await store.upsert([activity])
+
+        let result = try await model.fieldTestResult(forActivity: activity.id)
+
+        #expect(result?.measurement == .lactateThresholdHeartRate)
+        #expect(result?.valueBPM == 168)
+        #expect(result?.isEstimatedFromPlan == false)
+    }
+
     // MARK: Applying
 
     @Test("a max HR result lowers the max from the test onward, with the field-test source, and earlier days keep theirs")
     func applyLowersMax() async throws {
-        let (_, model) = makeModel()
-        let id = UUID()
+        let (store, model) = makeModel()
+        let activity = try await linkedActivity(store, model, template: BuiltInWorkoutTemplates.maxHRTest, on: day(5))
         let result = FieldTestResult(
-            measurement: .maxHeartRate, activityID: id, activityStart: day(5), valueBPM: 170, currentBPM: 178
+            measurement: .maxHeartRate, activityID: activity.id, activityStart: day(5), valueBPM: 170, currentBPM: 178
         )
 
         try await model.applyFieldTestResult(result, asOf: day(6))
@@ -98,22 +143,23 @@ struct FieldTestModelTests {
         let after = try #require(model.athlete.heartRateZoneSettings(asOf: day(5)))
         #expect(before.maxHeartRateBPM == 178)
         #expect(after.maxHeartRateBPM == 170)
-        #expect(after.maxHeartRateSource == .fieldTest(activityID: id))
+        #expect(after.maxHeartRateSource == .fieldTest(activityID: activity.id))
     }
 
     @Test("a lactate threshold result is recorded with the field-test source and leaves the max alone")
     func applyLactateThreshold() async throws {
         let (store, model) = makeModel()
-        let id = UUID()
+        let activity = try await linkedActivity(store, model, template: BuiltInWorkoutTemplates.lthrTest, on: day(5))
         let result = FieldTestResult(
-            measurement: .lactateThresholdHeartRate, activityID: id, activityStart: day(5), valueBPM: 168, currentBPM: nil
+            measurement: .lactateThresholdHeartRate, activityID: activity.id, activityStart: day(5),
+            valueBPM: 168, currentBPM: nil
         )
 
         try await model.applyFieldTestResult(result, asOf: day(6))
 
         let settings = try #require(model.athlete.heartRateZoneSettings(asOf: day(5)))
         #expect(settings.lactateThresholdHeartRateBPM == 168)
-        #expect(settings.lactateThresholdSource == .fieldTest(activityID: id))
+        #expect(settings.lactateThresholdSource == .fieldTest(activityID: activity.id))
         #expect(settings.maxHeartRateBPM == 178)
         #expect(try await store.athleteProfile()?.heartRateZoneSettings(asOf: day(5))?.lactateThresholdHeartRateBPM == 168)
     }
@@ -141,11 +187,98 @@ struct FieldTestModelTests {
         #expect(updated.heartRateZoneSettings(asOf: day(20))?.maxHeartRateBPM == 185)
     }
 
+    @Test("a result for an activity that was since deleted, or unlinked from its test, is not applied")
+    func staleResultNotApplied() async throws {
+        let (store, model) = makeModel()
+        let plan = try await planned(model, template: BuiltInWorkoutTemplates.maxHRTest, on: day(5))
+        let activity = testActivity(on: day(5), peak: 170, linkedTo: plan.id)
+        try await store.upsert([activity])
+        let result = try #require(try await model.fieldTestResult(forActivity: activity.id))
+        let before = model.athlete
+
+        var unlinked = activity
+        unlinked.linkedPlanID = nil
+        try await store.upsert([unlinked])
+        try await model.applyFieldTestResult(result, asOf: day(6))
+        #expect(model.athlete == before)
+
+        // Linked to an LTHR test instead: the wrong kind of test for a max heart rate result.
+        let lthrPlan = try await planned(model, template: BuiltInWorkoutTemplates.lthrTest, on: day(5))
+        var relinked = activity
+        relinked.linkedPlanID = lthrPlan.id
+        try await store.upsert([relinked])
+        try await model.applyFieldTestResult(result, asOf: day(6))
+        #expect(model.athlete == before)
+
+        try await model.applyFieldTestResult(
+            FieldTestResult(measurement: .maxHeartRate, activityID: UUID(), activityStart: day(5), valueBPM: 170, currentBPM: 178),
+            asOf: day(6)
+        )
+        #expect(model.athlete == before)
+    }
+
+    @Test("applying leaves cached metrics from before the test untouched")
+    func applyKeepsEarlierCache() async throws {
+        let cache = InMemoryStore()
+        let early = FitnessMetrics(
+            day: day(-10), load: 0, ctl: 42, atl: 42, tsb: 0,
+            monotony: .nan, strain: .nan, isProjected: false, isWarmingUp: false
+        )
+        try await cache.upsert([early])
+        let store = InMemoryStore()
+        let stores = StoreSet(
+            activityStore: store, planStore: store, workoutStore: store,
+            cycleStore: store, raceStore: store, athleteStore: store, fitnessMetricsCacheStore: cache
+        )
+        let model = TrainingModel(stores: stores, athlete: .fixture(maxHeartRateBPM: 178))
+        let plan = try await planned(model, template: BuiltInWorkoutTemplates.maxHRTest, on: day(5))
+        let activity = testActivity(on: day(5), peak: 170, linkedTo: plan.id)
+        try await store.upsert([activity])
+        let result = try #require(try await model.fieldTestResult(forActivity: activity.id))
+
+        try await model.applyFieldTestResult(result, asOf: day(6))
+
+        let kept = try await cache.cachedMetrics(in: day(-10)...day(-10))
+        #expect(kept.map(\.ctl) == [42])
+    }
+
+    @Test("a lactate threshold result is date-effective: earlier entries keep theirs and later carried ones follow")
+    func lactateThresholdLaterEntries() {
+        var athlete = AthleteProfile.fixture(lactateThresholdHeartRateBPM: 160)
+        var carried = athlete.heartRateZoneHistory[0]
+        carried.effectiveDate = day(10)
+        athlete.heartRateZoneHistory.append(carried)
+        var later = athlete.heartRateZoneHistory[0]
+        later.effectiveDate = day(20)
+        later.lactateThresholdHeartRateBPM = 175
+        later.lactateThresholdSource = .fieldTest(activityID: UUID())
+        athlete.heartRateZoneHistory.append(later)
+
+        let updated = athlete.settingLactateThresholdHeartRate(to: 166, from: day(5), source: .fieldTest(activityID: UUID()))
+
+        #expect(updated.heartRateZoneSettings(asOf: day(4))?.lactateThresholdHeartRateBPM == 160)
+        #expect(updated.heartRateZoneSettings(asOf: day(5))?.lactateThresholdHeartRateBPM == 166)
+        #expect(updated.heartRateZoneSettings(asOf: day(10))?.lactateThresholdHeartRateBPM == 166)
+        #expect(updated.heartRateZoneSettings(asOf: day(20))?.lactateThresholdHeartRateBPM == 175)
+    }
+
+    @Test("a result dated before every entry applies to the whole history")
+    func resultBeforeFirstEntry() {
+        var athlete = AthleteProfile.fixture(maxHeartRateBPM: 178)
+        athlete.heartRateZoneHistory[0].effectiveDate = day(10)
+
+        let updated = athlete.settingMaxHeartRate(to: 170, from: day(5), source: .fieldTest(activityID: UUID()))
+
+        #expect(updated.heartRateZoneSettings(asOf: day(5))?.maxHeartRateBPM == 170)
+        #expect(updated.heartRateZoneSettings(asOf: day(12))?.maxHeartRateBPM == 170)
+    }
+
     @Test("applying the value and source already in effect changes nothing")
     func applyIsIdempotent() async throws {
-        let (_, model) = makeModel()
+        let (store, model) = makeModel()
+        let activity = try await linkedActivity(store, model, template: BuiltInWorkoutTemplates.maxHRTest, on: day(5))
         let result = FieldTestResult(
-            measurement: .maxHeartRate, activityID: UUID(), activityStart: day(5), valueBPM: 170, currentBPM: 178
+            measurement: .maxHeartRate, activityID: activity.id, activityStart: day(5), valueBPM: 170, currentBPM: 178
         )
         try await model.applyFieldTestResult(result, asOf: day(6))
         let once = model.athlete

@@ -11,8 +11,9 @@ import Foundation
 /// The effort is the workout's longest timed step. Its window comes from the steps the Watch recorded
 /// (``Activity/steps``, laid over the plan by ``ActivityStepAligner``) when the test was started
 /// from the scheduled workout; otherwise from the plan's own timing, if the activity's length is within
-/// 10% of the plan's total (``FieldTestResult/isEstimatedFromPlan``). Heart rate is averaged over
-/// time, not per sample, so uneven sampling doesn't weight the average, and gaps and implausible
+/// 5% of the plan's total and the end of the window isn't a cooldown (``FieldTestResult/isEstimatedFromPlan``).
+/// The tolerances here (90% of the effort, 80% coverage, 5%) are our own, chosen so a result is
+/// refused rather than misleading. Heart rate is averaged over time, not per sample, so uneven sampling doesn't weight the average, and gaps and implausible
 /// values count as uncovered.
 public struct FieldTestMeasurer: Sendable {
     /// How much of the end of the effort the lactate threshold average covers, in seconds.
@@ -22,8 +23,14 @@ public struct FieldTestMeasurer: Sendable {
     /// The least of the averaging window that must have heart rate, as a fraction of it.
     static let minimumCoverage = 0.8
     /// How far the activity's length may differ from the plan's total when the effort is located by
-    /// the plan's timing, as a fraction of the total.
-    static let planTimingTolerance = 0.1
+    /// the plan's timing, as a fraction of the total. A recording that starts or ends this much off
+    /// moves the effort's window by about as much, so it is kept tight (2.5 minutes of a 50-minute test).
+    static let planTimingTolerance = 0.05
+    /// The end of a plan-located window that is checked for a cooldown: its last two minutes must average
+    /// at least ``tailFloorFraction`` of the whole window.
+    static let tailSeconds: TimeInterval = 120
+    /// See ``tailSeconds``.
+    static let tailFloorFraction = 0.9
 
     /// Finds the held peak for a max heart rate test and the plausible ceiling for averaging.
     public let detector: PeakHeartRateDetector
@@ -63,6 +70,10 @@ public struct FieldTestMeasurer: Sendable {
             let effort = try effortWindow(in: activity, workout: workout)
             let windowStart = effort.window.upperBound.addingTimeInterval(-Self.lactateThresholdWindowSeconds)
             let average = try averageHeartRate(in: activity.heartRate, over: windowStart...effort.window.upperBound)
+            if effort.isEstimatedFromPlan,
+               !endsInEffort(activity.heartRate, window: effort.window, average: average) {
+                throw .effortNotLocated
+            }
             let value = average.rounded()
             try checkPlausible(value, settings: settings)
             return FieldTestResult(
@@ -93,7 +104,10 @@ public struct FieldTestMeasurer: Sendable {
         }
         guard let effortIndex, effortSeconds >= Self.lactateThresholdWindowSeconds else { throw .effortNotLocated }
 
-        if let aligned = ActivityStepAligner.align(activity.steps, with: workout), let recorded = aligned[effortIndex] {
+        if let aligned = ActivityStepAligner.align(activity.steps, with: workout) {
+            // Steps that fit the plan but lack the effort say it wasn't done; the plan's timing mustn't
+            // invent one.
+            guard let recorded = aligned[effortIndex] else { throw .effortNotLocated }
             let length = recorded.end.timeIntervalSince(recorded.start)
             guard length >= effortSeconds * Self.minimumEffortFraction else { throw .effortTooShort(recordedSeconds: length) }
             return (recorded.start...recorded.end, false)
@@ -111,6 +125,15 @@ public struct FieldTestMeasurer: Sendable {
         guard abs(activity.duration - total) <= total * Self.planTimingTolerance else { throw .effortNotLocated }
         let start = activity.start.addingTimeInterval(offset)
         return (start...start.addingTimeInterval(effortSeconds), true)
+    }
+
+    /// Whether the end of `window` still looks like effort rather than a cooldown that the plan's timing
+    /// wrongly placed inside it: the heart rate of its last ``tailSeconds`` is at least
+    /// ``tailFloorFraction`` of the whole window's.
+    private func endsInEffort(_ samples: [HeartRateSample], window: ClosedRange<Date>, average: Double) -> Bool {
+        let tail = window.upperBound.addingTimeInterval(-Self.tailSeconds)...window.upperBound
+        guard let tailAverage = try? averageHeartRate(in: samples, over: tail) else { return false }
+        return tailAverage >= average * Self.tailFloorFraction
     }
 
     /// The time-weighted average of `samples` over `window`, in beats per minute.

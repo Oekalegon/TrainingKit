@@ -30,12 +30,15 @@ public struct FieldTestResult: Sendable, Hashable {
     public let currentBPM: Double?
     /// Whether the test's effort was located from the plan rather than from the steps the Watch
     /// recorded: the activity wasn't started from the scheduled workout, so the effort is assumed to
-    /// have followed the plan's timing. Always `false` for a max heart rate test, which looks at the
+    /// have followed the plan's timing (and be within 5% of its length). Always `false` for a max heart rate test, which looks at the
     /// whole activity. A host app may want to ask the athlete to check such a result.
     public let isEstimatedFromPlan: Bool
 
-    /// Whether applying the result would change the setting: the value differs from ``currentBPM``.
-    public var changesSettings: Bool { currentBPM != valueBPM }
+    /// Whether the value differs from ``currentBPM``. A host app can use it to say "no change", but applying
+    /// an equal value still records the new source (a measured max replaces a formula's), so don't skip
+    /// ``TrainingModel/applyFieldTestResult(_:asOf:)`` for a result whose value matches if the athlete should
+    /// get the measured source.
+    public var changesValue: Bool { currentBPM != valueBPM }
 
     /// Creates a result.
     ///

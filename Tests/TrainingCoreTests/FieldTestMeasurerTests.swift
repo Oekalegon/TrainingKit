@@ -76,7 +76,7 @@ struct FieldTestMeasurerTests {
         #expect(result.valueBPM == 170)
         #expect(result.currentBPM == 160)
         #expect(!result.isEstimatedFromPlan)
-        #expect(result.changesSettings)
+        #expect(result.changesValue)
     }
 
     @Test("without recorded steps the effort is located from the plan's timing and flagged as estimated")
@@ -97,6 +97,35 @@ struct FieldTestMeasurerTests {
             #expect(throws: FieldTestError.effortNotLocated) {
                 try measurer.measure(activity, workout: workout, settings: settings)
             }
+        }
+    }
+
+    @Test("recorded steps that fit the plan but lack the effort don't fall back to the plan's timing")
+    func lthrSkippedEffortNotInvented() throws {
+        let withoutEffort = recordedSteps().filter { $0.block != 2 }
+        let activity = lthrActivity(samples: lthrSamples(), steps: withoutEffort)
+
+        #expect(throws: FieldTestError.effortNotLocated) {
+            try measurer.measure(activity, workout: lthrWorkout(), settings: settings)
+        }
+    }
+
+    @Test("a recording that started two minutes into the warmup puts a cooldown at the plan-timed window's end and is refused")
+    func lthrShiftedRecordingRefused() throws {
+        // Same total length, but everything happens two minutes earlier in the recording.
+        var samples: [HeartRateSample] = []
+        for sample in lthrSamples() where sample.time >= start.addingTimeInterval(120) {
+            samples.append(HeartRateSample(time: sample.time.addingTimeInterval(-120), bpm: sample.bpm))
+        }
+        var second = 2880.0
+        while second <= 3000 {
+            samples.append(HeartRateSample(time: start.addingTimeInterval(second), bpm: 130))
+            second += 5
+        }
+        let activity = lthrActivity(samples: samples)
+
+        #expect(throws: FieldTestError.effortNotLocated) {
+            try measurer.measure(activity, workout: lthrWorkout(), settings: settings)
         }
     }
 
@@ -205,7 +234,7 @@ struct FieldTestMeasurerTests {
         let result = try #require(try measurer.measure(maxHRActivity(peak: 170), workout: workout, settings: settings))
 
         #expect(result.valueBPM == 170)
-        #expect(result.changesSettings)
+        #expect(result.changesValue)
     }
 
     @Test("a result equal to the value on record changes nothing")
@@ -214,7 +243,7 @@ struct FieldTestMeasurerTests {
 
         let result = try #require(try measurer.measure(maxHRActivity(peak: 178), workout: workout, settings: settings))
 
-        #expect(!result.changesSettings)
+        #expect(!result.changesValue)
     }
 
     @Test("a short spike isn't taken for the maximum")

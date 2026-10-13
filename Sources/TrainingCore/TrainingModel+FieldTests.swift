@@ -42,6 +42,9 @@ extension TrainingModel {
     /// and ``AthleteProfile/settingLactateThresholdHeartRate(to:from:source:)``). A max heart rate
     /// may go down. Assigning ``athlete`` invalidates the fitness-metrics cache from that date.
     ///
+    /// A no-op when the activity no longer exists or is no longer linked to a field test of the kind
+    /// `result` measured (it was deleted, unlinked or its plan changed since the result was read).
+    ///
     /// The profile is saved before ``athlete`` is updated, so a failed save leaves the model and the
     /// store in agreement. A no-op when the profile wouldn't change. Goes through
     /// ``updateAthlete(asOf:_:)``, so it runs in the same queue as imports and other athlete updates.
@@ -51,6 +54,12 @@ extension TrainingModel {
     ///   - today: Passed through to ``recompute(asOf:)``.
     /// - Throws: Whatever ``AthleteStore/save(_:)`` throws; nothing is changed in that case.
     public func applyFieldTestResult(_ result: FieldTestResult, asOf today: Date = .now) async throws {
+        guard let activity = try await stores.activityStore.activity(id: result.activityID),
+              let workout = try await plannedWorkout(planID: activity.linkedPlanID) else { return }
+        switch (result.measurement, workout.purpose) {
+        case (.maxHeartRate, .maxHRTest), (.lactateThresholdHeartRate, .lthrTest): break
+        default: return
+        }
         try await updateAthlete(asOf: today) { athlete in
             switch result.measurement {
             case .maxHeartRate:

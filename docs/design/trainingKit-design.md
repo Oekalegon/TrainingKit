@@ -147,7 +147,7 @@ The update is athlete-confirmed:
 
 Raising is **raise-only** and **date-effective**:
 - A workout below the max says nothing about the true maximum, so this flow never lowers it. A
-  dedicated max-HR test (a separate MVP2 item) may.
+  linked max-HR field test may (see Field tests below).
 - The new value applies from the activity's start. Earlier entries keep their max, so past load is
   unchanged; that activity and everything after it are rescored. Later entries below the new value
   are raised too, so a later resting-HR update can't bring the old max back.
@@ -165,14 +165,14 @@ is linked to the plan, `TrainingModel.fieldTestResult(forActivity:)` measures it
   first 10 are left out because the heart rate is still rising. The effort is the workout's longest
   timed step. Its window comes from the steps the Watch recorded (`ActivityStepAligner`); an
   activity not started from the scheduled workout falls back to the plan's own timing when its length is
-  within 10% of the plan's total, and the result says so (`isEstimatedFromPlan`). The average is
+  within 5% of the plan's total and the end of the window doesn't look like a cooldown (its last two minutes at least 90% of the window's average), and the result says so (`isEstimatedFromPlan`). Recorded steps that fit the plan but lack the effort mean the test wasn't done, so there is no fallback then. The tolerances (90% of the effort, 80% coverage, 5%) are our own choices, picked to refuse rather than mislead. The average is
   weighted by time, not by sample, and an interval longer than 15 s or with a value above 230 bpm
   counts as uncovered. A recorded effort under 90% of the planned length, or heart rate covering
   under 80% of the 20 minutes, is refused with a `FieldTestError` rather than guessed. A result at
   or below resting heart rate is refused too.
 
 Like the max HR suggestion, the result is offered and applied only when the athlete confirms
-(`applyFieldTestResult(_:asOf:)`, through `updateAthlete`). Unlike it, a test result may **lower** the
+(`applyFieldTestResult(_:asOf:)`, through `updateAthlete`; a no-op if the activity has since been deleted or unlinked from a test of that kind). Unlike it, a test result may **lower** the
 max, because a test is a deliberate attempt at the maximum; an ordinary workout still only raises it.
 It is date-effective from the test activity's start
 (`AthleteProfile.settingMaxHeartRate(to:from:source:)`,

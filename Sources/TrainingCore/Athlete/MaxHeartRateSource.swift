@@ -24,7 +24,42 @@ public enum MaxHeartRateSource: Sendable, Codable, Hashable {
     ///
     /// - Parameter activityID: The ``Activity`` the test was recorded in.
     case fieldTest(activityID: UUID)
-    /// Entered by the athlete (MVP2-132), e.g. from a lab test. Taken as given: nothing replaces
-    /// it automatically, and it isn't compared with the age formula or a workout's peak.
+    /// Measured in a laboratory (a graded exercise test) and entered by the athlete. The most reliable
+    /// source: nothing else replaces it automatically, and a field test or a workout only does after
+    /// the athlete confirms.
+    case labTest
+    /// Entered by the athlete (MVP2-132) without saying how it was found, e.g. a figure from a watch or
+    /// a guess. Taken as given: an age formula never replaces it, but it ranks below a measurement.
     case manual
+
+    /// How far this source can be trusted, higher being more reliable (see ``isReplaceable(by:)``):
+    /// ``formula`` 0, ``manual`` 1, ``workout(activityID:)`` 2, ``fieldTest(activityID:)`` 3,
+    /// ``labTest`` 4.
+    ///
+    /// A workout's held peak is a lower bound on the true maximum, a field test is a deliberate attempt
+    /// at it, and a lab test measures it under control. A figure the athlete typed in without a source
+    /// is above an estimate from age but below any measurement. Only the order matters, not the values.
+    public var reliabilityRank: Int {
+        switch self {
+        case .formula: 0
+        case .manual: 1
+        case .workout: 2
+        case .fieldTest: 3
+        case .labTest: 4
+        }
+    }
+
+    /// Whether a value from `other` may take this source's place without the athlete deciding: `other`
+    /// is at least as reliable (``reliabilityRank``). A host app that merges in estimates should check
+    /// `current.isReplaceable(by: .formula)` before overwriting, so an age formula never replaces a
+    /// measured or entered maximum.
+    ///
+    /// This is a guard for automatic updates. It doesn't stop the athlete confirming a lower-ranked
+    /// result: a workout whose held peak beats the maximum on record is proof that the record is too low,
+    /// whatever its source (``AthleteProfile/raisingMaxHeartRate(to:from:source:)``).
+    ///
+    /// - Parameter other: The source of the value that would replace this one.
+    public func isReplaceable(by other: MaxHeartRateSource) -> Bool {
+        other.reliabilityRank >= reliabilityRank
+    }
 }

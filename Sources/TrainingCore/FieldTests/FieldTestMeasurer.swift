@@ -64,7 +64,10 @@ public struct FieldTestMeasurer: Sendable {
             try checkPlausible(value, settings: settings)
             return FieldTestResult(
                 measurement: .maxHeartRate, activityID: activity.id, activityStart: activity.start,
-                valueBPM: value, currentBPM: settings?.maxHeartRateBPM
+                valueBPM: value, currentBPM: settings?.maxHeartRateBPM,
+                replacesMoreReliableSource: settings.map {
+                    !$0.maxHeartRateSource.isReplaceable(by: .fieldTest(activityID: activity.id))
+                } ?? false
             )
         case .lthrTest:
             let effort = try effortWindow(in: activity, workout: workout)
@@ -79,7 +82,11 @@ public struct FieldTestMeasurer: Sendable {
             return FieldTestResult(
                 measurement: .lactateThresholdHeartRate, activityID: activity.id, activityStart: activity.start,
                 valueBPM: value, currentBPM: settings?.lactateThresholdHeartRateBPM,
-                isEstimatedFromPlan: effort.isEstimatedFromPlan
+                isEstimatedFromPlan: effort.isEstimatedFromPlan,
+                replacesMoreReliableSource: settings.flatMap { current in
+                    current.lactateThresholdHeartRateBPM == nil ? nil
+                        : !current.lactateThresholdSource.isReplaceable(by: .fieldTest(activityID: activity.id))
+                } ?? false
             )
         }
     }

@@ -41,4 +41,20 @@ struct SwiftDataFieldTestSourceTests {
         #expect(settings.lactateThresholdSource == .fieldTest(activityID: id))
         #expect(settings.maxHeartRateBPM == 171)
     }
+
+    @Test("a lab-test source survives the profile record")
+    func labTestSurvivesProfileRecord() async throws {
+        let container = try TrainingPersistenceContainer.make(cloudKitDatabase: .none, isStoredInMemoryOnly: true)
+        let store = SwiftDataStore(modelContainer: container)
+        var profile = AthleteProfile.fixture()
+        profile.heartRateZoneHistory[0].maxHeartRateSource = .labTest
+        profile.heartRateZoneHistory[0].lactateThresholdHeartRateBPM = 165
+        profile.heartRateZoneHistory[0].lactateThresholdSource = .labTest
+
+        try await store.save(profile)
+
+        let settings = try #require(try await store.athleteProfile()?.currentHeartRateZoneSettings)
+        #expect(settings.maxHeartRateSource == .labTest)
+        #expect(settings.lactateThresholdSource == .labTest)
+    }
 }

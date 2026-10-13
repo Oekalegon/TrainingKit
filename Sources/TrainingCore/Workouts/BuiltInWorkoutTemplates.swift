@@ -357,7 +357,7 @@ public enum BuiltInWorkoutTemplates {
     /// effort of `work` seconds (5-15 minutes) and a fixed 3-minute Zone 1 recovery, then a fixed
     /// 5-minute Zone 2 run and a 5-minute Zone 1 cooldown. The last repetition keeps its recovery.
     /// As in ``tempoRun``, only the edge blocks are `.warmup`/`.cooldown`, matching what
-    /// ``WorkoutKitBridge`` sends to the Watch.
+    /// `WorkoutKitBridge` sends to the Watch.
     public static let cruiseIntervalRun = WorkoutTemplate(
         id: UUID(uuidString: "8F5D6E4E-6E0E-4B8B-9C1A-9E6F9F1C1A0B")!,
         name: "Cruise Interval Runs",

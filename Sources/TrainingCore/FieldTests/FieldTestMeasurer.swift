@@ -66,7 +66,7 @@ public struct FieldTestMeasurer: Sendable {
                 measurement: .maxHeartRate, activityID: activity.id, activityStart: activity.start,
                 valueBPM: value, currentBPM: settings?.maxHeartRateBPM,
                 replacesMoreReliableSource: settings.map {
-                    !$0.maxHeartRateSource.isReplaceable(by: .fieldTest(activityID: activity.id))
+                    !$0.maxHeartRateSource.isReplaceable(by: .fieldTest(activityID: activity.id), asOf: activity.start)
                 } ?? false
             )
         case .lthrTest:
@@ -85,7 +85,9 @@ public struct FieldTestMeasurer: Sendable {
                 isEstimatedFromPlan: effort.isEstimatedFromPlan,
                 replacesMoreReliableSource: settings.flatMap { current in
                     current.lactateThresholdHeartRateBPM == nil ? nil
-                        : !current.lactateThresholdSource.isReplaceable(by: .fieldTest(activityID: activity.id))
+                        : !current.lactateThresholdSource.isReplaceable(
+                            by: .fieldTest(activityID: activity.id), asOf: activity.start
+                        )
                 } ?? false
             )
         }

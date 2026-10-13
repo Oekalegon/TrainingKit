@@ -34,9 +34,10 @@ public struct FieldTestResult: Sendable, Hashable {
     /// whole activity. A host app may want to ask the athlete to check such a result.
     public let isEstimatedFromPlan: Bool
 
-    /// Whether the value on record comes from a more reliable source than a field test (a lab test), so
-    /// applying the result would replace a better measurement with a worse one. A host app should say so
-    /// when it asks the athlete, or default to keeping the old value. See ``MaxHeartRateSource/reliabilityRank``.
+    /// Whether the value on record comes from a more reliable source than a field test on the day of the
+    /// test (a lab test still fresh then, see ``MaxHeartRateSource/labTestFreshness``), so applying the
+    /// result would replace a better measurement with a worse one. A host app should say so
+    /// when it asks the athlete, or default to keeping the old value. See ``MaxHeartRateSource/reliabilityRank(asOf:)``.
     public let replacesMoreReliableSource: Bool
 
     /// Whether the value differs from ``currentBPM``. A host app can use it to say "no change", but applying

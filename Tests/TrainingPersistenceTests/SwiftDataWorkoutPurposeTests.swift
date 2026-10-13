@@ -47,14 +47,14 @@ struct SwiftDataFieldTestSourceTests {
         let container = try TrainingPersistenceContainer.make(cloudKitDatabase: .none, isStoredInMemoryOnly: true)
         let store = SwiftDataStore(modelContainer: container)
         var profile = AthleteProfile.fixture()
-        profile.heartRateZoneHistory[0].maxHeartRateSource = .labTest
+        profile.heartRateZoneHistory[0].maxHeartRateSource = .labTest(measuredOn: Date(timeIntervalSince1970: 1_690_000_000))
         profile.heartRateZoneHistory[0].lactateThresholdHeartRateBPM = 165
-        profile.heartRateZoneHistory[0].lactateThresholdSource = .labTest
+        profile.heartRateZoneHistory[0].lactateThresholdSource = .labTest(measuredOn: Date(timeIntervalSince1970: 1_690_000_000))
 
         try await store.save(profile)
 
         let settings = try #require(try await store.athleteProfile()?.currentHeartRateZoneSettings)
-        #expect(settings.maxHeartRateSource == .labTest)
-        #expect(settings.lactateThresholdSource == .labTest)
+        #expect(settings.maxHeartRateSource == .labTest(measuredOn: Date(timeIntervalSince1970: 1_690_000_000)))
+        #expect(settings.lactateThresholdSource == .labTest(measuredOn: Date(timeIntervalSince1970: 1_690_000_000)))
     }
 }

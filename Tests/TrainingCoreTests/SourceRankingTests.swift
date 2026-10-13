@@ -6,47 +6,86 @@ import Testing
 struct SourceRankingTests {
     private let id = UUID()
 
-    @Test("max heart rate sources rank formula < manual < workout < field test < lab test")
-    func maxHeartRateOrder() {
-        let ordered: [MaxHeartRateSource] = [.formula, .manual, .workout(activityID: id), .fieldTest(activityID: id), .labTest]
+    private let day = Date(timeIntervalSince1970: 1_700_000_000)
+    private let dayLength: TimeInterval = 86_400
 
-        #expect(ordered.map(\.reliabilityRank) == [0, 1, 2, 3, 4])
+    @Test("max heart rate sources rank formula < manual < workout < field test < a fresh lab test")
+    func maxHeartRateOrder() {
+        let ordered: [MaxHeartRateSource] = [
+            .formula, .manual, .workout(activityID: id), .fieldTest(activityID: id), .labTest(measuredOn: day)
+        ]
+
+        #expect(ordered.map { $0.reliabilityRank(asOf: day) } == [0, 1, 2, 3, 4])
     }
 
-    @Test("lactate threshold sources rank manual < field test < lab test")
+    @Test("lactate threshold sources rank manual < field test < a fresh lab test")
     func lactateThresholdOrder() {
-        let ordered: [LactateThresholdSource] = [.manual, .fieldTest(activityID: id), .labTest]
+        let ordered: [LactateThresholdSource] = [.manual, .fieldTest(activityID: id), .labTest(measuredOn: day)]
 
-        #expect(ordered.map(\.reliabilityRank) == [0, 1, 2])
+        #expect(ordered.map { $0.reliabilityRank(asOf: day) } == [0, 1, 2])
+    }
+
+    @Test("a max heart rate lab test keeps its rank for two years, then ranks with a workout, above a formula")
+    func maxHeartRateLabTestAges() {
+        let lab = MaxHeartRateSource.labTest(measuredOn: day)
+        let twoYears = MaxHeartRateSource.labTestFreshness
+
+        #expect(lab.reliabilityRank(asOf: day.addingTimeInterval(twoYears)) == 4)
+        #expect(lab.reliabilityRank(asOf: day.addingTimeInterval(twoYears + dayLength)) == 2)
+        #expect(MaxHeartRateSource.labTestFreshness == 2 * 365 * dayLength)
+        // A lab test dated after "today" isn't aged.
+        #expect(lab.reliabilityRank(asOf: day.addingTimeInterval(-dayLength)) == 4)
+    }
+
+    @Test("a lactate threshold lab test is worth less than a new field test after about three months")
+    func lactateThresholdLabTestAges() {
+        let lab = LactateThresholdSource.labTest(measuredOn: day)
+        let fieldTest = LactateThresholdSource.fieldTest(activityID: id)
+        let fresh = day.addingTimeInterval(60 * dayLength)
+        let stale = day.addingTimeInterval(120 * dayLength)
+
+        #expect(!lab.isReplaceable(by: fieldTest, asOf: fresh))
+        #expect(lab.isReplaceable(by: fieldTest, asOf: stale))
+        // An old lab figure is still no better than a typed-in one, but not worse.
+        #expect(lab.isReplaceable(by: .manual, asOf: stale))
+        #expect(!lab.isReplaceable(by: .manual, asOf: fresh))
+    }
+
+    @Test("an old lab-tested max is replaceable by a field test but never by a formula")
+    func oldLabTestVersusFormula() {
+        let lab = MaxHeartRateSource.labTest(measuredOn: day)
+        let later = day.addingTimeInterval(3 * 365 * dayLength)
+
+        #expect(lab.isReplaceable(by: .fieldTest(activityID: id), asOf: later))
+        #expect(!lab.isReplaceable(by: .formula, asOf: later))
+        #expect(!lab.isReplaceable(by: .manual, asOf: later))
     }
 
     @Test("a source may be replaced by one at least as reliable, never by a less reliable one")
     func replaceability() {
-        #expect(MaxHeartRateSource.formula.isReplaceable(by: .formula))
-        #expect(MaxHeartRateSource.formula.isReplaceable(by: .labTest))
-        #expect(!MaxHeartRateSource.manual.isReplaceable(by: .formula))
-        #expect(!MaxHeartRateSource.workout(activityID: id).isReplaceable(by: .formula))
-        #expect(MaxHeartRateSource.fieldTest(activityID: id).isReplaceable(by: .fieldTest(activityID: UUID())))
-        #expect(!MaxHeartRateSource.labTest.isReplaceable(by: .fieldTest(activityID: id)))
-        #expect(!MaxHeartRateSource.labTest.isReplaceable(by: .manual))
-
-        #expect(LactateThresholdSource.manual.isReplaceable(by: .fieldTest(activityID: id)))
-        #expect(!LactateThresholdSource.labTest.isReplaceable(by: .fieldTest(activityID: id)))
-        #expect(!LactateThresholdSource.fieldTest(activityID: id).isReplaceable(by: .manual))
+        #expect(MaxHeartRateSource.formula.isReplaceable(by: .formula, asOf: day))
+        #expect(MaxHeartRateSource.formula.isReplaceable(by: .labTest(measuredOn: day), asOf: day))
+        #expect(!MaxHeartRateSource.manual.isReplaceable(by: .formula, asOf: day))
+        #expect(!MaxHeartRateSource.workout(activityID: id).isReplaceable(by: .formula, asOf: day))
+        #expect(MaxHeartRateSource.fieldTest(activityID: id).isReplaceable(by: .fieldTest(activityID: UUID()), asOf: day))
+        #expect(!MaxHeartRateSource.labTest(measuredOn: day).isReplaceable(by: .fieldTest(activityID: id), asOf: day))
+        #expect(!MaxHeartRateSource.labTest(measuredOn: day).isReplaceable(by: .manual, asOf: day))
+        #expect(!LactateThresholdSource.fieldTest(activityID: id).isReplaceable(by: .manual, asOf: day))
     }
 
     @Test("the lab-test sources round-trip through the settings' encoding")
     func labTestCodable() throws {
         let settings = HeartRateZoneSettings(
             effectiveDate: Date(timeIntervalSince1970: 1_700_000_000), restingHeartRateBPM: 50, maxHeartRateBPM: 185,
-            maxHeartRateSource: .labTest, lactateThresholdHeartRateBPM: 168, lactateThresholdSource: .labTest
+            maxHeartRateSource: .labTest(measuredOn: day), lactateThresholdHeartRateBPM: 168,
+            lactateThresholdSource: .labTest(measuredOn: day)
         )
 
         let decoded = try JSONDecoder().decode(HeartRateZoneSettings.self, from: JSONEncoder().encode(settings))
 
         #expect(decoded == settings)
-        #expect(decoded.maxHeartRateSource == .labTest)
-        #expect(decoded.lactateThresholdSource == .labTest)
+        #expect(decoded.maxHeartRateSource == .labTest(measuredOn: day))
+        #expect(decoded.lactateThresholdSource == .labTest(measuredOn: day))
     }
 
     @Test("a field test result flags that it would replace a lab-tested value")
@@ -67,11 +106,17 @@ struct SourceRankingTests {
             )
         }
 
-        let overLab = try FieldTestMeasurer().measure(activity, workout: workout, settings: settings(.labTest))
+        let overLab = try FieldTestMeasurer().measure(
+            activity, workout: workout, settings: settings(.labTest(measuredOn: start.addingTimeInterval(-30 * dayLength)))
+        )
+        let overOldLab = try FieldTestMeasurer().measure(
+            activity, workout: workout, settings: settings(.labTest(measuredOn: start.addingTimeInterval(-800 * dayLength)))
+        )
         let overFormula = try FieldTestMeasurer().measure(activity, workout: workout, settings: settings(.formula))
         let overWorkout = try FieldTestMeasurer().measure(activity, workout: workout, settings: settings(.workout(activityID: UUID())))
 
         #expect(overLab?.replacesMoreReliableSource == true)
+        #expect(overOldLab?.replacesMoreReliableSource == false)
         #expect(overFormula?.replacesMoreReliableSource == false)
         #expect(overWorkout?.replacesMoreReliableSource == false)
     }

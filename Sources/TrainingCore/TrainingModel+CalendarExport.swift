@@ -59,6 +59,7 @@ extension TrainingModel {
         let fetchedPlans = try await stores.planStore.plans(in: fetchRange)
         let fetchedWorkouts = try await stores.workoutStore.workouts()
 
+        let estimator = await refinedEstimator()
         let metrics = await Self.buildMetricsWithoutCache(
             activities: fetchedActivities,
             plans: fetchedPlans,
@@ -75,7 +76,8 @@ extension TrainingModel {
         // their heart-rate samples: a season can take a few hundred milliseconds on a phone. It and
         // its inputs are Sendable, so it runs off the main actor rather than freezing the UI.
         let period = periodStart...periodEnd
-        let builder = CalendarExportBuilder(intensityParameters: intensityParameters, paceHistory: paceHistory)
+        let builder = CalendarExportBuilder(
+            statisticsCalculator: StatisticsCalculator(estimator: estimator), intensityParameters: intensityParameters, paceHistory: paceHistory)
         let periodActivities = fetchedActivities.filter { period.contains($0.start) }
         let periodPlans = fetchedPlans.filter { period.contains($0.date) }
         let periodMetrics = metrics.filter { period.contains($0.day) }

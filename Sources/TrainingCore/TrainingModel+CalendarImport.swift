@@ -78,7 +78,7 @@ extension TrainingModel {
             }
         }
         let customTemplates = try await stores.templateStore?.templates() ?? []
-        return CalendarImportPlanner(estimator: estimator).plan(
+        return CalendarImportPlanner(estimator: await refinedEstimator()).plan(
             for: export, existingPlans: existingPlans, existingWorkouts: existingWorkouts,
             existingTemplates: BuiltInWorkoutTemplates.all + customTemplates,
             canAddTemplates: stores.templateStore != nil,

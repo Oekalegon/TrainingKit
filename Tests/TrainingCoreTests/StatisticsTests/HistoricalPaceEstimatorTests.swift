@@ -252,7 +252,7 @@ struct HistoricalPaceEstimatorTests {
         var activities: [Activity] = []
         var plans: [PlannedActivity] = []
         var workouts: [StructuredWorkout] = []
-        // The fixed steps take 1320 s, so the open step took 900 s and 1100 s.
+        // The fixed steps take 1320 s, so the open step took 900 s and 1100 s (the newer run counts a little more).
         for (index, total) in [2220.0, 2420.0].enumerated() {
             let workout = hillSprints(templateID: templateID)
             let plan = PlannedActivity(workoutID: workout.id, date: day(3 + index))
@@ -269,7 +269,8 @@ struct HistoricalPaceEstimatorTests {
             for: hillSprints(templateID: templateID), athlete: athlete, history: .empty, before: day(10)
         )
 
-        #expect(abs(withHistory.duration - (1320 + 1000)) < 1)
+        // Weighted by recency, the newer 1100 s run decides when only two runs disagree.
+        #expect(abs(withHistory.duration - (1320 + 1100)) < 1)
         #expect(withoutHistory.duration == 1320 + 600)
     }
 
@@ -409,6 +410,48 @@ struct HistoricalPaceEstimatorTests {
         #expect(soon.distanceMeters == later.distanceMeters)
     }
 
+    @Test("a recent run of an open step counts more than older ones, and the same day's runs share equally")
+    func openStepIsRecencyWeighted() {
+        let templateID = UUID()
+        // Open step durations, oldest to newest: three 900 s runs long ago, then 1200 s twice recently.
+        let runs: [(day: Int, open: Double)] = [(3, 900), (4, 900), (5, 900), (200, 1200), (201, 1200)]
+        var activities: [Activity] = []
+        var plans: [PlannedActivity] = []
+        var workouts: [StructuredWorkout] = []
+        for run in runs {
+            let workout = hillSprints(templateID: templateID)
+            let plan = PlannedActivity(workoutID: workout.id, date: day(run.day))
+            workouts.append(workout)
+            plans.append(plan)
+            activities.append(activity(start: day(run.day), linkedPlanID: plan.id, phases: [(1320 + run.open, 3.0, 141)]))
+        }
+
+        let projection = forecast(
+            for: hillSprints(templateID: templateID), athlete: athlete,
+            history: history(activities, plans: plans, workouts: workouts), before: day(210)
+        )
+
+        // An unweighted median would be 900 s; the old runs have faded to almost nothing.
+        #expect(abs(projection.duration - (1320 + 1200)) < 1)
+    }
+
+    @Test("a cut-short run of the same workout doesn't set an open step's duration")
+    func cutShortRunIsSkipped() {
+        let workout = hillSprints(templateID: UUID())
+        let plans = [PlannedActivity(workoutID: workout.id, date: day(3)), PlannedActivity(workoutID: workout.id, date: day(4))]
+        // The fixed steps take 1320 s: a full run with a 900 s open step, then one stopped early at 400 s.
+        let activities = [
+            activity(start: day(3), linkedPlanID: plans[0].id, phases: [(2220, 3.0, 141)]),
+            activity(start: day(4), linkedPlanID: plans[1].id, phases: [(1400, 3.0, 141)])
+        ]
+
+        let projection = forecast(
+            for: workout, athlete: athlete, history: history(activities, plans: plans, workouts: [workout]), before: day(10)
+        )
+
+        #expect(abs(projection.duration - (1320 + 900)) < 1)
+    }
+
     @Test("earlier runs that only give an open step's duration count towards the forecast's activities")
     func openStepEvidenceIsCounted() {
         let templateID = UUID()
@@ -508,13 +551,6 @@ struct HistoricalPaceEstimatorTests {
         let reached = try #require(track.time(reaching: 150))
         #expect(abs(reached.timeIntervalSince(start) - 50) < 1e-9)
         #expect(track.time(reaching: 301) == nil)
-    }
-
-    @Test("the median of an even count averages the middle two")
-    func median() {
-        #expect(HistoricalPaceEstimator.median([3, 1, 2]) == 2)
-        #expect(HistoricalPaceEstimator.median([900, 1100]) == 1000)
-        #expect(HistoricalPaceEstimator.median([]) == nil)
     }
 }
 

@@ -19,10 +19,14 @@ import Foundation
 ///    run at, favouring steps of similar length (a 400 m rep is run faster than a 2 km one), pulled
 ///    towards the zone's pace the same way. This keeps a zone-2 recovery jog between intervals, run
 ///    while the heart rate is still coming down, from being forecast at steady zone-2 pace.
-/// 4. **Open steps.** An `.open` step (the run to the hill in hill sprints) takes the median time
-///    the same step took in earlier runs of the same workout or, failing that, of workouts made
-///    from the same template (whose blocks and steps sit in the same places whatever their
-///    parameter values).
+/// 4. **Open steps.** An `.open` step (the run to the hill in hill sprints) takes the
+///    **recency-weighted median** time the same step took in earlier runs of the same workout or,
+///    failing that, of workouts made from the same template (whose blocks and steps sit in the same
+///    places whatever their parameter values). The weights are the ones
+///    ``LinkedActivityRefinedEstimator`` uses for a workout's TRIMP: a run's weight halves for every
+///    ``recencyHalfLifeDays`` it is older than the newest run, so a recent run counts more than an old one.
+///    A run of the same workout whose length is far from the workout's (a session cut short) is
+///    skipped (``openStepDurationTolerance``).
 ///
 /// A `.time` step's distance and a `.distance` step's time then follow from its pace. Without any
 /// match or open-step evidence there's nothing to forecast from, and the projector keeps the pace
@@ -35,6 +39,11 @@ struct HistoricalPaceEstimator: Sendable {
     var priorSeconds: Double = 300
     /// After this many days an activity counts half as much as the newest one used.
     var recencyHalfLifeDays: Double = 60
+    /// How far a run of the same workout may differ in length from the workout's estimated duration
+    /// (the run's duration as a fraction of it) and still inform an `.open` step's duration. A session
+    /// stopped early says little about how long the open step takes. Runs of another workout from the
+    /// same template can't be compared this way, since their own workout isn't known here.
+    var openStepDurationTolerance: ClosedRange<Double> = 0.75...1.33
     /// How many similar activities are used.
     var maximumMatches = 12
     /// The least share of time-in-zone an activity must have in common with the planned workout.
@@ -113,7 +122,7 @@ struct HistoricalPaceEstimator: Sendable {
         // further ahead a workout is planned the more its forecast would fall back to the pace model.
         guard let newest = candidates.map(\.start).max() else { return nil }
         let matches = self.matches(for: workout, planned: planned, among: candidates, asOf: newest)
-        let open = self.openStepDurations(for: workout, among: candidates)
+        let open = self.openStepDurations(for: workout, athlete: athlete, among: candidates)
         guard !matches.isEmpty || !open.durations.isEmpty else { return nil }
         let contributors = Set(matches.map(\.observation.activityID)).union(open.activityIDs)
 
@@ -250,36 +259,43 @@ struct HistoricalPaceEstimator: Sendable {
         return speed > 0 ? speed : target
     }
 
-    /// The median observed duration of each `.open` step of `workout`, from earlier runs of the same
-    /// workout or, failing that, of workouts made from the same template, and the activities those
-    /// durations came from. A duration is elapsed time, stops included: it's how long the step took.
+    /// The recency-weighted median observed duration of each `.open` step of `workout`, from earlier
+    /// runs of the same workout or, failing that, of workouts made from the same template, and the
+    /// activities those durations came from. A duration is elapsed time, stops included: it's how long
+    /// the step took.
+    ///
+    /// Ages count from the newest run used, like the pace evidence's, so a workout planned weeks ahead
+    /// doesn't weaken all the evidence alike.
     private func openStepDurations(
-        for workout: StructuredWorkout, among candidates: [PaceHistory.Observation]
+        for workout: StructuredWorkout, athlete: AthleteProfile, among candidates: [PaceHistory.Observation]
     ) -> (durations: [PaceHistory.StepPosition: Double], activityIDs: Set<UUID>) {
         guard workout.blocks.contains(where: { block in block.steps.contains { $0.goal == .open } }) else { return ([:], []) }
-        let sameWorkout = candidates.filter { $0.workoutID == workout.id }
+        var sameWorkout = candidates.filter { $0.workoutID == workout.id }
         let sameTemplate = workout.templateID.map { templateID in
             candidates.filter { $0.templateID == templateID }
         } ?? []
-        let source = sameWorkout.contains { $0.steps.contains(where: \.isOpen) } ? sameWorkout : sameTemplate
+        let isSameWorkout = sameWorkout.contains { $0.steps.contains(where: \.isOpen) }
+        var source = isSameWorkout ? sameWorkout : sameTemplate
+        if isSameWorkout {
+            let planned = durationEstimator.duration(for: workout, athlete: athlete)
+            if planned > 0 {
+                sameWorkout.removeAll { !openStepDurationTolerance.contains($0.duration / planned) }
+                source = sameWorkout
+            }
+        }
+        guard let newest = source.map(\.start).max() else { return ([:], []) }
 
-        var observed: [PaceHistory.StepPosition: [Double]] = [:]
+        var observed: [PaceHistory.StepPosition: [(value: Double, weight: Double)]] = [:]
         var activityIDs: Set<UUID> = []
         for observation in source {
+            let ageDays = newest.timeIntervalSince(observation.start) / 86_400
+            let weight = recencyHalfLifeDays > 0 ? pow(0.5, ageDays / recencyHalfLifeDays) : (ageDays == 0 ? 1 : 0)
             for step in observation.steps where step.isOpen {
-                observed[step.position, default: []].append(step.elapsedSeconds)
+                observed[step.position, default: []].append((step.elapsedSeconds, weight))
                 activityIDs.insert(observation.activityID)
             }
         }
-        return (observed.compactMapValues(Self.median), activityIDs)
-    }
-
-    /// The median of `values`, averaging the middle two of an even count; `nil` when empty.
-    static func median(_ values: [Double]) -> Double? {
-        guard !values.isEmpty else { return nil }
-        let sorted = values.sorted()
-        let middle = sorted.count / 2
-        return sorted.count.isMultiple(of: 2) ? (sorted[middle - 1] + sorted[middle]) / 2 : sorted[middle]
+        return (observed.compactMapValues(LinkedActivityRefinedEstimator.weightedMedian), activityIDs)
     }
 
     /// The weighted least-squares non-decreasing fit to `values` (pool adjacent violators): wherever

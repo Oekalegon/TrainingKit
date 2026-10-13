@@ -19,6 +19,46 @@ private final class FlakyPlanStore: PlanStore, @unchecked Sendable {
     func deletePlan(id: UUID) async throws { try await base.deletePlan(id: id) }
 }
 
+/// Lets a test hold a read open until it says so.
+private actor Gate {
+    private var waiter: CheckedContinuation<Void, Never>?
+    private var isOpen = false
+    private(set) var arrivals = 0
+
+    func wait() async {
+        arrivals += 1
+        if isOpen { return }
+        await withCheckedContinuation { waiter = $0 }
+    }
+
+    func open() {
+        isOpen = true
+        waiter?.resume()
+        waiter = nil
+    }
+}
+
+/// A ``PlanStore`` that reads the plans and then holds the answer until a ``Gate`` opens, so a test can change
+/// the stores after a read started and before it finished.
+private final class GatedPlanStore: PlanStore, @unchecked Sendable {
+    let base: InMemoryStore
+    let gate: Gate
+
+    init(base: InMemoryStore, gate: Gate) {
+        self.base = base
+        self.gate = gate
+    }
+
+    func plans(in range: ClosedRange<Date>) async throws -> [PlannedActivity] {
+        let plans = try await base.plans(in: range)
+        await gate.wait()
+        return plans
+    }
+    func upsert(_ plans: [PlannedActivity]) async throws { try await base.upsert(plans) }
+    func plan(id: UUID) async throws -> PlannedActivity? { try await base.plan(id: id) }
+    func deletePlan(id: UUID) async throws { try await base.deletePlan(id: id) }
+}
+
 /// The refined planned-load estimator is built once and kept until something changes (MVP2-160).
 @MainActor
 @Suite("TrainingModel refined estimator cache", .serialized)
@@ -145,5 +185,45 @@ struct RefinedEstimatorCacheTests {
         _ = try await model.loadRefinedEstimator()
 
         #expect(model.refinedEstimatorBuildCount == afterRecovery)
+    }
+
+    @Test("a build that was running when something changed isn't kept")
+    func inFlightBuildIsNotKept() async throws {
+        let store = InMemoryStore()
+        let gate = Gate()
+        let stores = StoreSet(
+            activityStore: store, planStore: GatedPlanStore(base: store, gate: gate), workoutStore: store,
+            cycleStore: store, raceStore: store, athleteStore: store
+        )
+        let model = TrainingModel(stores: stores, athlete: AthleteProfile.fixture())
+        let done = workout(minutes: 30)
+        var plan = PlannedActivity(workoutID: done.id, date: day(0))
+        try await store.upsert([done])
+        try await store.upsert([plan])
+        model.invalidateRefinedEstimator()
+        let before = model.refinedEstimatorBuildCount
+
+        // A build reads the plans (none completed yet) and is held at the gate.
+        let stale = Task { try await model.loadRefinedEstimator() }
+        while await gate.arrivals == 0 { await Task.yield() }
+
+        // The plan is completed, as an import would, and the model is told.
+        var activity = Activity(source: .healthKit(UUID()), sport: .running, start: day(0), duration: 1800, importedLoad: 50)
+        activity.linkedPlanID = plan.id
+        plan.completedActivityID = activity.id
+        try await store.upsert([activity])
+        try await store.upsert([plan])
+        model.invalidateRefinedEstimator()
+        await gate.open()
+
+        // The held build finishes for whoever waited on it, with what it read.
+        #expect(try await stale.value is TRIMPPlanEstimator)
+        // But it wasn't kept: the next call builds again, and sees the completed plan.
+        let fresh = try await model.loadRefinedEstimator()
+        #expect(fresh is LinkedActivityRefinedEstimator)
+        #expect(model.refinedEstimatorBuildCount == before + 2)
+        // And that one is kept.
+        _ = try await model.loadRefinedEstimator()
+        #expect(model.refinedEstimatorBuildCount == before + 2)
     }
 }

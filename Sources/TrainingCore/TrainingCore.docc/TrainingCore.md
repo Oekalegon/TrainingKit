@@ -27,6 +27,10 @@ See `docs/design/trainingKit-design.md` in the package repository for the full m
 - ``MaxHeartRateSource``
 - ``PeakHeartRateDetector``
 - ``MaxHeartRateSuggestion``
+- ``LactateThresholdSource``
+- ``FieldTestMeasurer``
+- ``FieldTestResult``
+- ``FieldTestError``
 - ``TanakaHRMaxEstimator``
 
 ### Activity

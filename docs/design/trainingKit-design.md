@@ -112,7 +112,8 @@ time zone or week start rebuilds the whole fitness-metrics cache (`TrainingModel
 Each `HeartRateZoneSettings` entry records where its max heart rate came from in
 `maxHeartRateSource`:
 - `.formula`: estimated from age (Tanaka); the default, and what older saved settings decode to;
-- `.workout(activityID:)`: reached in an ordinary workout.
+- `.workout(activityID:)`: reached in an ordinary workout;
+- `.fieldTest(activityID:)`: measured by the max HR field test (MVP2-154, below);
 - `.manual`: entered by the athlete (MVP2-132); nothing replaces it automatically.
 
 Max heart rate drives the Karvonen zones and the heart-rate-reserve ratio TRIMP is built on. An age
@@ -152,7 +153,38 @@ Raising is **raise-only** and **date-effective**:
   are raised too, so a later resting-HR update can't bring the old max back.
 
 A host app that merges in fresh formula estimates (TrainingApp's HealthKit merge) must not overwrite
-a `.workout` max with a lower estimate.
+a `.workout` or `.fieldTest` max with a lower estimate.
+
+#### Field tests (MVP2-154)
+
+A workout whose `purpose` is `.maxHRTest` or `.lthrTest` (MVP2-153) is a field test. When its activity
+is linked to the plan, `TrainingModel.fieldTestResult(forActivity:)` measures it (`FieldTestMeasurer`):
+- **Max HR test:** the highest heart rate *held* anywhere in the activity, by the same
+  `PeakHeartRateDetector` as above, rounded to a whole bpm.
+- **LTHR test (Friel):** the average heart rate over the last 20 minutes of the 30-minute effort; the
+  first 10 are left out because the heart rate is still rising. The effort is the workout's longest
+  timed step. Its window comes from the steps the Watch recorded (`ActivityStepAligner`); an
+  activity not started from the scheduled workout falls back to the plan's own timing when its length is
+  within 10% of the plan's total, and the result says so (`isEstimatedFromPlan`). The average is
+  weighted by time, not by sample, and an interval longer than 15 s or with a value above 230 bpm
+  counts as uncovered. A recorded effort under 90% of the planned length, or heart rate covering
+  under 80% of the 20 minutes, is refused with a `FieldTestError` rather than guessed. A result at
+  or below resting heart rate is refused too.
+
+Like the max HR suggestion, the result is offered and applied only when the athlete confirms
+(`applyFieldTestResult(_:asOf:)`, through `updateAthlete`). Unlike it, a test result may **lower** the
+max, because a test is a deliberate attempt at the maximum; an ordinary workout still only raises it.
+It is date-effective from the test activity's start
+(`AthleteProfile.settingMaxHeartRate(to:from:source:)`,
+`settingLactateThresholdHeartRate(to:from:source:)`). The settings in effect on that date are the
+baseline; later entries that still carry the baseline's value and source (a resting-HR update copies
+them) follow, and a later entry with a different value or source is a later measurement and is kept.
+`HeartRateZoneSettings.lactateThresholdSource` (`.manual`, the default and what older data decodes
+to, or `.fieldTest(activityID:)`) records how the LTHR was obtained.
+
+An activity can show up in both flows: its peak may beat the max, so `maxHeartRateSuggestion` would also
+offer it as a raise. A host app should ask `fieldTestResult` first and not offer the raise for an
+activity that is a test.
 
 #### Updating the athlete (MVP2-101)
 

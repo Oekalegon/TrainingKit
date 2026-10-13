@@ -17,7 +17,14 @@ public enum MaxHeartRateSource: Sendable, Codable, Hashable {
     ///
     /// - Parameter activityID: The ``Activity`` the peak was measured in.
     case workout(activityID: UUID)
-    /// Entered by the athlete (MVP2-132), e.g. from a field test. Taken as given: nothing replaces
+    /// Measured by the max heart rate field test (``WorkoutPurpose/maxHRTest``, MVP2-154): the highest
+    /// heart rate held for a few seconds in a test activity linked to its plan. Unlike
+    /// ``workout(activityID:)`` it may be lower than the value it replaces, since a test is a
+    /// deliberate attempt at the maximum.
+    ///
+    /// - Parameter activityID: The ``Activity`` the test was recorded in.
+    case fieldTest(activityID: UUID)
+    /// Entered by the athlete (MVP2-132), e.g. from a lab test. Taken as given: nothing replaces
     /// it automatically, and it isn't compared with the age formula or a workout's peak.
     case manual
 }

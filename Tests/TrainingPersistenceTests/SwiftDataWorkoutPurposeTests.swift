@@ -19,3 +19,26 @@ struct SwiftDataWorkoutPurposeTests {
         #expect(try await store.workout(id: workout.id)?.purpose == .maxHRTest)
     }
 }
+
+@Suite("Field-test sources + SwiftData")
+struct SwiftDataFieldTestSourceTests {
+    @Test("an athlete profile keeps the field-test sources of its heart-rate settings (MVP2-154)")
+    func sourcesSurviveProfileRecord() async throws {
+        let container = try TrainingPersistenceContainer.make(cloudKitDatabase: .none, isStoredInMemoryOnly: true)
+        let store = SwiftDataStore(modelContainer: container)
+        let id = UUID()
+        var profile = AthleteProfile.fixture()
+        profile = profile.settingMaxHeartRate(to: 171, from: Date(timeIntervalSince1970: 1_700_000_000), source: .fieldTest(activityID: id))
+        profile = profile.settingLactateThresholdHeartRate(
+            to: 162, from: Date(timeIntervalSince1970: 1_700_000_000), source: .fieldTest(activityID: id)
+        )
+
+        try await store.save(profile)
+
+        let loaded = try #require(try await store.athleteProfile())
+        let settings = try #require(loaded.currentHeartRateZoneSettings)
+        #expect(settings.maxHeartRateSource == .fieldTest(activityID: id))
+        #expect(settings.lactateThresholdSource == .fieldTest(activityID: id))
+        #expect(settings.maxHeartRateBPM == 171)
+    }
+}

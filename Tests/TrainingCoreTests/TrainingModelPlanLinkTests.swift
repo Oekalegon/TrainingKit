@@ -29,6 +29,38 @@ struct TrainingModelPlanLinkTests {
         StructuredWorkout(name: "W", sport: .running, blocks: [WorkoutBlock(steps: [WorkoutStep(kind: .work, goal: .time(minutes * 60))])])
     }
 
+    @Test("a completed plan refines the estimate of a later workout from the same template")
+    func refinedEstimatorUsesCompletedPlans() async throws {
+        let (store, model) = makeModel()
+        let templateID = UUID()
+        func made(minutes: Double) -> StructuredWorkout {
+            StructuredWorkout(
+                name: "W", sport: .running,
+                blocks: [WorkoutBlock(steps: [WorkoutStep(kind: .work, goal: .time(minutes * 60), target: .heartRateZone(2))])],
+                templateID: templateID
+            )
+        }
+        let done = made(minutes: 30)
+        let later = made(minutes: 60)
+        try await model.add(done, asOf: day(0))
+        try await model.add(later, asOf: day(0))
+        let plan = PlannedActivity(workoutID: done.id, date: day(0))
+        try await model.add(plan, asOf: day(0))
+        try await model.load(in: day(0)...day(1), asOf: day(0))
+        let before = await model.refinedEstimator().estimatedLoad(for: later, athlete: model.athlete)
+
+        let activity = Activity(source: .healthKit(UUID()), sport: .running, start: day(0), duration: 1800, importedLoad: 50)
+        try await model.importActivities(from: StubImporter(activities: [activity]), asOf: day(0))
+        #expect(try await store.plan(id: plan.id)?.completedActivityID == activity.id)
+
+        let refined = await model.refinedEstimator().estimatedLoad(for: later, athlete: model.athlete)
+        let base = TRIMPPlanEstimator()
+        let expected = 50 * base.estimatedLoad(for: later, athlete: model.athlete).value
+            / base.estimatedLoad(for: done, athlete: model.athlete).value
+        #expect(before == base.estimatedLoad(for: later, athlete: model.athlete))
+        #expect(abs(refined.value - expected) < 1e-9)
+    }
+
     @Test("import links a newly imported activity to its plan")
     func importLinks() async throws {
         let (store, model) = makeModel()

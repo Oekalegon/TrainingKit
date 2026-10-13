@@ -25,8 +25,8 @@ import Foundation
 ///    places whatever their parameter values). The weights are the ones
 ///    ``LinkedActivityRefinedEstimator`` uses for a workout's TRIMP: a run's weight halves for every
 ///    ``recencyHalfLifeDays`` it is older than the newest run, so a recent run counts more than an old one.
-///    A run of the same workout whose length is far from the workout's (a session cut short) is
-///    skipped (``openStepDurationTolerance``).
+///    A run of the same workout that stopped well short of the workout's fixed steps (a session cut
+///    short) is skipped (``openStepMinimumCompletion``).
 ///
 /// A `.time` step's distance and a `.distance` step's time then follow from its pace. Without any
 /// match or open-step evidence there's nothing to forecast from, and the projector keeps the pace
@@ -39,11 +39,12 @@ struct HistoricalPaceEstimator: Sendable {
     var priorSeconds: Double = 300
     /// After this many days an activity counts half as much as the newest one used.
     var recencyHalfLifeDays: Double = 60
-    /// How far a run of the same workout may differ in length from the workout's estimated duration
-    /// (the run's duration as a fraction of it) and still inform an `.open` step's duration. A session
-    /// stopped early says little about how long the open step takes. Runs of another workout from the
+    /// How much of a workout's fixed steps (everything but its `.open` steps) a run of the same workout
+    /// must have lasted to inform an `.open` step's duration, as a fraction of their duration. A
+    /// session stopped early says little about how long the open step takes. There's no upper bound: a
+    /// long open step makes a long run, and is the evidence wanted. Runs of another workout from the
     /// same template can't be compared this way, since their own workout isn't known here.
-    var openStepDurationTolerance: ClosedRange<Double> = 0.75...1.33
+    var openStepMinimumCompletion = 0.75
     /// How many similar activities are used.
     var maximumMatches = 12
     /// The least share of time-in-zone an activity must have in common with the planned workout.
@@ -270,19 +271,19 @@ struct HistoricalPaceEstimator: Sendable {
         for workout: StructuredWorkout, athlete: AthleteProfile, among candidates: [PaceHistory.Observation]
     ) -> (durations: [PaceHistory.StepPosition: Double], activityIDs: Set<UUID>) {
         guard workout.blocks.contains(where: { block in block.steps.contains { $0.goal == .open } }) else { return ([:], []) }
-        var sameWorkout = candidates.filter { $0.workoutID == workout.id }
+        let fixedSeconds = fixedDuration(of: workout, athlete: athlete)
+        // A run of the same workout that stopped well short of its fixed steps can't say how long the
+        // open step takes. Judged without the open step, whose length is what's being learned: a run
+        // with a long open step is exactly the evidence wanted. Filtering comes before choosing the
+        // source, so when no run of the workout is usable the template's runs still are.
+        let sameWorkout = candidates.filter {
+            $0.workoutID == workout.id
+                && (fixedSeconds <= 0 || $0.duration >= fixedSeconds * openStepMinimumCompletion)
+        }
         let sameTemplate = workout.templateID.map { templateID in
             candidates.filter { $0.templateID == templateID }
         } ?? []
-        let isSameWorkout = sameWorkout.contains { $0.steps.contains(where: \.isOpen) }
-        var source = isSameWorkout ? sameWorkout : sameTemplate
-        if isSameWorkout {
-            let planned = durationEstimator.duration(for: workout, athlete: athlete)
-            if planned > 0 {
-                sameWorkout.removeAll { !openStepDurationTolerance.contains($0.duration / planned) }
-                source = sameWorkout
-            }
-        }
+        let source = sameWorkout.contains { $0.steps.contains(where: \.isOpen) } ? sameWorkout : sameTemplate
         guard let newest = source.map(\.start).max() else { return ([:], []) }
 
         var observed: [PaceHistory.StepPosition: [(value: Double, weight: Double)]] = [:]
@@ -296,6 +297,13 @@ struct HistoricalPaceEstimator: Sendable {
             }
         }
         return (observed.compactMapValues(LinkedActivityRefinedEstimator.weightedMedian), activityIDs)
+    }
+
+    /// The duration of `workout`'s steps other than `.open` ones, with repetitions expanded.
+    private func fixedDuration(of workout: StructuredWorkout, athlete: AthleteProfile) -> TimeInterval {
+        let openSteps = PaceHistory.expandedSteps(of: workout).filter { $0.step.goal == .open }.count
+        let total = durationEstimator.duration(for: workout, athlete: athlete)
+        return total - Double(openSteps) * durationEstimator.defaultOpenStepDuration
     }
 
     /// The weighted least-squares non-decreasing fit to `values` (pool adjacent violators): wherever

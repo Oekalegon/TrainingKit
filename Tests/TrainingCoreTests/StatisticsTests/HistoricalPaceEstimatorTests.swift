@@ -439,10 +439,10 @@ struct HistoricalPaceEstimatorTests {
     func cutShortRunIsSkipped() {
         let workout = hillSprints(templateID: UUID())
         let plans = [PlannedActivity(workoutID: workout.id, date: day(3)), PlannedActivity(workoutID: workout.id, date: day(4))]
-        // The fixed steps take 1320 s: a full run with a 900 s open step, then one stopped early at 400 s.
+        // The fixed steps take 1320 s. A full run has a 900 s open step; the newer run stopped 300 s into it.
         let activities = [
             activity(start: day(3), linkedPlanID: plans[0].id, phases: [(2220, 3.0, 141)]),
-            activity(start: day(4), linkedPlanID: plans[1].id, phases: [(1400, 3.0, 141)])
+            activity(start: day(4), linkedPlanID: plans[1].id, phases: [(900, 3.0, 141)])
         ]
 
         let projection = forecast(
@@ -450,6 +450,67 @@ struct HistoricalPaceEstimatorTests {
         )
 
         #expect(abs(projection.duration - (1320 + 900)) < 1)
+    }
+
+    @Test("a long open step on the same workout counts, however far it is from the default")
+    func longOpenStepOnTheSameWorkoutCounts() {
+        let workout = hillSprints(templateID: UUID())
+        let plan = PlannedActivity(workoutID: workout.id, date: day(3))
+        // The open step took 1500 s, far from the 600 s default the workout's estimate assumes.
+        let run = activity(start: day(3), linkedPlanID: plan.id, phases: [(1320 + 1500, 3.0, 141)])
+
+        let projection = forecast(
+            for: workout, athlete: athlete, history: history([run], plans: [plan], workouts: [workout]), before: day(10)
+        )
+
+        #expect(abs(projection.duration - (1320 + 1500)) < 1)
+    }
+
+    @Test("when every run of the workout is cut short, the template's other runs are used")
+    func templateRunsStepInWhenNoRunOfTheWorkoutIsUsable() {
+        let templateID = UUID()
+        let workout = hillSprints(templateID: templateID)
+        let other = hillSprints(templateID: templateID)
+        let plan = PlannedActivity(workoutID: workout.id, date: day(4))
+        let otherPlan = PlannedActivity(workoutID: other.id, date: day(3))
+        let activities = [
+            activity(start: day(4), linkedPlanID: plan.id, phases: [(900, 3.0, 141)]),
+            activity(start: day(3), linkedPlanID: otherPlan.id, phases: [(2220, 3.0, 141)])
+        ]
+
+        let projection = forecast(
+            for: workout, athlete: athlete,
+            history: history(activities, plans: [plan, otherPlan], workouts: [workout, other]), before: day(10)
+        )
+
+        #expect(abs(projection.duration - (1320 + 900)) < 1)
+    }
+
+    @Test("runs on the same day weigh the same, and a run exactly one half-life older weighs half")
+    func openStepWeightBoundaries() {
+        func duration(_ runs: [(day: Int, open: Double)]) -> Double {
+            let templateID = UUID()
+            var activities: [Activity] = []
+            var plans: [PlannedActivity] = []
+            var workouts: [StructuredWorkout] = []
+            for run in runs {
+                let workout = hillSprints(templateID: templateID)
+                let plan = PlannedActivity(workoutID: workout.id, date: day(run.day))
+                workouts.append(workout)
+                plans.append(plan)
+                activities.append(activity(start: day(run.day), linkedPlanID: plan.id, phases: [(1320 + run.open, 3.0, 141)]))
+            }
+            return forecast(
+                for: hillSprints(templateID: templateID), athlete: athlete,
+                history: history(activities, plans: plans, workouts: workouts), before: day(100)
+            ).duration
+        }
+
+        // Equal weights: the ordinary median of two averages them.
+        #expect(abs(duration([(10, 900), (10, 1100)]) - (1320 + 1000)) < 1)
+        // Two runs one half-life (60 days) older weigh 0.5 each, exactly half the total weight of 2:
+        // the median lands between them and the newer run.
+        #expect(abs(duration([(10, 900), (10, 900), (70, 1200)]) - (1320 + 1050)) < 1)
     }
 
     @Test("earlier runs that only give an open step's duration count towards the forecast's activities")

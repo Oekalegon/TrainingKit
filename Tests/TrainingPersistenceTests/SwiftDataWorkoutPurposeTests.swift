@@ -7,7 +7,7 @@ import TrainingCore
 struct SwiftDataWorkoutPurposeTests {
     @Test("a workout and a template keep their purpose through the records (MVP2-153)")
     func purposeSurvivesRecords() async throws {
-        let container = try TrainingPersistenceContainer.make(cloudKitDatabase: .none, isStoredInMemoryOnly: true)
+        let container = try TestContainers.make(cloudKitDatabase: .none, isStoredInMemoryOnly: true)
         let store = SwiftDataStore(modelContainer: container)
         let template = BuiltInWorkoutTemplates.maxHRTest
         let workout = try template.instantiate()
@@ -24,7 +24,7 @@ struct SwiftDataWorkoutPurposeTests {
 struct SwiftDataFieldTestSourceTests {
     @Test("an athlete profile keeps the field-test sources of its heart-rate settings (MVP2-154)")
     func sourcesSurviveProfileRecord() async throws {
-        let container = try TrainingPersistenceContainer.make(cloudKitDatabase: .none, isStoredInMemoryOnly: true)
+        let container = try TestContainers.make(cloudKitDatabase: .none, isStoredInMemoryOnly: true)
         let store = SwiftDataStore(modelContainer: container)
         let id = UUID()
         var profile = AthleteProfile.fixture()
@@ -40,5 +40,21 @@ struct SwiftDataFieldTestSourceTests {
         #expect(settings.maxHeartRateSource == .fieldTest(activityID: id))
         #expect(settings.lactateThresholdSource == .fieldTest(activityID: id))
         #expect(settings.maxHeartRateBPM == 171)
+    }
+
+    @Test("a lab-test source survives the profile record")
+    func labTestSurvivesProfileRecord() async throws {
+        let container = try TestContainers.make(cloudKitDatabase: .none, isStoredInMemoryOnly: true)
+        let store = SwiftDataStore(modelContainer: container)
+        var profile = AthleteProfile.fixture()
+        profile.heartRateZoneHistory[0].maxHeartRateSource = .labTest(measuredOn: Date(timeIntervalSince1970: 1_690_000_000))
+        profile.heartRateZoneHistory[0].lactateThresholdHeartRateBPM = 165
+        profile.heartRateZoneHistory[0].lactateThresholdSource = .labTest(measuredOn: Date(timeIntervalSince1970: 1_690_000_000))
+
+        try await store.save(profile)
+
+        let settings = try #require(try await store.athleteProfile()?.currentHeartRateZoneSettings)
+        #expect(settings.maxHeartRateSource == .labTest(measuredOn: Date(timeIntervalSince1970: 1_690_000_000)))
+        #expect(settings.lactateThresholdSource == .labTest(measuredOn: Date(timeIntervalSince1970: 1_690_000_000)))
     }
 }

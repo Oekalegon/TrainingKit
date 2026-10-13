@@ -114,7 +114,10 @@ Each `HeartRateZoneSettings` entry records where its max heart rate came from in
 - `.formula`: estimated from age (Tanaka); the default, and what older saved settings decode to;
 - `.workout(activityID:)`: reached in an ordinary workout;
 - `.fieldTest(activityID:)`: measured by the max HR field test (MVP2-154, below);
-- `.manual`: entered by the athlete (MVP2-132); nothing replaces it automatically.
+- `.labTest(measuredOn:)`: measured in a laboratory and entered by the athlete; the date is kept in the source because a later settings entry (a resting-HR update) copies the source forward and would make an old test look new;
+- `.manual`: entered by the athlete (MVP2-132) without saying how it was found; an age formula never replaces it.
+
+The sources are ranked by reliability (`reliabilityRank(asOf:)`): formula 0 < manual 1 < workout 2 < field test 3 < lab test 4 (LTHR: manual 0 < field test 1 < lab test 2). A lab test ages: after 2 years for max HR (it falls by roughly a beat a year) and 90 days for LTHR (it follows fitness) it ranks one step below a field test (max HR: with a workout, still above a formula or a typed-in figure; LTHR: with a typed-in figure). Both windows are our own choices. `isReplaceable(by:asOf:)` says whether a value from another source, dated `asOf`, may take a source's place *without the athlete deciding*, which is the guard for automatic updates: a host app's HealthKit merge must check `current.isReplaceable(by: .formula, asOf: today)` before writing an age estimate. The ranking doesn't stop a confirmed update: a workout peak above the recorded max proves the record too low whatever its source, and `FieldTestResult.replacesMoreReliableSource` (judged on the test's date) tells the app when a test would replace a fresh lab test, so it can warn or default to keeping it.
 
 Max heart rate drives the Karvonen zones and the heart-rate-reserve ratio TRIMP is built on. An age
 estimate is commonly about 10 bpm off for an individual, and the ratio isn't clamped above 1, so a
@@ -152,8 +155,11 @@ Raising is **raise-only** and **date-effective**:
   unchanged; that activity and everything after it are rescored. Later entries below the new value
   are raised too, so a later resting-HR update can't bring the old max back.
 
-A host app that merges in fresh formula estimates (TrainingApp's HealthKit merge) must not overwrite
-a `.workout` or `.fieldTest` max with a lower estimate.
+A host app that merges in fresh formula estimates (TrainingApp's HealthKit merge) must check
+`current.maxHeartRateSource.isReplaceable(by: .formula, asOf: today)` before writing one, so an age
+estimate never replaces a manual, workout, field-test or lab-test max (see the ranking above). Only a
+lab test ages today; a field test's LTHR drifts too and doesn't yet. `MaxHeartRateSuggestion.replacesMoreReliableSource`
+flags a workout peak that would replace a fresh lab-tested max, like the field test result's flag.
 
 #### Field tests (MVP2-154)
 
@@ -180,7 +186,7 @@ It is date-effective from the test activity's start
 baseline; later entries that still carry the baseline's value and source (a resting-HR update copies
 them) follow, and a later entry with a different value or source is a later measurement and is kept.
 `HeartRateZoneSettings.lactateThresholdSource` (`.manual`, the default and what older data decodes
-to, or `.fieldTest(activityID:)`) records how the LTHR was obtained.
+to, `.fieldTest(activityID:)` or `.labTest(measuredOn:)`) records how the LTHR was obtained.
 
 An activity can show up in both flows: its peak may beat the max, so `maxHeartRateSuggestion` would also
 offer it as a raise. A host app should ask `fieldTestResult` first and not offer the raise for an

@@ -16,7 +16,7 @@ struct SwiftDataTemplateImportTests {
     }
 
     private func makeSwiftDataModel() throws -> (SwiftDataStore, TrainingModel) {
-        let container = try TrainingPersistenceContainer.make(cloudKitDatabase: .none, isStoredInMemoryOnly: true)
+        let container = try TestContainers.make(cloudKitDatabase: .none, isStoredInMemoryOnly: true)
         let store = SwiftDataStore(modelContainer: container)
         let stores = StoreSet(
             activityStore: store, planStore: store, workoutStore: store, cycleStore: store,

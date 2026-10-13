@@ -51,7 +51,7 @@ struct SplitContainerTests {
 
     @Test("the synced record holds the athlete's preferences and none of the health-derived profile")
     func syncedRecordHasNoHealthFields() async throws {
-        let container = try TrainingPersistenceContainer.make(cloudKitDatabase: .none, isStoredInMemoryOnly: true)
+        let container = try TestContainers.make(cloudKitDatabase: .none, isStoredInMemoryOnly: true)
         let store = SwiftDataStore(modelContainer: container)
         var profile = AthleteProfile.fixture(name: "Alex", sex: .female)
         profile.dateOfBirth = Date(timeIntervalSince1970: 631_152_000)
@@ -70,7 +70,7 @@ struct SplitContainerTests {
 
     @Test("a preference changed in the synced record (another device's edit) shows in the profile; health fields stay local")
     func syncedPreferencesWin() async throws {
-        let container = try TrainingPersistenceContainer.make(cloudKitDatabase: .none, isStoredInMemoryOnly: true)
+        let container = try TestContainers.make(cloudKitDatabase: .none, isStoredInMemoryOnly: true)
         let store = SwiftDataStore(modelContainer: container)
         var profile = AthleteProfile.fixture(name: "Alex", sex: .female, timeZoneIdentifier: "UTC")
         profile.dateOfBirth = Date(timeIntervalSince1970: 631_152_000)
@@ -95,7 +95,7 @@ struct SplitContainerTests {
 
     @Test("saving twice keeps one preferences record")
     func oneRecord() async throws {
-        let container = try TrainingPersistenceContainer.make(cloudKitDatabase: .none, isStoredInMemoryOnly: true)
+        let container = try TestContainers.make(cloudKitDatabase: .none, isStoredInMemoryOnly: true)
         let store = SwiftDataStore(modelContainer: container)
         try await store.save(AthleteProfile.fixture(name: "A"))
         try await store.save(AthleteProfile.fixture(name: "B"))
@@ -111,7 +111,7 @@ struct SplitContainerTests {
         in directory: URL, activity: Activity, plan: PlannedActivity, profile: AthleteProfile, metrics: FitnessMetrics? = nil
     ) throws {
         let legacyTypes = TrainingPersistenceContainer.modelTypes.filter { $0 != AthletePreferencesRecord.self }
-        let container = try ModelContainer(
+        let container = try TestContainers.modelContainer(
             for: Schema(legacyTypes),
             configurations: [ModelConfiguration(
                 "default", schema: Schema(legacyTypes),
@@ -146,7 +146,7 @@ struct SplitContainerTests {
         profile.dateOfBirth = Date(timeIntervalSince1970: 631_152_000)
         try writeLegacyStore(in: directory, activity: activity, plan: plan, profile: profile)
 
-        let container = try TrainingPersistenceContainer.make(cloudKitDatabase: .none, storeDirectory: directory)
+        let container = try TestContainers.make(cloudKitDatabase: .none, storeDirectory: directory)
         let store = SwiftDataStore(modelContainer: container)
 
         #expect(try await store.activity(id: activity.id) == activity)
@@ -170,12 +170,12 @@ struct SplitContainerTests {
             profile: AthleteProfile.fixture()
         )
 
-        _ = try TrainingPersistenceContainer.make(cloudKitDatabase: .none, storeDirectory: directory)
+        _ = try TestContainers.make(cloudKitDatabase: .none, storeDirectory: directory)
 
         // The backup is a complete old store: opened as one, it still has the activity the split
         // container removed from the original file.
         let legacyTypes = TrainingPersistenceContainer.modelTypes.filter { $0 != AthletePreferencesRecord.self }
-        let backup = try ModelContainer(
+        let backup = try TestContainers.modelContainer(
             for: Schema(legacyTypes),
             configurations: [ModelConfiguration(
                 "default", schema: Schema(legacyTypes), url: LegacyStoreMigration.backupURL(in: directory),
@@ -202,7 +202,7 @@ struct SplitContainerTests {
         try LegacyStoreMigration.copyLocalDataIfNeeded(in: directory)
         do {
             let legacyTypes = TrainingPersistenceContainer.modelTypes.filter { $0 != AthletePreferencesRecord.self }
-            let old = try ModelContainer(
+            let old = try TestContainers.modelContainer(
                 for: Schema(legacyTypes),
                 configurations: [ModelConfiguration(
                     "default", schema: Schema(legacyTypes),
@@ -218,7 +218,7 @@ struct SplitContainerTests {
         }
 
         // The next launch must not copy again from the now-emptied old file over the good copy.
-        let container = try TrainingPersistenceContainer.make(cloudKitDatabase: .none, storeDirectory: directory)
+        let container = try TestContainers.make(cloudKitDatabase: .none, storeDirectory: directory)
         let store = SwiftDataStore(modelContainer: container)
 
         #expect(try await store.activity(id: activity.id) == activity)
@@ -239,7 +239,7 @@ struct SplitContainerTests {
             )
         )
 
-        let container = try TrainingPersistenceContainer.make(cloudKitDatabase: .none, storeDirectory: directory)
+        let container = try TestContainers.make(cloudKitDatabase: .none, storeDirectory: directory)
 
         #expect(try ModelContext(container).fetch(FetchDescriptor<FitnessMetricsRecord>()).isEmpty)
     }
@@ -254,10 +254,10 @@ struct SplitContainerTests {
             profile: AthleteProfile.fixture()
         )
         do {
-            _ = try TrainingPersistenceContainer.make(cloudKitDatabase: .none, storeDirectory: directory)
+            _ = try TestContainers.make(cloudKitDatabase: .none, storeDirectory: directory)
         }
 
-        let again = try TrainingPersistenceContainer.make(cloudKitDatabase: .none, storeDirectory: directory)
+        let again = try TestContainers.make(cloudKitDatabase: .none, storeDirectory: directory)
         let context = ModelContext(again)
 
         #expect(try context.fetch(FetchDescriptor<ActivityRecord>()).count == 1)
@@ -272,11 +272,11 @@ struct SplitContainerTests {
         defer { try? FileManager.default.removeItem(at: directory) }
         let activity = Activity(source: .manual, sport: .running, start: day(1), duration: 600)
         do {
-            let container = try TrainingPersistenceContainer.make(cloudKitDatabase: .none, storeDirectory: directory)
+            let container = try TestContainers.make(cloudKitDatabase: .none, storeDirectory: directory)
             try await SwiftDataStore(modelContainer: container).upsert([activity])
         }
 
-        let again = try TrainingPersistenceContainer.make(cloudKitDatabase: .none, storeDirectory: directory)
+        let again = try TestContainers.make(cloudKitDatabase: .none, storeDirectory: directory)
 
         #expect(try await SwiftDataStore(modelContainer: again).activity(id: activity.id) == activity)
     }

@@ -34,6 +34,12 @@ public struct FieldTestResult: Sendable, Hashable {
     /// whole activity. A host app may want to ask the athlete to check such a result.
     public let isEstimatedFromPlan: Bool
 
+    /// Whether the value on record comes from a more reliable source than a field test on the day of the
+    /// test (a lab test still fresh then, see ``MaxHeartRateSource/labTestFreshness``), so applying the
+    /// result would replace a better measurement with a worse one. A host app should say so
+    /// when it asks the athlete, or default to keeping the old value. See ``MaxHeartRateSource/reliabilityRank(asOf:)``.
+    public let replacesMoreReliableSource: Bool
+
     /// Whether the value differs from ``currentBPM``. A host app can use it to say "no change", but applying
     /// an equal value still records the new source (a measured max replaces a formula's), so don't skip
     /// ``TrainingModel/applyFieldTestResult(_:asOf:)`` for a result whose value matches if the athlete should
@@ -49,9 +55,11 @@ public struct FieldTestResult: Sendable, Hashable {
     ///   - valueBPM: The measured value, in beats per minute.
     ///   - currentBPM: The value in effect at `activityStart`, if any.
     ///   - isEstimatedFromPlan: Whether the effort was located from the plan; defaults to `false`.
+    ///   - replacesMoreReliableSource: Whether the value on record is from a more reliable source than
+    ///     a field test; defaults to `false`.
     public init(
         measurement: Measurement, activityID: UUID, activityStart: Date, valueBPM: Double,
-        currentBPM: Double?, isEstimatedFromPlan: Bool = false
+        currentBPM: Double?, isEstimatedFromPlan: Bool = false, replacesMoreReliableSource: Bool = false
     ) {
         self.measurement = measurement
         self.activityID = activityID
@@ -59,5 +67,6 @@ public struct FieldTestResult: Sendable, Hashable {
         self.valueBPM = valueBPM
         self.currentBPM = currentBPM
         self.isEstimatedFromPlan = isEstimatedFromPlan
+        self.replacesMoreReliableSource = replacesMoreReliableSource
     }
 }

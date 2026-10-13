@@ -30,7 +30,7 @@ struct SwiftDataMetricsCacheTests {
     }
 
     private func makeStore() throws -> SwiftDataStore {
-        let container = try TrainingPersistenceContainer.make(cloudKitDatabase: .none, isStoredInMemoryOnly: true)
+        let container = try TestContainers.make(cloudKitDatabase: .none, isStoredInMemoryOnly: true)
         return SwiftDataStore(modelContainer: container)
     }
 

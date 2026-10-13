@@ -21,7 +21,7 @@ struct WorkoutPurposeTests {
     @Test("a workout or template saved before purposes existed decodes as general")
     func legacyDecodesAsGeneral() throws {
         let workout = StructuredWorkout(name: "Old", sport: .running, blocks: [], purpose: .lthrTest)
-        let template = try BuiltInWorkoutTemplates.lthrTest
+        let template = BuiltInWorkoutTemplates.lthrTest
 
         func withoutPurpose<T: Codable>(_ value: T) throws -> Data {
             var json = try #require(try JSONSerialization.jsonObject(with: JSONEncoder().encode(value)) as? [String: Any])
@@ -49,23 +49,24 @@ struct WorkoutPurposeTests {
         #expect(BuiltInWorkoutTemplates.lthrTest.purpose == .lthrTest)
     }
 
+    private func step(_ kind: StepKind, _ seconds: TimeInterval, _ target: IntensityTarget) -> WorkoutStep {
+        WorkoutStep(kind: kind, goal: .time(seconds), target: target)
+    }
+
     @Test("the max HR test is a warmup, three 3-minute hard efforts with 1-minute recoveries, then a 3-minute all-out effort")
     func maxHRTestProtocol() throws {
         let workout = try BuiltInWorkoutTemplates.maxHRTest.instantiate()
 
-        #expect(workout.blocks == [
-            WorkoutBlock(steps: [WorkoutStep(kind: .warmup, goal: .time(600), target: .heartRateZone(1))]),
-            WorkoutBlock(steps: [WorkoutStep(kind: .work, goal: .time(300), target: .heartRateZone(2))]),
-            WorkoutBlock(
-                steps: [
-                    WorkoutStep(kind: .work, goal: .time(180), target: .rpe(9)),
-                    WorkoutStep(kind: .recovery, goal: .time(60), target: .heartRateZone(1)),
-                ],
-                repetitions: 3
-            ),
-            WorkoutBlock(steps: [WorkoutStep(kind: .work, goal: .time(180), target: .rpe(10))]),
-            WorkoutBlock(steps: [WorkoutStep(kind: .cooldown, goal: .time(300), target: .heartRateZone(1))]),
-        ])
+        let warmup = WorkoutBlock(steps: [step(.warmup, 600, .heartRateZone(1))])
+        let rampIn = WorkoutBlock(steps: [step(.work, 300, .heartRateZone(2))])
+        let efforts = WorkoutBlock(
+            steps: [step(.work, 180, .rpe(9)), step(.recovery, 60, .heartRateZone(1))], repetitions: 3
+        )
+        let allOut = WorkoutBlock(steps: [step(.work, 180, .rpe(10))])
+        let cooldown = WorkoutBlock(steps: [step(.cooldown, 300, .heartRateZone(1))])
+        let expected: [WorkoutBlock] = [warmup, rampIn, efforts, allOut, cooldown]
+
+        #expect(workout.blocks == expected)
         #expect(workout.purpose == .maxHRTest)
         #expect(try duration(BuiltInWorkoutTemplates.maxHRTest) == 600 + 300 + 3 * 240 + 180 + 300)
     }
@@ -74,14 +75,27 @@ struct WorkoutPurposeTests {
     func lthrTestProtocol() throws {
         let workout = try BuiltInWorkoutTemplates.lthrTest.instantiate()
 
-        #expect(workout.blocks == [
-            WorkoutBlock(steps: [WorkoutStep(kind: .warmup, goal: .time(600), target: .heartRateZone(1))]),
-            WorkoutBlock(steps: [WorkoutStep(kind: .work, goal: .time(300), target: .heartRateZone(2))]),
-            WorkoutBlock(steps: [WorkoutStep(kind: .work, goal: .time(30 * 60), target: .rpe(9))]),
-            WorkoutBlock(steps: [WorkoutStep(kind: .cooldown, goal: .time(300), target: .heartRateZone(1))]),
-        ])
+        let warmup = WorkoutBlock(steps: [step(.warmup, 600, .heartRateZone(1))])
+        let rampIn = WorkoutBlock(steps: [step(.work, 300, .heartRateZone(2))])
+        let effort = WorkoutBlock(steps: [step(.work, 30 * 60, .rpe(9))])
+        let cooldown = WorkoutBlock(steps: [step(.cooldown, 300, .heartRateZone(1))])
+        let expected: [WorkoutBlock] = [warmup, rampIn, effort, cooldown]
+
+        #expect(workout.blocks == expected)
         #expect(workout.purpose == .lthrTest)
         #expect(try duration(BuiltInWorkoutTemplates.lthrTest) == 600 + 300 + 30 * 60 + 300)
+    }
+
+    @Test("editing a workout's blocks, or its template's purpose later, leaves the instantiated purpose alone")
+    func purposeIsFixedAtInstantiation() throws {
+        var template = BuiltInWorkoutTemplates.maxHRTest
+        var workout = try template.instantiate()
+
+        workout.blocks = []
+        template.purpose = .general
+
+        #expect(workout.purpose == .maxHRTest)
+        #expect(try template.instantiate().purpose == .general)
     }
 
     @Test("a calendar file keeps a template's purpose, and reads an unknown one as general")

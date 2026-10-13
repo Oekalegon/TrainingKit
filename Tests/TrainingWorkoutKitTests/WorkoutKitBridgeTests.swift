@@ -240,6 +240,21 @@ struct WorkoutKitBridgeTests {
     }
 
     @available(*, deprecated)
+    @Test("the field-test templates map to one warmup, one cooldown and the efforts in between")
+    func fieldTestsMapEdgesToWarmupAndCooldown() throws {
+        for template in [BuiltInWorkoutTemplates.maxHRTest, BuiltInWorkoutTemplates.lthrTest] {
+            let custom = try bridge.customWorkout(from: template.instantiate())
+
+            #expect(custom.warmup != nil, "\(template.name)")
+            #expect(custom.cooldown != nil, "\(template.name)")
+            #expect(!custom.blocks.isEmpty, "\(template.name)")
+        }
+        // The ramp-in, three efforts and the all-out effort: 1 + 1 blocks of work around the repeated one.
+        let maxHR = try bridge.customWorkout(from: BuiltInWorkoutTemplates.maxHRTest.instantiate())
+        #expect(maxHR.blocks.count == 3)
+        #expect(maxHR.blocks[1].iterations == 3)
+    }
+
     @Test("sync(_:) mints a fresh id when the workout hasn't been synced before")
     func syncMintsFreshIDWhenUnsynced() async throws {
         let workout = StructuredWorkout(

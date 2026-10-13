@@ -1,7 +1,7 @@
 /// What a ``StructuredWorkout`` is for, beyond the training it gives (MVP2-153).
 ///
 /// Most workouts are ``general``: they're done for the training. A field test is done to measure the
-/// athlete, and the result is read from the activity linked to its plan. The purpose is carried from
+/// athlete, and the result will be read from the activity linked to its plan (MVP2-154). The purpose is carried from
 /// a ``WorkoutTemplate`` to the workouts it instantiates, and doesn't change the workout's estimated
 /// or recorded load.
 public enum WorkoutPurpose: String, Sendable, Codable, Hashable, CaseIterable {

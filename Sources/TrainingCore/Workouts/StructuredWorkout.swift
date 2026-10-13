@@ -26,8 +26,11 @@ public struct StructuredWorkout: Identifiable, Sendable, Codable, Hashable {
     public var parameterValues: [String: Double]?
     /// What the workout is for: ``WorkoutPurpose/general`` for an ordinary one, or a field test
     /// whose result is measured from the activity linked to its plan (MVP2-153). Taken from the
-    /// template when instantiated. Absent from workouts saved before this field existed, which
-    /// decode as ``WorkoutPurpose/general``.
+    /// template when instantiated and fixed from then on: a later change to the template's purpose,
+    /// or to this workout's ``blocks``, doesn't change it, and a copy of the workout keeps it. Not
+    /// kept by a calendar file entry without a template, nor by a workout recovered from WorkoutKit,
+    /// which read as ``WorkoutPurpose/general``. Absent from workouts saved before this field
+    /// existed, which decode the same way. A value this version doesn't know fails to decode.
     public var purpose: WorkoutPurpose
 
     /// Creates a structured workout.

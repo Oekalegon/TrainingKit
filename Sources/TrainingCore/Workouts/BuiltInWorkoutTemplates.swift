@@ -242,6 +242,10 @@ public enum BuiltInWorkoutTemplates {
     ///    during it.
     /// 4. A 5-minute Zone 1 cooldown.
     ///
+    /// This protocol is TrainingKit's own design, not a published one: it follows the usual shape of
+    /// a field test for maximum heart rate (a warmup, repeated hard efforts, then one all-out
+    /// effort), but the effort and recovery lengths are our choice.
+    ///
     /// Best done on a steady climb or flat, rested, and with a chest strap: a wrist sensor lags and
     /// can miss the peak. The efforts target perceived exertion, not heart-rate zones, because the
     /// zones come from the very maximum being measured. As in ``tempoRun``, only the edge blocks are
@@ -278,7 +282,8 @@ public enum BuiltInWorkoutTemplates {
     )
 
     /// Friel's 30-minute lactate-threshold-heart-rate field test (MVP2-153), purpose
-    /// ``WorkoutPurpose/lthrTest``.
+    /// ``WorkoutPurpose/lthrTest``. The effort and the last-20-minutes average are his protocol (see
+    /// TrainingPeaks, "Joe Friel's Quick Guide to Setting Zones"); the warmup and the RPE target are ours.
     ///
     /// The structure, with no parameters, since changing it changes the test:
     /// 1. A 10-minute Zone 1 warmup and a 5-minute Zone 2 ramp-in.

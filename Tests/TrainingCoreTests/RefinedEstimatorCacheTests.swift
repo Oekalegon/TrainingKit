@@ -19,6 +19,45 @@ private final class FlakyPlanStore: PlanStore, @unchecked Sendable {
     func deletePlan(id: UUID) async throws { try await base.deletePlan(id: id) }
 }
 
+/// An ``ActivityStore`` over an `InMemoryStore` whose next read fails once an upsert has landed, so an import
+/// can be made to throw after it has written.
+private final class FailsAfterUpsertActivityStore: ActivityStore, @unchecked Sendable {
+    struct ReadFailure: Error {}
+    let base: InMemoryStore
+    var failsNextRead = false
+    var failsAfterUpsert = false
+
+    init(base: InMemoryStore) { self.base = base }
+
+    func activities(in range: ClosedRange<Date>) async throws -> [Activity] {
+        if failsNextRead {
+            failsNextRead = false
+            throw ReadFailure()
+        }
+        return try await base.activities(in: range)
+    }
+    func upsert(_ activities: [Activity]) async throws {
+        try await base.upsert(activities)
+        if failsAfterUpsert { failsNextRead = true }
+    }
+    func activity(source: ActivitySource) async throws -> Activity? { try await base.activity(source: source) }
+    func activity(id: UUID) async throws -> Activity? { try await base.activity(id: id) }
+    func deleteActivity(source: ActivitySource) async throws { try await base.deleteActivity(source: source) }
+    func deleteActivity(id: UUID) async throws { try await base.deleteActivity(id: id) }
+    func saveJoin(_ merged: Activity, components: [UUID], replacing replacedJoinIDs: [UUID]) async throws {
+        try await base.saveJoin(merged, components: components, replacing: replacedJoinIDs)
+    }
+    func components(ofJoinedActivity id: UUID) async throws -> [Activity] { try await base.components(ofJoinedActivity: id) }
+    func unjoinActivity(id: UUID) async throws { try await base.unjoinActivity(id: id) }
+    func joinedActivity(containing componentID: UUID) async throws -> Activity? {
+        try await base.joinedActivity(containing: componentID)
+    }
+    func tombstonedSources(among sources: [ActivitySource]) async throws -> Set<ActivitySource> {
+        try await base.tombstonedSources(among: sources)
+    }
+    func deduplicateActivities() async throws -> [Activity] { try await base.deduplicateActivities() }
+}
+
 /// Lets a test hold a read open until it says so.
 private actor Gate {
     private var waiter: CheckedContinuation<Void, Never>?
@@ -166,6 +205,29 @@ struct RefinedEstimatorCacheTests {
 
         #expect(model.refinedEstimatorBuildCount == built)
         #expect(try await store.activity(id: activity.id) == nil)
+    }
+
+    @Test("an import that fails after writing drops the estimator, so an empty import after it rebuilds (MVP2-161)")
+    func failedImportInvalidates() async throws {
+        let base = InMemoryStore()
+        let activities = FailsAfterUpsertActivityStore(base: base)
+        let stores = StoreSet(
+            activityStore: activities, planStore: base, workoutStore: base,
+            cycleStore: base, raceStore: base, athleteStore: base
+        )
+        let model = TrainingModel(stores: stores, athlete: AthleteProfile.fixture())
+        try await model.load(in: day(0)...day(1), asOf: day(0))
+        let built = model.refinedEstimatorBuildCount
+
+        activities.failsAfterUpsert = true
+        let activity = Activity(source: .healthKit(UUID()), sport: .running, start: day(0), duration: 1800, importedLoad: 50)
+        await #expect(throws: FailsAfterUpsertActivityStore.ReadFailure.self) {
+            try await model.importActivities(from: StubImporter(activities: [activity]), asOf: day(0))
+        }
+        activities.failsAfterUpsert = false
+
+        try await model.importActivities(from: StubImporter(activities: []), asOf: day(0))
+        #expect(model.refinedEstimatorBuildCount == built + 1)
     }
 
     @Test("a completed plan imported through the model shows up in the next call")

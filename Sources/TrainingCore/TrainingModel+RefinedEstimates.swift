@@ -35,7 +35,7 @@ extension TrainingModel {
     /// The estimator is built once and kept until the next ``recompute(asOf:)`` that follows a change,
     /// which every mutation of the activities, plans, workouts or athlete goes through: an import that
     /// brought or removed something, a link, join, delete, edit or profile change. An import that found
-    /// nothing new keeps it (MVP2-161). Concurrent callers share one build. A failed build isn't kept,
+    /// nothing new keeps it, and one that fails part-way drops it (MVP2-161). Concurrent callers share one build. A failed build isn't kept,
     /// so the next call tries again. Changes made to the stores without going through this model (an
     /// iCloud sync, say) aren't seen until then, as with ``metrics``.
     ///

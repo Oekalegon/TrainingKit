@@ -104,6 +104,11 @@ extension TrainingModel {
     ///
     /// Call from inside ``runQueued(_:)``, like ``performImport(from:asOf:)``.
     func applyImport(_ result: ImportResult, savingAnchor: Bool, asOf today: Date) async throws {
+        // An import that throws after it has written to the stores never reaches `recompute`, so the
+        // kept refined estimator would outlive a change it was built before, and a later import that
+        // finds nothing new would keep it. Any early exit therefore forgets it (MVP2-161).
+        var finished = false
+        defer { if !finished { invalidateRefinedEstimator() } }
         // Captured before deleting: once an activity is gone, the store can no longer answer what
         // day it occupied, and a persisted fitness-metrics cache needs that date to know how far
         // back to invalidate.
@@ -235,10 +240,13 @@ extension TrainingModel {
         )
         try await reloadActivitiesAndPlans(in: range, bestEffortPlans: true)
         loadedRange = range
+        finished = true
         // A pull-to-refresh that finds nothing new changes nothing the refined estimator is built from
         // (MVP2-161), so it keeps the one it has instead of reading every plan and activity again.
         // Edits made to the stores without going through this model (an iCloud sync) are therefore
         // picked up by the estimator at the next change that does, not by an empty refresh.
+        // A deleted source counts as a change even when the store no longer has it (`deletedStarts`
+        // is empty then): rebuilding is cheap next to keeping a stale estimator.
         let changedAnything = !affectedDates.isEmpty || !result.deletedSources.isEmpty
         await recompute(asOf: today, refinedEstimatorIsCurrent: !changedAnything)
     }

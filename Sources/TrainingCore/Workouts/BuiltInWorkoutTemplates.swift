@@ -508,36 +508,42 @@ public enum BuiltInWorkoutTemplates {
     /// 5-minute Zone 1 cooldown. Unlike ``baseHillSprints`` there is no second open run: the last
     /// recovery is the descent, and the cooldown follows. The effort's RPE target stays in the app,
     /// since WorkoutKit has no perceived-exertion alert.
-    public static let hillRepetitionRun = WorkoutTemplate(
-        id: UUID(uuidString: "8F5D6E4E-6E0E-4B8B-9C1A-9E6F9F1C1A10")!,
-        name: "Hill Repetition Runs",
-        titleName: "Hill Repeats",
-        sport: .running,
-        venue: .outdoor(nil),
-        parameters: [
-            WorkoutTemplateParameter(key: "reps", name: "Repetitions", unit: .count, defaultValue: 8, range: 6...12),
-            WorkoutTemplateParameter(key: "work", name: "Uphill effort", unit: .minutes, defaultValue: 60, range: 30...90),
-            WorkoutTemplateParameter(key: "rest", name: "Recovery", unit: .minutes, defaultValue: 120, range: 90...150),
-        ],
-        blocks: [
-            TemplateBlock(steps: [
-                TemplateStep(kind: .warmup, goal: .time(.fixed(5 * 60)), target: .heartRateZone(1)),
-            ]),
-            TemplateBlock(steps: [
-                TemplateStep(kind: .work, goal: .open, target: .heartRateZone(2)),
-            ]),
-            TemplateBlock(
-                steps: [
-                    TemplateStep(kind: .work, goal: .time(.parameter("work")), target: .rpe(10)),
-                    TemplateStep(kind: .recovery, goal: .time(.parameter("rest")), target: .heartRateZone(1)),
-                ],
-                repetitions: .parameter("reps")
-            ),
-            TemplateBlock(steps: [
-                TemplateStep(kind: .cooldown, goal: .time(.fixed(5 * 60)), target: .heartRateZone(1)),
-            ]),
-        ]
+    public static let hillRepetitionRun = hillRepetitions(
+        uuid: "8F5D6E4E-6E0E-4B8B-9C1A-9E6F9F1C1A10", name: "Hill Repetition Runs", titleName: "Hill Repeats", effortRPE: 10
     )
+
+    private static func hillRepetitions(uuid: String, name: String, titleName: String, effortRPE: Int) -> WorkoutTemplate {
+        WorkoutTemplate(
+            id: UUID(uuidString: uuid)!,
+            name: name,
+            titleName: titleName,
+            sport: .running,
+            venue: .outdoor(nil),
+            parameters: [
+                WorkoutTemplateParameter(key: "reps", name: "Repetitions", unit: .count, defaultValue: 8, range: 6...12),
+                WorkoutTemplateParameter(key: "work", name: "Uphill effort", unit: .minutes, defaultValue: 60, range: 30...90),
+                WorkoutTemplateParameter(key: "rest", name: "Recovery", unit: .minutes, defaultValue: 120, range: 90...150),
+            ],
+            blocks: [
+                TemplateBlock(steps: [
+                    TemplateStep(kind: .warmup, goal: .time(.fixed(5 * 60)), target: .heartRateZone(1)),
+                ]),
+                TemplateBlock(steps: [
+                    TemplateStep(kind: .work, goal: .open, target: .heartRateZone(2)),
+                ]),
+                TemplateBlock(
+                    steps: [
+                        TemplateStep(kind: .work, goal: .time(.parameter("work")), target: .rpe(effortRPE)),
+                        TemplateStep(kind: .recovery, goal: .time(.parameter("rest")), target: .heartRateZone(1)),
+                    ],
+                    repetitions: .parameter("reps")
+                ),
+                TemplateBlock(steps: [
+                    TemplateStep(kind: .cooldown, goal: .time(.fixed(5 * 60)), target: .heartRateZone(1)),
+                ]),
+            ]
+        )
+    }
 
     /// Long interval runs (MVP2-106): Zone 4 efforts of 3 to 5 minutes with Zone 1 recoveries of 2 to 4 minutes.
     ///
@@ -643,27 +649,13 @@ public enum BuiltInWorkoutTemplates {
     ///
     /// The same structure and parameters as ``hillRepetitionRun``: a 5-minute Zone 1 warmup, an open
     /// Zone 2 run, here to the top of the hill, `reps` (6-12) times a fast downhill effort of `work`
-    /// seconds (30-90) and a Zone 1 recovery of `rest` seconds (90-150), the climb back up, and a
-    /// 5-minute Zone 1 cooldown. The downhill effort is RPE 8, fast but controlled, not the all-out
+    /// seconds (30-90) and a Zone 1 recovery of `rest` seconds (90-150), the walk or jog back up the
+    /// hill, and a 5-minute Zone 1 cooldown. The downhill effort is RPE 8, fast but controlled, not the all-out
     /// RPE 10 of the uphill version: a flat-out descent risks a fall, and the stimulus is the
     /// eccentric load, not the effort. The downhill itself isn't modelled, so the athlete picks the
     /// slope. The RPE target stays in the app, since WorkoutKit has no perceived-exertion alert.
-    public static let sarcomereRun = WorkoutTemplate(
-        id: UUID(uuidString: "8F5D6E4E-6E0E-4B8B-9C1A-9E6F9F1C1A13")!,
-        name: "Sarcomere Runs",
-        titleName: "Downhill Repeats",
-        sport: .running,
-        venue: .outdoor(nil),
-        parameters: hillRepetitionRun.parameters,
-        blocks: hillRepetitionRun.blocks.map { block in
-            var block = block
-            block.steps = block.steps.map { step in
-                var step = step
-                if step.target == .rpe(10) { step.target = .rpe(8) }
-                return step
-            }
-            return block
-        }
+    public static let sarcomereRun = hillRepetitions(
+        uuid: "8F5D6E4E-6E0E-4B8B-9C1A-9E6F9F1C1A13", name: "Sarcomere Runs", titleName: "Downhill Repeats", effortRPE: 8
     )
 
     /// Every built-in template, in the order they should appear in a library UI.

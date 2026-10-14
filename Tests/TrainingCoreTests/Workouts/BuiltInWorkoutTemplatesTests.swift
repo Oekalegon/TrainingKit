@@ -311,6 +311,7 @@ struct BuiltInWorkoutTemplatesTests {
         let hill = BuiltInWorkoutTemplates.hillRepetitionRun
 
         #expect(sarcomere.parameters == hill.parameters)
+        #expect(!sarcomere.blocks.flatMap(\.steps).contains { $0.target == .rpe(10) })
         #expect(sarcomere.id != hill.id)
 
         let workout = try sarcomere.instantiate(values: ["reps": 10, "work": 45, "rest": 100])
@@ -326,6 +327,28 @@ struct BuiltInWorkoutTemplatesTests {
             ),
             WorkoutBlock(steps: [WorkoutStep(kind: .cooldown, goal: .time(5 * 60), target: .heartRateZone(1))]),
         ])
+    }
+
+    @Test("the MVP2-106 hill templates plan a duration counting their open step as 10 minutes")
+    func hillTemplatesPlannedDuration() throws {
+        let athlete = AthleteProfile.fixture()
+        let estimator = WorkoutDurationEstimator()
+        // 5 min warmup + open run + 8 × (60 s effort + 120 s recovery) + 5 min cooldown.
+        let expected: TimeInterval = 300 + 600 + 8 * (60 + 120) + 300
+
+        for template in [BuiltInWorkoutTemplates.hillRepetitionRun, BuiltInWorkoutTemplates.sarcomereRun] {
+            let workout = try template.instantiate()
+            #expect(estimator.duration(for: workout, athlete: athlete) == expected, "\(template.name)")
+        }
+    }
+
+    @Test("the MVP2-106 templates name generated workouts by their short title")
+    func mvp2106DefaultTitles() {
+        #expect(BuiltInWorkoutTemplates.fartlekZone4.defaultTitle().contains("Fartlek"))
+        #expect(BuiltInWorkoutTemplates.fartlekZone5.defaultTitle().contains("Fartlek"))
+        #expect(BuiltInWorkoutTemplates.hillRepetitionRun.defaultTitle().contains("Hill Repeats"))
+        #expect(BuiltInWorkoutTemplates.sarcomereRun.defaultTitle().contains("Downhill Repeats"))
+        #expect(BuiltInWorkoutTemplates.longFartlekRun.defaultTitle().contains("Long Fartlek"))
     }
 
     @Test("the MVP2-106 templates offer the ticket's parameter ranges, with defaults inside them")

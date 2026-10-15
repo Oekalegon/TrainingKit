@@ -368,14 +368,20 @@ struct TrainingModelPlanLinkTests {
         #expect(try await store.plan(id: plan.id)?.completedActivityID == nil)
     }
 
-    @Test("deleting a plan frees its activity")
-    func deletePlanFreesActivity() async throws {
+    @Test("a planned workout an activity completed is never deleted; after an unlink it can be")
+    func deleteCompletedPlanIsRefused() async throws {
         let (store, model, plan, a, _) = try await linkedPair()
 
-        try await model.deletePlan(id: plan.id, asOf: day(0))
+        await #expect(throws: TrainingPlanError.workoutIsCompleted(plan.id)) {
+            try await model.deletePlan(id: plan.id, asOf: self.day(0))
+        }
+        #expect(try await store.plan(id: plan.id)?.completedActivityID == a.id)
+        #expect(try await store.activity(id: a.id)?.linkedPlanID == plan.id)
 
+        try await model.unlinkActivity(id: a.id, asOf: day(0))
+        try await model.deletePlan(id: plan.id, asOf: day(0))
+        #expect(try await store.plan(id: plan.id) == nil)
         #expect(try await store.activity(id: a.id)?.linkedPlanID == nil)
-        #expect(model.activities.first { $0.id == a.id }?.linkedPlanID == nil)
     }
 
     /// Plan store that can be made to fail its reads, to exercise import's best-effort matching.

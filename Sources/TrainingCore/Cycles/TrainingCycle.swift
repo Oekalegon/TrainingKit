@@ -3,7 +3,7 @@ import Foundation
 /// A macro-, meso-, or micro-cycle: the calendar structure that plans and statistics hang off.
 ///
 /// Rules enforced by ``CycleStore`` on insert: a child's `dateRange` must lie inside its parent's,
-/// and siblings (cycles sharing the same `parentID`) must not overlap. Micros are not required to
+/// and siblings (cycles sharing the same `parentID` and `planID`) must not overlap. Micros are not required to
 /// be exactly 7 days — a 10-day micro is legitimate. Gaps are allowed; untracked time is just no
 /// cycle.
 public struct TrainingCycle: Identifiable, Sendable, Codable, Hashable {

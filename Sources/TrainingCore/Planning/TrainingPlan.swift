@@ -19,6 +19,8 @@ public struct TrainingPlan: Identifiable, Sendable, Codable, Hashable {
     public var targetRaceID: UUID?
     /// When the plan was created.
     public var createdDate: Date
+    /// The day the plan was cancelled; set while ``status`` is ``PlanStatus/cancelled``, `nil` otherwise.
+    public var cancelledDate: Date?
 
     /// Creates a training plan.
     ///
@@ -29,13 +31,15 @@ public struct TrainingPlan: Identifiable, Sendable, Codable, Hashable {
     ///   - macroCycleID: The plan's macro cycle, if it has one yet.
     ///   - targetRaceID: The race the plan builds towards, if any.
     ///   - createdDate: When the plan was created; defaults to now.
+    ///   - cancelledDate: The day the plan was cancelled, for a ``PlanStatus/cancelled`` plan.
     public init(
         id: UUID = UUID(),
         name: String,
         status: PlanStatus = .draft,
         macroCycleID: UUID? = nil,
         targetRaceID: UUID? = nil,
-        createdDate: Date = .now
+        createdDate: Date = .now,
+        cancelledDate: Date? = nil
     ) {
         self.id = id
         self.name = name
@@ -43,5 +47,26 @@ public struct TrainingPlan: Identifiable, Sendable, Codable, Hashable {
         self.macroCycleID = macroCycleID
         self.targetRaceID = targetRaceID
         self.createdDate = createdDate
+        self.cancelledDate = cancelledDate
+    }
+}
+
+extension TrainingPlan {
+    /// The id of the plan that existing unassigned data is adopted into. Fixed, so two devices that
+    /// each create it before iCloud has synced end up with one plan, not two.
+    public static let currentPlanID = UUID(uuidString: "5C0DE000-0000-4000-8000-0000000000C1")!
+}
+
+extension Collection where Element == TrainingPlan {
+    /// The plan in use. Normally the only active one; if a sync left several active (two devices
+    /// each activated one), the oldest by `createdDate` (then id) is, so every device agrees.
+    public var canonicalActivePlan: TrainingPlan? {
+        filter { $0.status == .active }.min { ($0.createdDate, $0.id.uuidString) < ($1.createdDate, $1.id.uuidString) }
+    }
+
+    /// The ids of the plans that don't feed the series: every plan but the canonical active one.
+    public var inactivePlanIDs: Set<UUID> {
+        let active = canonicalActivePlan?.id
+        return Set(filter { $0.id != active }.map(\.id))
     }
 }

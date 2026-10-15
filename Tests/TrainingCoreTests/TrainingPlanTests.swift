@@ -319,4 +319,144 @@ struct TrainingPlanTests {
         try await model.deleteTrainingPlan(id: empty.id, asOf: day(0))
         #expect(model.trainingPlans.map(\.id) == [plan.id])
     }
+
+    // MARK: - Cancelling
+
+    @Test("starting a new plan after following the old one cancels the old one, dated today; an untouched one becomes a draft")
+    func replacingActivePlanCancelsItIfFollowed() async throws {
+        let (store, model) = makeModel()
+        let w = workout()
+        try await model.add(w, asOf: day(0))
+        let old = try await model.createTrainingPlan(named: "Old", status: .active, asOf: day(0))
+        try await model.load(in: day(-30)...day(30), asOf: day(0))
+        try await store.upsert([PlannedActivity(workoutID: w.id, date: day(-10), completedActivityID: UUID(), planID: old.id)])
+
+        let new = try await model.createTrainingPlan(named: "New", status: .active, asOf: day(5))
+
+        let cancelled = try #require(model.trainingPlans.first { $0.id == old.id })
+        #expect(cancelled.status == .cancelled)
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = model.athlete.timeZone
+        #expect(cancelled.cancelledDate == calendar.startOfDay(for: day(5)))
+        #expect(model.activeTrainingPlan?.id == new.id)
+
+        let third = try await model.createTrainingPlan(named: "Third", status: .active, asOf: day(6))
+        #expect(model.trainingPlans.first { $0.id == new.id }?.status == .draft) // nothing completed under it
+        #expect(model.trainingPlans.first { $0.id == new.id }?.cancelledDate == nil)
+        #expect(model.activeTrainingPlan?.id == third.id)
+    }
+
+    @Test("cancelling a plan dates it, keeps its workouts, and activating it again clears the date")
+    func cancelAndReactivate() async throws {
+        let (store, model) = makeModel()
+        let w = workout()
+        try await model.add(w, asOf: day(0))
+        let plan = try await model.createTrainingPlan(named: "Now", status: .active, asOf: day(0))
+        let planned = PlannedActivity(workoutID: w.id, date: day(3), planID: plan.id)
+        try await store.upsert([planned])
+        try await model.load(in: day(0)...day(10), asOf: day(0))
+
+        try await model.cancelTrainingPlan(id: plan.id, asOf: day(2))
+        let cancelled = try #require(model.trainingPlans.first)
+        #expect(cancelled.status == .cancelled && cancelled.cancelledDate != nil)
+        #expect(model.plans.isEmpty && model.activeTrainingPlan == nil)
+        #expect(try await store.plan(id: planned.id) != nil)
+        let firstDate = cancelled.cancelledDate
+        try await model.cancelTrainingPlan(id: plan.id, asOf: day(4)) // already cancelled: keeps its date
+        #expect(model.trainingPlans.first?.cancelledDate == firstDate)
+
+        try await model.activateTrainingPlan(id: plan.id, asOf: day(5))
+        #expect(model.trainingPlans.first?.status == .active && model.trainingPlans.first?.cancelledDate == nil)
+        #expect(model.plans.count == 1)
+    }
+
+    @Test("a plan's completed workouts stay in the model after the plan stops being active")
+    func completedWorkoutsStayVisible() async throws {
+        let (store, model) = makeModel()
+        let w = workout()
+        try await model.add(w, asOf: day(0))
+        let old = try await model.createTrainingPlan(named: "Old", status: .active, asOf: day(0))
+        let done = PlannedActivity(workoutID: w.id, date: day(-3), completedActivityID: UUID(), planID: old.id)
+        let missed = PlannedActivity(workoutID: w.id, date: day(-2), planID: old.id)
+        try await store.upsert([done, missed])
+        try await model.load(in: day(-10)...day(10), asOf: day(0))
+        #expect(model.plans.count == 2)
+
+        _ = try await model.createTrainingPlan(named: "New", status: .active, asOf: day(0))
+
+        #expect(model.trainingPlans.first { $0.id == old.id }?.status == .cancelled)
+        #expect(model.plans.map(\.id) == [done.id])
+    }
+
+    // MARK: - Active plan, statuses
+
+    @Test("with several active plans after a sync, the oldest is the active one on every device")
+    func oldestActivePlanWins() async throws {
+        let store = InMemoryStore()
+        let older = TrainingPlan(name: "Older", status: .active, createdDate: day(0))
+        let newer = TrainingPlan(name: "Newer", status: .active, createdDate: day(1))
+        // Bypass the store's one-active rule the way two merged CloudKit writes would.
+        try await store.upsertTrainingPlan(newer)
+        try await store.upsertTrainingPlan(TrainingPlan(name: "Draft"))
+        #expect([older, newer].canonicalActivePlan?.id == older.id)
+        #expect([older, newer].inactivePlanIDs == [newer.id])
+        #expect([older, newer].reversed().canonicalActivePlan?.id == older.id)
+        #expect([TrainingPlan(name: "D")].canonicalActivePlan == nil)
+    }
+
+    @Test("a plan status this version doesn't know decodes as a draft")
+    func unknownStatusIsDraft() throws {
+        var json = try JSONSerialization.jsonObject(with: JSONEncoder().encode(TrainingPlan(name: "X", status: .active))) as! [String: Any]
+        json["status"] = "paused"
+        let decoded = try JSONDecoder().decode(TrainingPlan.self, from: JSONSerialization.data(withJSONObject: json))
+        #expect(decoded.status == .draft)
+    }
+
+    // MARK: - Adoption
+
+    @Test("adoption uses one fixed plan, runs once per model, and keeps links written to the workouts")
+    func adoptionIsStableAndKeepsLinks() async throws {
+        let (store, model) = makeModel()
+        let w = workout()
+        try await store.upsert([w])
+        let linked = PlannedActivity(workoutID: w.id, date: day(2), completedActivityID: UUID())
+        try await store.upsert([linked])
+
+        try await model.load(in: day(0)...day(10), asOf: day(0))
+        #expect(model.activeTrainingPlan?.id == TrainingPlan.currentPlanID)
+        #expect(try await store.plan(id: linked.id)?.completedActivityID == linked.completedActivityID)
+        #expect(try await store.plan(id: linked.id)?.planID == TrainingPlan.currentPlanID)
+
+        // A second device adopting its own copy lands on the same plan row.
+        let (store2, model2) = makeModel()
+        try await store2.upsert([w])
+        try await store2.upsert([PlannedActivity(workoutID: w.id, date: day(3))])
+        try await model2.load(in: day(0)...day(10), asOf: day(1))
+        #expect(try await store2.trainingPlans().map(\.id) == [TrainingPlan.currentPlanID])
+
+        // Once adopted, later loads don't look again: a stray unassigned workout waits for the next launch.
+        let stray = PlannedActivity(workoutID: w.id, date: day(4))
+        try await store.upsert([stray])
+        try await model.load(in: day(0)...day(10), asOf: day(0))
+        #expect(try await store.plan(id: stray.id)?.planID == nil)
+    }
+
+    @Test("inserting a plan with its cycles and workouts is all or nothing")
+    func insertTrainingPlanIsAtomic() async throws {
+        let store = InMemoryStore()
+        let plan = TrainingPlan(name: "Copy")
+        let overlapping = [macro(day(0)...day(20), planID: plan.id), macro(day(10)...day(30), planID: plan.id)]
+        let planned = PlannedActivity(workoutID: UUID(), date: day(3), planID: plan.id)
+
+        await #expect(throws: CycleStoreError.self) {
+            try await store.insertTrainingPlan(plan, cycles: overlapping, plannedActivities: [planned])
+        }
+        #expect(try await store.trainingPlans().isEmpty)
+        #expect(try await store.plan(id: planned.id) == nil)
+
+        try await store.insertTrainingPlan(plan, cycles: [overlapping[0]], plannedActivities: [planned])
+        #expect(try await store.trainingPlan(id: plan.id) == plan)
+        #expect(try await store.cycle(id: overlapping[0].id) != nil)
+        #expect(try await store.plan(id: planned.id) != nil)
+    }
 }

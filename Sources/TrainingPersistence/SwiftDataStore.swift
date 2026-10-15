@@ -542,15 +542,16 @@ public actor SwiftDataStore: ActivityStore, PlanStore, WorkoutLibraryStore, Cycl
         try fetchTrainingPlanRecord(id: id)?.toTrainingPlan()
     }
 
-    /// See `TrainingPlanStore/upsertTrainingPlan(_:)`. The demotion of the previously active plan and
-    /// the write of `plan` go out in one save.
-    public func upsertTrainingPlan(_ plan: TrainingPlan) async throws {
+    /// See `TrainingPlanStore/upsertTrainingPlan(_:cancelingActivePlanOn:)`. The demotion of the
+    /// previously active plan and the write of `plan` go out in one save.
+    public func upsertTrainingPlan(_ plan: TrainingPlan, cancelingActivePlanOn date: Date?) async throws {
         var existing: TrainingPlanRecord?
         for record in try modelContext.fetch(FetchDescriptor<TrainingPlanRecord>()) {
             if record.id == plan.id {
                 existing = record
             } else if plan.status == .active, var other = try? record.toTrainingPlan(), other.status == .active {
-                other.status = .draft
+                other.status = date == nil ? .draft : .cancelled
+                other.cancelledDate = date
                 try record.update(from: other)
             }
         }
@@ -559,6 +560,68 @@ public actor SwiftDataStore: ActivityStore, PlanStore, WorkoutLibraryStore, Cycl
         } else {
             modelContext.insert(try TrainingPlanRecord(plan: plan))
         }
+        try modelContext.save()
+    }
+
+    /// See `TrainingPlanStore/adoptUnassigned(intoActivePlanOrNew:)`. One fetch-and-save, so a link
+    /// written meanwhile isn't overwritten with a stale copy.
+    public func adoptUnassigned(intoActivePlanOrNew newPlan: TrainingPlan) async throws -> Bool {
+        let planRecords = try modelContext.fetch(FetchDescriptor<PlannedActivityRecord>())
+        let cycleRecords = try modelContext.fetch(FetchDescriptor<TrainingCycleRecord>())
+        var orphanPlans: [(PlannedActivityRecord, PlannedActivity)] = []
+        for record in planRecords {
+            let plan = try record.toPlan()
+            if plan.planID == nil { orphanPlans.append((record, plan)) }
+        }
+        var orphanCycles: [(TrainingCycleRecord, TrainingCycle)] = []
+        for record in cycleRecords {
+            let cycle = try record.toCycle()
+            if cycle.planID == nil { orphanCycles.append((record, cycle)) }
+        }
+        guard !orphanPlans.isEmpty || !orphanCycles.isEmpty else { return false }
+
+        let existing = try await trainingPlans().canonicalActivePlan
+        let targetID: UUID
+        if let existing {
+            targetID = existing.id
+        } else {
+            targetID = newPlan.id
+            if let record = try fetchTrainingPlanRecord(id: newPlan.id) {
+                try record.update(from: newPlan)
+            } else {
+                modelContext.insert(try TrainingPlanRecord(plan: newPlan))
+            }
+        }
+        for (record, var plan) in orphanPlans {
+            plan.planID = targetID
+            try record.update(from: plan)
+        }
+        for (record, var cycle) in orphanCycles {
+            cycle.planID = targetID
+            try record.update(from: cycle)
+        }
+        try modelContext.save()
+        return true
+    }
+
+    /// See `TrainingPlanStore/insertTrainingPlan(_:cycles:plannedActivities:)`. Everything goes out in
+    /// one save, after the cycles are validated.
+    public func insertTrainingPlan(_ plan: TrainingPlan, cycles: [TrainingCycle], plannedActivities: [PlannedActivity]) async throws {
+        var existingCycles: [UUID: TrainingCycle] = [:]
+        for record in try modelContext.fetch(FetchDescriptor<TrainingCycleRecord>()) {
+            existingCycles[record.id] = try record.toCycle()
+        }
+        try CycleNestingValidator.validate(cycles, existing: existingCycles)
+
+        for record in try modelContext.fetch(FetchDescriptor<TrainingPlanRecord>()) where plan.status == .active {
+            if var other = try? record.toTrainingPlan(), other.status == .active, other.id != plan.id {
+                other.status = .draft
+                try record.update(from: other)
+            }
+        }
+        modelContext.insert(try TrainingPlanRecord(plan: plan))
+        for cycle in cycles { modelContext.insert(try TrainingCycleRecord(cycle: cycle)) }
+        for planned in plannedActivities { modelContext.insert(try PlannedActivityRecord(plan: planned)) }
         try modelContext.save()
     }
 

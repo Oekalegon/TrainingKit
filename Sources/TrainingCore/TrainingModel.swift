@@ -19,6 +19,8 @@ public final class TrainingModel {
     /// Every training plan, active or not (MVP5-124); empty without a ``StoreSet/trainingPlanStore``.
     /// ``plans`` and ``cycles`` hold only what belongs to the active plan (and what belongs to none).
     public internal(set) var trainingPlans: [TrainingPlan] = []
+    /// Whether unassigned workouts and cycles were moved into a plan since this model was created.
+    var didAdoptUnassigned = false
     /// Every goal, as of the last ``load(in:asOf:)`` or goal change: goals have no date, so they aren't
     /// limited to the loaded range. Empty when the ``StoreSet`` has no ``GoalStore``.
     public private(set) var goals: [Goal] = []
@@ -206,7 +208,7 @@ public final class TrainingModel {
     /// through (e.g. the plan fetch throwing after the activity fetch already succeeded) leaves
     /// this model exactly as it was before the call, rather than a mix of the old and new range.
     public func load(in range: ClosedRange<Date>, asOf today: Date = .now) async throws {
-        await adoptUnassignedIntoActivePlan()
+        await adoptUnassignedIntoActivePlan(asOf: today)
         let newActivities = try await stores.activityStore.activities(in: range)
         let newPlans = try await stores.activePlannedActivities(in: range)
         let newWorkouts = try await stores.workoutStore.workouts()
@@ -238,7 +240,7 @@ public final class TrainingModel {
     /// without this, the plan would persist to the store but `plans`/`metrics` would never reflect
     /// it, with no error to signal anything was skipped.
     public func add(_ plan: PlannedActivity, asOf today: Date = .now) async throws {
-        try await stores.planStore.upsert(try await assigningToActivePlan([plan]))
+        try await stores.planStore.upsert(try await assigningToActivePlan([plan], asOf: today))
         let range = loadedRange ?? (plan.date...plan.date)
         plans = try await stores.activePlannedActivities(in: range)
         // Always refreshed (not just when never loaded): recompute needs `workouts` to resolve
@@ -280,11 +282,19 @@ public final class TrainingModel {
     /// (`TrainingWorkoutKit`'s `WorkoutKitBridge.unschedule(_:)`), since Core has no WorkoutKit dependency.
     /// Lives in this file rather than an extension because ``plans``' setter is `private`.
     ///
+    /// A planned workout that an activity completed is history and is never deleted: this throws
+    /// ``TrainingPlanError/workoutIsCompleted(_:)`` and changes nothing. Unlink the activity first
+    /// (``unlinkActivity(id:asOf:)``) if the match was wrong.
+    ///
     /// - Parameters:
     ///   - id: The plan to remove.
     ///   - today: Passed through to ``recompute(asOf:)``.
+    /// - Throws: ``TrainingPlanError/workoutIsCompleted(_:)`` as described, or whatever the stores throw.
     public func deletePlan(id: UUID, asOf today: Date = .now) async throws {
-        // An activity matched to this plan is freed, not left holding a link to nothing.
+        if let existing = try await stores.planStore.plan(id: id), existing.completedActivityID != nil {
+            throw TrainingPlanError.workoutIsCompleted(id)
+        }
+        // Defensive: an activity that still names this plan (a link the plan side lost) is freed too.
         try await releaseActivity(heldBy: id)
         try await stores.planStore.deletePlan(id: id)
         if let loadedRange {
@@ -315,7 +325,7 @@ public final class TrainingModel {
     /// of `newCycles`' date ranges (and adopts it as the loaded range), for the same reason as the
     /// `PlannedActivity` overload of `add` above.
     public func add(_ newCycles: [TrainingCycle], asOf today: Date = .now) async throws {
-        try await stores.cycleStore.upsert(try await assigningToActivePlan(newCycles))
+        try await stores.cycleStore.upsert(try await assigningToActivePlan(newCycles, asOf: today))
         let range = loadedRange ?? Self.union(of: newCycles.map(\.dateRange), fallback: today)
         cycles = try await stores.activeCycles(in: range)
         loadedRange = range

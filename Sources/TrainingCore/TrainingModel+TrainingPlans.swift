@@ -10,7 +10,7 @@ import Foundation
 extension TrainingModel {
     /// The plan in use, or `nil` if none is active (or there is no ``StoreSet/trainingPlanStore``).
     public var activeTrainingPlan: TrainingPlan? {
-        trainingPlans.first { $0.status == .active }
+        trainingPlans.canonicalActivePlan
     }
 
     /// Creates a plan and stores it, making it the active plan if `status` is ``PlanStatus/active``
@@ -31,23 +31,33 @@ extension TrainingModel {
         targetRaceID: UUID? = nil,
         asOf today: Date = .now
     ) async throws -> TrainingPlan {
-        let plan = TrainingPlan(name: name, status: status, targetRaceID: targetRaceID)
+        let plan = TrainingPlan(name: name, status: status, targetRaceID: targetRaceID, createdDate: today)
         try await save(plan, asOf: today)
         return plan
     }
 
     /// Replaces the stored plan that has `plan`'s id (or inserts it), then reloads and recomputes.
-    /// Activating a plan this way demotes the previously active one to a draft in the same write;
-    /// archiving the active plan leaves none active, and the next workout added by hand starts a new
-    /// "My plan".
+    ///
+    /// Activating a plan ends the previously active one in the same write. If that plan has a completed
+    /// workout (the athlete has been following it), it is **cancelled** and dated today (its
+    /// ``TrainingPlan/cancelledDate``), so starting a new plan mid-way leaves the old one behind as
+    /// history; if it has none, it simply becomes a draft. Archiving or cancelling the active plan
+    /// leaves none active, and the next workout added by hand starts a new "My plan".
     ///
     /// - Parameters:
     ///   - plan: The plan to store, e.g. a copy of an existing one with another name or status.
-    ///   - today: Passed through to ``recompute(asOf:)``.
+    ///   - today: The day a replaced plan is cancelled on, and passed through to ``recompute(asOf:)``.
     /// - Throws: ``TrainingPlanError/notConfigured`` without a ``StoreSet/trainingPlanStore``, or
     ///   whatever the stores throw.
     public func save(_ plan: TrainingPlan, asOf today: Date = .now) async throws {
-        try await requiredTrainingPlanStore().upsertTrainingPlan(plan)
+        let store = try requiredTrainingPlanStore()
+        var cancelDate: Date?
+        if plan.status == .active,
+           let current = try await store.trainingPlans().canonicalActivePlan, current.id != plan.id,
+           try await trainingPlanHasCompletedWorkouts(id: current.id) {
+            cancelDate = startOfDay(today)
+        }
+        try await store.upsertTrainingPlan(plan, cancelingActivePlanOn: cancelDate)
         try await reloadPlanState(asOf: today)
     }
 
@@ -73,7 +83,22 @@ extension TrainingModel {
     public func setStatus(_ status: PlanStatus, ofTrainingPlan id: UUID, asOf today: Date = .now) async throws {
         var plan = try await storedTrainingPlan(id)
         plan.status = status
+        plan.cancelledDate = status == .cancelled ? (plan.cancelledDate ?? startOfDay(today)) : nil
         try await save(plan, asOf: today)
+    }
+
+    /// Cancels the plan with `id` as of today: its status becomes ``PlanStatus/cancelled`` and its
+    /// ``TrainingPlan/cancelledDate`` is set to the start of `today`. The plan, its cycles and every
+    /// workout under it stay as history; the plan stops feeding the series (its completed workouts stay
+    /// in ``plans``). Cancelling an already cancelled plan keeps its date.
+    ///
+    /// - Parameters:
+    ///   - id: The plan to cancel.
+    ///   - today: The day to cancel on, and passed through to ``recompute(asOf:)``.
+    /// - Throws: ``TrainingPlanError/notFound(_:)`` if there is no such plan, ``TrainingPlanError/notConfigured``
+    ///   without a ``StoreSet/trainingPlanStore``, or whatever the stores throw.
+    public func cancelTrainingPlan(id: UUID, asOf today: Date = .now) async throws {
+        try await setStatus(.cancelled, ofTrainingPlan: id, asOf: today)
     }
 
     /// Renames the plan with `id`.
@@ -114,7 +139,8 @@ extension TrainingModel {
             name: name ?? "\(original.name) copy",
             status: .draft,
             macroCycleID: original.macroCycleID.flatMap { newCycleIDs[$0] },
-            targetRaceID: original.targetRaceID
+            targetRaceID: original.targetRaceID,
+            createdDate: today
         )
         let copiedCycles = cycles.map { cycle in
             TrainingCycle(
@@ -132,11 +158,7 @@ extension TrainingModel {
                 )
             }
 
-        // The copy's row first, so a failure part-way leaves an empty draft rather than workouts and
-        // cycles that belong to no plan.
-        try await requiredTrainingPlanStore().upsertTrainingPlan(copy)
-        if !copiedCycles.isEmpty { try await stores.cycleStore.upsert(copiedCycles) }
-        if !copiedPlans.isEmpty { try await stores.planStore.upsert(copiedPlans) }
+        try await requiredTrainingPlanStore().insertTrainingPlan(copy, cycles: copiedCycles, plannedActivities: copiedPlans)
         try await reloadPlanState(asOf: today)
         return copy
     }
@@ -196,8 +218,8 @@ extension TrainingModel {
     /// Stamps the active plan's id on every item without a plan, first creating "My plan" as the
     /// active plan if there is none. Items that already name a plan are left as they are. Returns
     /// `items` unchanged without a ``StoreSet/trainingPlanStore``.
-    func assigningToActivePlan(_ items: [PlannedActivity]) async throws -> [PlannedActivity] {
-        guard items.contains(where: { $0.planID == nil }), let planID = try await ensureActivePlanID() else { return items }
+    func assigningToActivePlan(_ items: [PlannedActivity], asOf today: Date) async throws -> [PlannedActivity] {
+        guard items.contains(where: { $0.planID == nil }), let planID = try await ensureActivePlanID(asOf: today) else { return items }
         return items.map { item in
             var item = item
             item.planID = item.planID ?? planID
@@ -205,9 +227,9 @@ extension TrainingModel {
         }
     }
 
-    /// See ``assigningToActivePlan(_:)-(PlannedActivity)``; the same for cycles.
-    func assigningToActivePlan(_ items: [TrainingCycle]) async throws -> [TrainingCycle] {
-        guard items.contains(where: { $0.planID == nil }), let planID = try await ensureActivePlanID() else { return items }
+    /// The same for cycles.
+    func assigningToActivePlan(_ items: [TrainingCycle], asOf today: Date) async throws -> [TrainingCycle] {
+        guard items.contains(where: { $0.planID == nil }), let planID = try await ensureActivePlanID(asOf: today) else { return items }
         return items.map { item in
             var item = item
             item.planID = item.planID ?? planID
@@ -217,53 +239,38 @@ extension TrainingModel {
 
     /// The id of the active plan, creating a plan called "My plan" if there is none; `nil` without a
     /// ``StoreSet/trainingPlanStore``.
-    func ensureActivePlanID() async throws -> UUID? {
+    func ensureActivePlanID(asOf today: Date) async throws -> UUID? {
         guard let store = stores.trainingPlanStore else { return nil }
-        if let active = try await store.trainingPlans().first(where: { $0.status == .active }) {
+        if let active = try await store.trainingPlans().canonicalActivePlan {
             return active.id
         }
-        let plan = TrainingPlan(name: "My plan", status: .active)
+        let plan = TrainingPlan(name: "My plan", status: .active, createdDate: today)
         try await store.upsertTrainingPlan(plan)
         trainingPlans = try await store.trainingPlans()
         return plan.id
     }
 
     /// Moves every planned workout and cycle that belongs to no plan (stored before plans existed, or
-    /// written by another device or the sandbox without one) into the active plan, creating a plan
-    /// called "Current plan" first if there is none. Best effort: a failure is logged and the load
-    /// goes on, since an unassigned item counts anyway.
-    func adoptUnassignedIntoActivePlan() async {
-        guard let store = stores.trainingPlanStore else { return }
+    /// written by another device or the sandbox without one) into the active plan, creating the plan
+    /// "Current plan" first if there is none. Done once per model, inside the store as one write
+    /// (``TrainingPlanStore/adoptUnassigned(intoActivePlanOrNew:)``), so it can't overwrite a link an
+    /// import writes at the same moment. Best effort: a failure is logged and the load goes on, since an
+    /// unassigned item counts anyway, and it is tried again at the next load.
+    func adoptUnassignedIntoActivePlan(asOf today: Date) async {
+        guard !didAdoptUnassigned, let store = stores.trainingPlanStore else { return }
         do {
-            let everything = Date.distantPast...Date.distantFuture
-            let orphanPlans = try await stores.planStore.plans(in: everything).filter { $0.planID == nil }
-            let orphanCycles = try await stores.cycleStore.cycles(in: everything).filter { $0.planID == nil }
-            guard !orphanPlans.isEmpty || !orphanCycles.isEmpty else { return }
-
-            let planID: UUID
-            if let active = try await store.trainingPlans().first(where: { $0.status == .active }) {
-                planID = active.id
-            } else {
-                let current = TrainingPlan(name: "Current plan", status: .active)
-                try await store.upsertTrainingPlan(current)
-                planID = current.id
-            }
-            // Cycles first: a plan's cycleID never needs the plan id, but a failure between the two
-            // leaves workouts that still count (nil) rather than cycles that don't.
-            try await stores.cycleStore.upsert(orphanCycles.map { cycle in
-                TrainingCycle(
-                    id: cycle.id, level: cycle.level, phase: cycle.phase, loadRole: cycle.loadRole, name: cycle.name,
-                    dateRange: cycle.dateRange, parentID: cycle.parentID, targetRaceID: cycle.targetRaceID, planID: planID
-                )
-            })
-            try await stores.planStore.upsert(orphanPlans.map { plan in
-                var plan = plan
-                plan.planID = planID
-                return plan
-            })
+            let current = TrainingPlan(id: TrainingPlan.currentPlanID, name: "Current plan", status: .active, createdDate: today)
+            _ = try await store.adoptUnassigned(intoActivePlanOrNew: current)
+            didAdoptUnassigned = true
         } catch {
             Logging.load.error("Adopting unassigned plans failed: \(error.localizedDescription)")
         }
+    }
+
+    private func startOfDay(_ date: Date) -> Date {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = athlete.timeZone
+        return calendar.startOfDay(for: date)
     }
 
     private func requiredTrainingPlanStore() throws -> any TrainingPlanStore {

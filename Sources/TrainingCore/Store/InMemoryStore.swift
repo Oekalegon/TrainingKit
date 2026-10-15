@@ -396,16 +396,43 @@ public actor InMemoryStore: ActivityStore, PlanStore, WorkoutLibraryStore, Worko
         trainingPlansByID[id]
     }
 
-    /// See ``TrainingPlanStore/upsertTrainingPlan(_:)``.
-    public func upsertTrainingPlan(_ plan: TrainingPlan) async throws {
+    /// See ``TrainingPlanStore/upsertTrainingPlan(_:cancelingActivePlanOn:)``.
+    public func upsertTrainingPlan(_ plan: TrainingPlan, cancelingActivePlanOn date: Date?) async throws {
         if plan.status == .active {
             for other in trainingPlansByID.values where other.status == .active && other.id != plan.id {
                 var demoted = other
-                demoted.status = .draft
+                demoted.status = date == nil ? .draft : .cancelled
+                demoted.cancelledDate = date
                 trainingPlansByID[other.id] = demoted
             }
         }
         trainingPlansByID[plan.id] = plan
+    }
+
+    /// See ``TrainingPlanStore/adoptUnassigned(intoActivePlanOrNew:)``.
+    public func adoptUnassigned(intoActivePlanOrNew newPlan: TrainingPlan) async throws -> Bool {
+        let orphanPlans = plansByID.values.filter { $0.planID == nil }
+        let orphanCycles = cyclesByID.values.filter { $0.planID == nil }
+        guard !orphanPlans.isEmpty || !orphanCycles.isEmpty else { return false }
+        let target = trainingPlansByID.values.canonicalActivePlan ?? newPlan
+        trainingPlansByID[target.id] = target
+        for var plan in orphanPlans {
+            plan.planID = target.id
+            plansByID[plan.id] = plan
+        }
+        for var cycle in orphanCycles {
+            cycle.planID = target.id
+            cyclesByID[cycle.id] = cycle
+        }
+        return true
+    }
+
+    /// See ``TrainingPlanStore/insertTrainingPlan(_:cycles:plannedActivities:)``.
+    public func insertTrainingPlan(_ plan: TrainingPlan, cycles: [TrainingCycle], plannedActivities: [PlannedActivity]) async throws {
+        try CycleNestingValidator.validate(cycles, existing: cyclesByID)
+        try await upsertTrainingPlan(plan)
+        for cycle in cycles { cyclesByID[cycle.id] = cycle }
+        for planned in plannedActivities { plansByID[planned.id] = planned }
     }
 
     /// See ``TrainingPlanStore/deleteTrainingPlan(id:)``.

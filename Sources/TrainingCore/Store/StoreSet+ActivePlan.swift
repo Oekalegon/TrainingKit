@@ -1,8 +1,8 @@
 import Foundation
 
 extension StoreSet {
-    /// The ids of the plans that don't feed the fitness series: every ``PlanStatus/draft`` and
-    /// ``PlanStatus/archived`` plan. Empty without a ``trainingPlanStore``.
+    /// The ids of the plans that don't feed the fitness series: every plan that isn't the active one
+    /// (drafts, archived and cancelled plans). Empty without a ``trainingPlanStore``.
     ///
     /// Read fresh from the store each time (a handful of rows), so a plan activated by another device
     /// through iCloud is seen at the next fetch.
@@ -10,11 +10,12 @@ extension StoreSet {
     /// - Throws: Whatever the store throws.
     public func inactivePlanIDs() async throws -> Set<UUID> {
         guard let trainingPlanStore else { return [] }
-        return Set(try await trainingPlanStore.trainingPlans().filter { $0.status != .active }.map(\.id))
+        return try await trainingPlanStore.trainingPlans().inactivePlanIDs
     }
 
     /// The planned workouts in `range` that count: those of the active plan, plus any that belong to no
-    /// plan (stored before plans existed, or whose plan was deleted). Everything, without a
+    /// plan (stored before plans existed), plus every one an activity completed, whatever its plan's
+    /// status, so the history of a cancelled or archived plan stays in view. Everything, without a
     /// ``trainingPlanStore``.
     ///
     /// - Parameter range: The days to fetch, as for ``PlanStore/plans(in:)``.
@@ -23,7 +24,7 @@ extension StoreSet {
         let inactive = try await inactivePlanIDs()
         let plans = try await planStore.plans(in: range)
         guard !inactive.isEmpty else { return plans }
-        return plans.filter { $0.planID.map { !inactive.contains($0) } ?? true }
+        return plans.filter { $0.completedActivityID != nil || ($0.planID.map { !inactive.contains($0) } ?? true) }
     }
 
     /// The cycles overlapping `range` that count, chosen the way ``activePlannedActivities(in:)``

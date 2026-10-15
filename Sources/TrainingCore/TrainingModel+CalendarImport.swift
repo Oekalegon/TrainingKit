@@ -43,7 +43,7 @@ extension TrainingModel {
             templates = try await templateStore.templates()
         }
         if !plan.workouts.isEmpty { try await stores.workoutStore.upsert(plan.workouts) }
-        try await stores.planStore.upsert(try await assigningToActivePlan(plan.plans))
+        try await stores.planStore.upsert(try await assigningToActivePlan(plan.plans, asOf: today))
 
         if !plan.activities.isEmpty {
             // Through the import queue, so it can't interleave with a HealthKit import's read and

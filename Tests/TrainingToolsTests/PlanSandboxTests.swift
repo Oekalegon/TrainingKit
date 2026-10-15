@@ -199,4 +199,26 @@ struct PlanSandboxTests {
         #expect(try await store.plan(id: added.id)?.planID == active.id)
         #expect(try await store.plan(id: theirs.id) != nil) // the draft's workout isn't touched
     }
+
+    @Test("commit refuses to delete a planned workout an activity has completed, before writing anything")
+    func commitRefusesCompletedWorkoutRemoval() async throws {
+        let (store, stores, _) = try await makeStores()
+        let workout = steadyWorkout()
+        try await store.upsert([workout])
+        let done = PlannedActivity(workoutID: workout.id, date: day(1))
+        let other = PlannedActivity(workoutID: workout.id, date: day(2))
+        try await store.upsert([done, other])
+
+        let sandbox = try await PlanSandbox(snapshotOf: stores, range: day(0)...day(10))
+        await sandbox.setPlans([PlannedActivity(workoutID: workout.id, date: day(3))]) // removes both
+        var completed = done
+        completed.completedActivityID = UUID() // an import matched it after the snapshot
+        try await store.upsert([completed])
+
+        await #expect(throws: TrainingPlanError.workoutIsCompleted(done.id)) {
+            try await sandbox.commit(to: stores)
+        }
+        #expect(try await store.plan(id: done.id) == completed)
+        #expect(try await store.plan(id: other.id) == other)
+    }
 }

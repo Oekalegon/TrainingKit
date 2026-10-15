@@ -7,4 +7,15 @@ public enum PlanStatus: String, Sendable, Codable, Hashable, CaseIterable {
     case active
     /// Finished or put away. Treated like a ``draft`` for what feeds the series.
     case archived
+    /// Stopped part-way, on ``TrainingPlan/cancelledDate``, typically because a new plan replaced it.
+    /// The plan and what was done under it stay as history; like ``archived``, it feeds nothing.
+    case cancelled
+
+    /// Decodes a status, reading one this version doesn't know (written by a newer version on another
+    /// device) as ``draft``, so the plan stays readable and inactive rather than failing to decode
+    /// and leaving its workouts counting.
+    public init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = PlanStatus(rawValue: raw) ?? .draft
+    }
 }

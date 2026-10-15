@@ -30,7 +30,8 @@ public struct RunAvailability: Sendable, Codable, Hashable {
     }
 
     /// Decodes availability, ignoring weekdays and slots this version does not know (for instance
-    /// written by a newer version) and treating a missing `slots` as no availability.
+    /// written by a newer version) and treating a missing `slots` as no availability. Saving it again
+    /// writes only what was understood, so the unknown values are lost.
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let raw = try container.decodeIfPresent([String: [String]].self, forKey: .slots) ?? [:]

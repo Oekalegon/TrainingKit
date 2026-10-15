@@ -10,6 +10,10 @@ import TrainingCore
 /// stays in the local-only ``AthleteProfileRecord``, since Apple's guideline 5.1.3(ii) forbids storing
 /// health information in iCloud. One row per store, like ``AthleteProfileRecord``;
 /// ``SwiftDataStore`` merges the two when it reads the profile.
+///
+/// The synced preferences win on read and sync is last-writer-wins, so a device running an older
+/// version that doesn't know a field (for instance ``AthletePreferences/runAvailability``) writes
+/// the record without it and clears it for the others until they save it again.
 @Model
 public final class AthletePreferencesRecord {
     /// The JSON-encoded ``AthletePreferences``.

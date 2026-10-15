@@ -24,8 +24,8 @@ store files (`TrainingPersistenceContainer.make(...)`):
 
 - **The athlete profile is split.** `AthleteProfileRecord` (local) holds the whole profile and the
   HealthKit import anchor. `AthletePreferencesRecord` (synced) holds only what the athlete types or
-  chooses: name, picture, time zone, week start, main sport, the pace history and the HealthKit
-  resting-heart-rate switch. Sex, date of birth and the heart-rate settings never sync.
+  chooses: name, picture, time zone, week start, main sport, the pace history, the HealthKit
+  resting-heart-rate switch and the run availability (MVP5-104). Sex, date of birth and the heart-rate settings never sync.
   `SwiftDataStore.athleteProfile()` merges the two, the synced preferences winning, so a preference
   edited on another device shows up; `save(_:)` writes both. The import anchor is local because it is a
   per-device HealthKit anchor: a synced anchor would make a second device skip workouts it never

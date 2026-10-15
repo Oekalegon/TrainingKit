@@ -8,6 +8,8 @@ import Foundation
 /// 2. The very last micro (the one covering race day itself) always has role `.race`.
 /// 3. Every other micro in a `.taper`- or `.race`-phase ``MacroTemplate/MesoBlock`` has role
 ///    `.taper` or `.race` respectively.
+///    Taper and race blocks are recognised by the built-in `.taper` and `.race` phases only; a
+///    paradigm's differently named taper phase is laid out like any other block.
 /// 4. Every micro in any other block cycles through its pattern's `microRoles` (e.g. "3:1"'s
 ///    `build, build, build, recovery`), restarting the pattern at each block's boundary. The
 ///    pattern is `meso`, unless the block sets its own ``MacroTemplate/MesoBlock/pattern``, so a

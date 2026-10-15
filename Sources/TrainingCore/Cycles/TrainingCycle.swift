@@ -52,15 +52,11 @@ public struct TrainingCycle: Identifiable, Sendable, Codable, Hashable {
         self.id = id
         self.level = level
         self.phase = phase
-        self.loadRole = level == .micro ? loadRole ?? Self.derivedLoadRole(from: phase) : nil
+        self.loadRole = level == .micro ? loadRole ?? MicroLoadRole(legacyPhase: phase) : nil
         self.name = name
         self.dateRange = dateRange
         self.parentID = parentID
         self.targetRaceID = targetRaceID
-    }
-
-    private static func derivedLoadRole(from phase: CyclePhase) -> MicroLoadRole {
-        MicroLoadRole(rawValue: phase.id) ?? .build
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -69,7 +65,9 @@ public struct TrainingCycle: Identifiable, Sendable, Codable, Hashable {
 
     /// Decodes a cycle, including payloads written before the load role existed. For those, a
     /// micro's role is derived from its stored phase (`build`, `recovery`, `taper` and `race` map
-    /// to the role of the same name; any other phase counts as `build`).
+    /// to the role of the same name; any other phase counts as `build`). A stored recovery micro
+    /// keeps its `recovery` phase, whereas a micro laid out now takes its block's phase and
+    /// carries the recovery role instead.
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(UUID.self, forKey: .id)
@@ -82,7 +80,7 @@ public struct TrainingCycle: Identifiable, Sendable, Codable, Hashable {
         if let stored = try container.decodeIfPresent(MicroLoadRole.self, forKey: .loadRole) {
             loadRole = stored
         } else if level == .micro {
-            loadRole = Self.derivedLoadRole(from: phase)
+            loadRole = MicroLoadRole(legacyPhase: phase)
         } else {
             loadRole = nil
         }

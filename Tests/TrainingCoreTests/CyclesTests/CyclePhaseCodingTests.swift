@@ -79,6 +79,21 @@ struct CyclePhaseCodingTests {
         #expect(try JSONDecoder().decode(MesocycleTemplate.self, from: JSONEncoder().encode(template)) == template)
     }
 
+    @Test("a micro-cycle without a stored role derives it from its phase")
+    func legacyMicrocycle() throws {
+        let legacy = Data(#"{"dateRange":[1000,2000],"phase":{"recovery":{}},"mesoBlockIndex":2}"#.utf8)
+        let micro = try JSONDecoder().decode(Microcycle.self, from: legacy)
+        #expect(micro.phase == .recovery && micro.loadRole == .recovery && micro.mesoBlockIndex == 2)
+        #expect(try JSONDecoder().decode(Microcycle.self, from: JSONEncoder().encode(micro)) == micro)
+    }
+
+    @Test("a macro template stored with enum phases decodes")
+    func legacyMacroTemplate() throws {
+        let legacy = Data(#"{"name":"M","mesoBlocks":[{"phase":{"base":{}},"microCount":4},{"phase":{"taper":{}},"microCount":2}]}"#.utf8)
+        let macro = try JSONDecoder().decode(MacroTemplate.self, from: legacy)
+        #expect(macro.mesoBlocks.map(\.phase) == [.base, .taper])
+    }
+
     @Test("InMemoryStore holds a cycle decoded from a legacy payload")
     func inMemoryStoreLegacy() async throws {
         let cycle = try JSONDecoder().decode(TrainingCycle.self, from: Self.legacyCyclePayload(level: "micro", phase: "recovery"))

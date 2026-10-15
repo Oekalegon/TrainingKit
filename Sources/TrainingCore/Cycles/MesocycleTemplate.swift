@@ -68,7 +68,7 @@ extension MesocycleTemplate {
             microRoles = roles
         } else {
             let legacy = try container.decode([CyclePhase].self, forKey: .microPhases)
-            microRoles = legacy.map { MicroLoadRole(rawValue: $0.id) ?? .build }
+            microRoles = legacy.map { MicroLoadRole(legacyPhase: $0) }
         }
         microLengthDays = try container.decode(Int.self, forKey: .microLengthDays)
         recoveryLoadFraction = try container.decode(Double.self, forKey: .recoveryLoadFraction)

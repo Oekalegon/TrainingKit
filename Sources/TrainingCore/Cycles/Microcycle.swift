@@ -33,4 +33,18 @@ public struct Microcycle: Identifiable, Sendable, Codable, Hashable {
         self.loadRole = loadRole
         self.mesoBlockIndex = mesoBlockIndex
     }
+
+    private enum CodingKeys: String, CodingKey {
+        case dateRange, phase, loadRole, mesoBlockIndex
+    }
+
+    /// Decodes a micro-cycle, including payloads written before load roles existed; those get the
+    /// role ``MicroLoadRole/init(legacyPhase:)`` derives from the stored phase.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        dateRange = try container.decode(ClosedRange<Date>.self, forKey: .dateRange)
+        phase = try container.decode(CyclePhase.self, forKey: .phase)
+        loadRole = try container.decodeIfPresent(MicroLoadRole.self, forKey: .loadRole) ?? MicroLoadRole(legacyPhase: phase)
+        mesoBlockIndex = try container.decode(Int.self, forKey: .mesoBlockIndex)
+    }
 }

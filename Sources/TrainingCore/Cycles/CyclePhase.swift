@@ -8,7 +8,7 @@ import Foundation
 /// own. How hard a micro-cycle is meant to be — build, recovery, taper or race — is a separate
 /// concern, recorded per micro as ``MicroLoadRole``.
 ///
-/// Encodes as a plain string (its ``id``). Payloads written before phases became named values
+/// Ids are case-sensitive: `"Build"` is not `.build`. Encodes as a plain string (its ``id``). Payloads written before phases became named values
 /// stored the old enum, e.g. `{"build":{}}`; those decode to the matching constant.
 public struct CyclePhase: Sendable, Hashable, Codable, ExpressibleByStringLiteral, CustomStringConvertible {
     /// The phase's stable identifier, e.g. `"build"`. This is what is persisted.
@@ -26,6 +26,7 @@ public struct CyclePhase: Sendable, Hashable, Codable, ExpressibleByStringLitera
         self.init(value)
     }
 
+    /// The phase's ``id``.
     public var description: String { id }
 
     /// General aerobic base building.
@@ -59,6 +60,7 @@ public struct CyclePhase: Sendable, Hashable, Codable, ExpressibleByStringLitera
         self.init(key.stringValue)
     }
 
+    /// Encodes the phase as its ``id`` string.
     public func encode(to encoder: Encoder) throws {
         var container = encoder.singleValueContainer()
         try container.encode(id)

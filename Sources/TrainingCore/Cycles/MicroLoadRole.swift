@@ -15,4 +15,12 @@ public enum MicroLoadRole: String, Sendable, Codable, Hashable, CaseIterable {
     case taper
     /// The micro containing race day.
     case race
+
+    /// The role a micro stored before load roles existed had, judged from its phase: `build`,
+    /// `recovery`, `taper` and `race` map to the role of the same name, any other phase to `build`.
+    ///
+    /// - Parameter phase: The stored phase.
+    public init(legacyPhase phase: CyclePhase) {
+        self = MicroLoadRole(rawValue: phase.id) ?? .build
+    }
 }

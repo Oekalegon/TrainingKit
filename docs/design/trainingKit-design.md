@@ -340,10 +340,19 @@ struct PlannedActivity: Identifiable, Sendable, Codable {
     var expectedLoadOverride: Double? // manual override of the estimator
     var completedActivityID: UUID?    // set on reconciliation
     var cycleID: UUID?                // the micro this plan belongs to; derived from date if nil
+    var planID: UUID?                 // the TrainingPlan it belongs to (MVP5-124)
 }
 ```
 
-A plan is just workout + date; everything else is derived. Keeping it minimal is what lets MVP 2 generate plans as plain data.
+A planned activity is just workout + date; everything else is derived. Keeping it minimal is what lets MVP 2 generate plans as plain data.
+
+#### Training plans (MVP5-124)
+
+A `TrainingPlan` (`id`, `name`, `status` of `.draft`/`.active`/`.archived`, `macroCycleID`, `targetRaceID`, `createdDate`) groups the `PlannedActivity` values and `TrainingCycle`s that belong together through their `planID`, so several plans can exist side by side with **at most one active**. Only the active plan's workouts and cycles are in `TrainingModel.plans`/`.cycles`, and so in the fitness series, statistics, activity matching, pace history, calendar export and the `PlanSandbox` snapshot; a draft or archived plan stays in the store, editable and previewable (`TrainingModel.plannedActivities(ofPlan:in:)`, `cycles(ofPlan:in:)`). Workouts and cycles with no plan, or whose plan is gone, count as part of the active plan (the filter excludes *inactive* plans rather than selecting the active one), so data written before plans existed, or by another device on an older version, never drops out of the series.
+
+Stored in an optional `TrainingPlanStore` (`StoreSet.trainingPlanStore`; `nil` means no plans and everything counts), with a synced `TrainingPlanRecord` in the CloudKit store. Two multi-record guarantees live in the store: `upsertTrainingPlan(_:)` demotes any other active plan to a draft in the same write, and `deleteTrainingPlan(id:)` removes the plan, its cycles and its planned workouts that no activity completed in one save (a completed one stays, its `planID` pointing at nothing, so the history behind the estimate refinement isn't lost). Sibling cycles only have to avoid overlapping *within the same plan* (`CycleNestingValidator`), so two plans can lay out the same weeks differently.
+
+`TrainingModel` adds `createTrainingPlan(named:status:targetRaceID:)`, `save(_:)`, `activateTrainingPlan(id:)`, `setStatus(_:ofTrainingPlan:)`, `renameTrainingPlan(id:to:)`, `duplicateTrainingPlan(id:named:)` (a draft copy with the cycles, parents remapped, and the uncompleted workouts from today on) and `deleteTrainingPlan(id:)`, each reloading and recomputing. A workout or cycle added without a plan goes into the active plan; if there is none, "My plan" is created and activated. `load(in:)` moves everything that has no plan into the active plan, creating "Current plan" first if needed, which migrates data written before plans existed (best effort, logged on failure). Archiving the active plan leaves none active. Plans don't affect the persisted fitness-metrics cache, which only holds past days: switching the active plan just recomputes the projection.
 
 #### Default titles (MVP2-110)
 
@@ -558,7 +567,7 @@ Sources/
     Cycles/           TrainingCycle, CycleLevel, CyclePhase, MicroLoadRole, MesocycleTemplate,
                       MacroTemplate, CycleLayoutBuilder
     Goals/            Goal, GoalTarget, GoalMeasure, GoalPeriod
-    Store/            ActivityStore, PlanStore, WorkoutLibraryStore, CycleStore, RaceStore,
+    Store/            ActivityStore, PlanStore, TrainingPlanStore, WorkoutLibraryStore, CycleStore, RaceStore,
                       GoalStore, WorkoutTemplateStore, WorkoutTemplateStoreError, TemplateRemoval,
                       AthleteStore, FitnessMetricsCacheStore, InMemoryStore
     TrainingModel.swift

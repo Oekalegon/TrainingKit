@@ -14,8 +14,11 @@ public final class TrainingModel {
     public internal(set) var activities: [Activity] = []
     public internal(set) var plans: [PlannedActivity] = []
     public private(set) var workouts: [StructuredWorkout] = []
-    public private(set) var cycles: [TrainingCycle] = []
+    public internal(set) var cycles: [TrainingCycle] = []
     public private(set) var races: [Race] = []
+    /// Every training plan, active or not (MVP5-124); empty without a ``StoreSet/trainingPlanStore``.
+    /// ``plans`` and ``cycles`` hold only what belongs to the active plan (and what belongs to none).
+    public internal(set) var trainingPlans: [TrainingPlan] = []
     /// Every goal, as of the last ``load(in:asOf:)`` or goal change: goals have no date, so they aren't
     /// limited to the loaded range. Empty when the ``StoreSet`` has no ``GoalStore``.
     public private(set) var goals: [Goal] = []
@@ -203,13 +206,15 @@ public final class TrainingModel {
     /// through (e.g. the plan fetch throwing after the activity fetch already succeeded) leaves
     /// this model exactly as it was before the call, rather than a mix of the old and new range.
     public func load(in range: ClosedRange<Date>, asOf today: Date = .now) async throws {
+        await adoptUnassignedIntoActivePlan()
         let newActivities = try await stores.activityStore.activities(in: range)
-        let newPlans = try await stores.planStore.plans(in: range)
+        let newPlans = try await stores.activePlannedActivities(in: range)
         let newWorkouts = try await stores.workoutStore.workouts()
-        let newCycles = try await stores.cycleStore.cycles(in: range)
+        let newCycles = try await stores.activeCycles(in: range)
         let newRaces = try await stores.raceStore.races(in: range)
         let newGoals = try await stores.goalStore?.goals() ?? []
         let newTemplates = try await stores.templateStore?.templates() ?? []
+        let newTrainingPlans = try await stores.trainingPlanStore?.trainingPlans() ?? []
         let newHasEverImportedActivities = try await stores.athleteStore.importAnchor() != nil
 
         activities = newActivities
@@ -219,6 +224,7 @@ public final class TrainingModel {
         races = newRaces
         goals = newGoals
         templates = newTemplates
+        trainingPlans = newTrainingPlans
         hasEverImportedActivities = newHasEverImportedActivities
         loadedRange = range
         await recompute(asOf: today)
@@ -232,9 +238,9 @@ public final class TrainingModel {
     /// without this, the plan would persist to the store but `plans`/`metrics` would never reflect
     /// it, with no error to signal anything was skipped.
     public func add(_ plan: PlannedActivity, asOf today: Date = .now) async throws {
-        try await stores.planStore.upsert([plan])
+        try await stores.planStore.upsert(try await assigningToActivePlan([plan]))
         let range = loadedRange ?? (plan.date...plan.date)
-        plans = try await stores.planStore.plans(in: range)
+        plans = try await stores.activePlannedActivities(in: range)
         // Always refreshed (not just when never loaded): recompute needs `workouts` to resolve
         // `plan.workoutID`, and the workout `plan` references might not be in the cached array yet.
         workouts = try await stores.workoutStore.workouts()
@@ -282,7 +288,7 @@ public final class TrainingModel {
         try await releaseActivity(heldBy: id)
         try await stores.planStore.deletePlan(id: id)
         if let loadedRange {
-            plans = try await stores.planStore.plans(in: loadedRange)
+            plans = try await stores.activePlannedActivities(in: loadedRange)
         }
         await recompute(asOf: today)
     }
@@ -309,9 +315,9 @@ public final class TrainingModel {
     /// of `newCycles`' date ranges (and adopts it as the loaded range), for the same reason as the
     /// `PlannedActivity` overload of `add` above.
     public func add(_ newCycles: [TrainingCycle], asOf today: Date = .now) async throws {
-        try await stores.cycleStore.upsert(newCycles)
+        try await stores.cycleStore.upsert(try await assigningToActivePlan(newCycles))
         let range = loadedRange ?? Self.union(of: newCycles.map(\.dateRange), fallback: today)
-        cycles = try await stores.cycleStore.cycles(in: range)
+        cycles = try await stores.activeCycles(in: range)
         loadedRange = range
         await recompute(asOf: today)
     }
@@ -724,7 +730,7 @@ public final class TrainingModel {
         // can't taint what's about to be cached — it only degrades today's/future's *published*
         // estimate, handled separately below.
         let fetchedActivities = try? await stores.activityStore.activities(in: fetchFromStart...upperBound)
-        let fetchedPlans = try? await stores.planStore.plans(in: fetchFromStart...upperBound)
+        let fetchedPlans = try? await stores.activePlannedActivities(in: fetchFromStart...upperBound)
         let cacheWriteBlocked = fetchedActivities == nil
         let rawActivities = fetchedActivities ?? []
         let rawPlans = fetchedPlans ?? []

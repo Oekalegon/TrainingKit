@@ -22,7 +22,7 @@ import SwiftData
 /// already needed this: see its doc comment below.
 @ModelActor
 public actor SwiftDataStore: ActivityStore, PlanStore, WorkoutLibraryStore, CycleStore, RaceStore, GoalStore,
-    WorkoutTemplateStore, AthleteStore, FitnessMetricsCacheStore {
+    WorkoutTemplateStore, AthleteStore, FitnessMetricsCacheStore, TrainingPlanStore {
     // MARK: ActivityStore
 
     /// See `ActivityStore/activities(in:)`.
@@ -514,6 +514,71 @@ public actor SwiftDataStore: ActivityStore, PlanStore, WorkoutLibraryStore, Cycl
 
     private func fetchGoalRecord(id: UUID) throws -> GoalRecord? {
         let descriptor = FetchDescriptor<GoalRecord>(predicate: #Predicate { $0.id == id })
+        return try modelContext.fetch(descriptor).first
+    }
+
+    // MARK: TrainingPlanStore
+
+    /// See `TrainingPlanStore/trainingPlans()`.
+    ///
+    /// A record that can't be decoded is skipped and logged rather than thrown, as for goals: plans
+    /// sync, so another device on a newer version can write a status this one doesn't know, and one
+    /// such plan mustn't make `TrainingModel.load(in:asOf:)` fail for everything else.
+    public func trainingPlans() async throws -> [TrainingPlan] {
+        try modelContext.fetch(FetchDescriptor<TrainingPlanRecord>()).compactMap { record in
+            do {
+                return try record.toTrainingPlan()
+            } catch {
+                Logging.persistence.error(
+                    "Skipping training plan \(record.id, privacy: .public) that can't be decoded: \(String(describing: error), privacy: .public)"
+                )
+                return nil
+            }
+        }
+    }
+
+    /// See `TrainingPlanStore/trainingPlan(id:)`.
+    public func trainingPlan(id: UUID) async throws -> TrainingPlan? {
+        try fetchTrainingPlanRecord(id: id)?.toTrainingPlan()
+    }
+
+    /// See `TrainingPlanStore/upsertTrainingPlan(_:)`. The demotion of the previously active plan and
+    /// the write of `plan` go out in one save.
+    public func upsertTrainingPlan(_ plan: TrainingPlan) async throws {
+        var existing: TrainingPlanRecord?
+        for record in try modelContext.fetch(FetchDescriptor<TrainingPlanRecord>()) {
+            if record.id == plan.id {
+                existing = record
+            } else if plan.status == .active, var other = try? record.toTrainingPlan(), other.status == .active {
+                other.status = .draft
+                try record.update(from: other)
+            }
+        }
+        if let existing {
+            try existing.update(from: plan)
+        } else {
+            modelContext.insert(try TrainingPlanRecord(plan: plan))
+        }
+        try modelContext.save()
+    }
+
+    /// See `TrainingPlanStore/deleteTrainingPlan(id:)`. The plan, its cycles and its uncompleted
+    /// planned workouts are removed in one save.
+    public func deleteTrainingPlan(id: UUID) async throws {
+        guard let record = try fetchTrainingPlanRecord(id: id) else { return }
+        for cycleRecord in try modelContext.fetch(FetchDescriptor<TrainingCycleRecord>()) {
+            if try cycleRecord.toCycle().planID == id { modelContext.delete(cycleRecord) }
+        }
+        for planRecord in try modelContext.fetch(FetchDescriptor<PlannedActivityRecord>()) {
+            let plan = try planRecord.toPlan()
+            if plan.planID == id, plan.completedActivityID == nil { modelContext.delete(planRecord) }
+        }
+        modelContext.delete(record)
+        try modelContext.save()
+    }
+
+    private func fetchTrainingPlanRecord(id: UUID) throws -> TrainingPlanRecord? {
+        let descriptor = FetchDescriptor<TrainingPlanRecord>(predicate: #Predicate { $0.id == id })
         return try modelContext.fetch(descriptor).first
     }
 

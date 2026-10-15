@@ -65,7 +65,7 @@ extension TrainingModel {
         guard let earliest = candidates.map(\.start).min(), let latest = candidates.map(\.start).max() else { return }
         // A day either side, so the reconciler's timezone-aware same-day check has the plans it needs.
         let day: TimeInterval = 86_400
-        var plans = try await stores.planStore.plans(in: earliest.addingTimeInterval(-day)...latest.addingTimeInterval(day))
+        var plans = try await stores.activePlannedActivities(in: earliest.addingTimeInterval(-day)...latest.addingTimeInterval(day))
         guard !plans.isEmpty else { return }
         try await freeUnknownHolders(of: &plans, startedBy: candidates)
         let workouts = try await stores.workoutStore.workouts()
@@ -190,7 +190,7 @@ extension TrainingModel {
             try await stores.planStore.upsert([plan])
         }
         planMatchAmbiguities.removeAll { ids.contains($0.activityID) }
-        if let loadedRange { plans = try await stores.planStore.plans(in: loadedRange) }
+        if let loadedRange { plans = try await stores.activePlannedActivities(in: loadedRange) }
     }
 
     /// Frees the activity linked to the plan `planID`, for when the plan is about to be deleted —
@@ -265,12 +265,12 @@ extension TrainingModel {
         }
         if let loadedRange {
             activities = try await stores.activityStore.activities(in: loadedRange)
-            plans = try await stores.planStore.plans(in: loadedRange)
+            plans = try await stores.activePlannedActivities(in: loadedRange)
         }
     }
 
     private func loadedPlansFromStore() async throws -> [PlannedActivity] {
         guard let loadedRange else { return [] }
-        return try await stores.planStore.plans(in: loadedRange)
+        return try await stores.activePlannedActivities(in: loadedRange)
     }
 }

@@ -43,7 +43,7 @@ extension TrainingModel {
             templates = try await templateStore.templates()
         }
         if !plan.workouts.isEmpty { try await stores.workoutStore.upsert(plan.workouts) }
-        try await stores.planStore.upsert(plan.plans)
+        try await stores.planStore.upsert(try await assigningToActivePlan(plan.plans))
 
         if !plan.activities.isEmpty {
             // Through the import queue, so it can't interleave with a HealthKit import's read and
@@ -67,7 +67,7 @@ extension TrainingModel {
         let first = CalendarImportPlanner.date(fromDay: export.firstDay, calendar: calendar) ?? .distantPast
         let last = CalendarImportPlanner.date(fromDay: export.lastDay, calendar: calendar) ?? .distantFuture
         let range = (calendar.date(byAdding: .day, value: -1, to: first) ?? first)...(calendar.date(byAdding: .day, value: 2, to: last) ?? last)
-        let existingPlans = try await stores.planStore.plans(in: range)
+        let existingPlans = try await stores.activePlannedActivities(in: range)
         let existingWorkouts = try await stores.workoutStore.workouts()
         let existingActivities = try await stores.activityStore.activityListItems(in: range)
         var existingSources: Set<ActivitySource> = []

@@ -262,12 +262,12 @@ extension TrainingModel {
         activities = try await stores.activityStore.activities(in: range)
         if bestEffortPlans {
             do {
-                plans = try await stores.planStore.plans(in: range)
+                plans = try await stores.activePlannedActivities(in: range)
             } catch {
                 Logging.dataImport.error("Refreshing plans failed: \(error.localizedDescription)")
             }
         } else {
-            plans = try await stores.planStore.plans(in: range)
+            plans = try await stores.activePlannedActivities(in: range)
         }
     }
 }

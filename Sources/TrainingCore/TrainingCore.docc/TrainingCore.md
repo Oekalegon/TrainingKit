@@ -72,6 +72,8 @@ See `docs/design/trainingKit-design.md` in the package repository for the full m
 ### Planning
 
 - ``PlannedActivity``
+- ``TrainingPlan``
+- ``PlanStatus``
 - ``PlanPreferences``
 - ``RunAvailability``
 - ``DaySlot``
@@ -138,6 +140,8 @@ See `docs/design/trainingKit-design.md` in the package repository for the full m
 
 - ``ActivityStore``
 - ``PlanStore``
+- ``TrainingPlanStore``
+- ``TrainingPlanError``
 - ``WorkoutLibraryStore``
 - ``CycleStore``
 - ``CycleStoreError``

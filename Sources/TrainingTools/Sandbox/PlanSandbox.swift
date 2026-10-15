@@ -52,9 +52,9 @@ public actor PlanSandbox {
             throw PlanSandboxError.missingAthleteProfile
         }
 
-        async let plans = stores.planStore.plans(in: range)
+        async let plans = stores.activePlannedActivities(in: range)
         async let workouts = stores.workoutStore.workouts()
-        async let cycles = stores.cycleStore.cycles(in: range)
+        async let cycles = stores.activeCycles(in: range)
         async let activities = stores.activityStore.activities(in: range)
 
         let (fetchedPlans, fetchedWorkouts, fetchedCycles, fetchedActivities) =
@@ -134,9 +134,21 @@ public actor PlanSandbox {
     }
 
     /// Writes the sandbox's current working set to `stores`, replacing whatever plans/workouts/
-    /// cycles were removed since the snapshot and upserting everything added or changed.
+    /// cycles were removed since the snapshot and upserting everything added or changed. A plan or
+    /// cycle that belongs to no training plan is put in the active one, if there is one.
     public func commit(to stores: StoreSet) async throws {
         let diff = diff()
+        let activePlanID = try await stores.trainingPlanStore?.trainingPlans().first { $0.status == .active }?.id
+        let plans = plans.map { plan in
+            var plan = plan
+            plan.planID = plan.planID ?? activePlanID
+            return plan
+        }
+        let cycles = cycles.map { cycle in
+            var cycle = cycle
+            cycle.planID = cycle.planID ?? activePlanID
+            return cycle
+        }
 
         if !plans.isEmpty { try await stores.planStore.upsert(plans) }
         for removed in diff.plans.removed {

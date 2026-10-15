@@ -7,7 +7,7 @@ import Foundation
 /// `delete(id:)`) — Swift can't satisfy identically-shaped requirements from different protocols
 /// with different implementations on one conforming type.
 public actor InMemoryStore: ActivityStore, PlanStore, WorkoutLibraryStore, WorkoutTemplateStore, CycleStore,
-    AthleteStore, FitnessMetricsCacheStore, RaceStore, GoalStore {
+    AthleteStore, FitnessMetricsCacheStore, RaceStore, GoalStore, TrainingPlanStore {
     private var activitiesByID: [UUID: Activity] = [:]
     private var deletedSources: Set<ActivitySource> = []
     /// Joined activity id → its component ids. See ``ActivityStore/saveJoin(_:components:replacing:)``.
@@ -18,6 +18,7 @@ public actor InMemoryStore: ActivityStore, PlanStore, WorkoutLibraryStore, Worko
     private var cyclesByID: [UUID: TrainingCycle] = [:]
     private var racesByID: [UUID: Race] = [:]
     private var goalsByID: [UUID: Goal] = [:]
+    private var trainingPlansByID: [UUID: TrainingPlan] = [:]
     private var profile: AthleteProfile?
     private var anchor: ImportAnchor?
     private var cachedMetricsByDay: [Date: FitnessMetrics] = [:]
@@ -381,5 +382,40 @@ public actor InMemoryStore: ActivityStore, PlanStore, WorkoutLibraryStore, Worko
     /// See ``FitnessMetricsCacheStore/clearDirtyWatermark()``.
     public func clearDirtyWatermark() async throws {
         cacheDirtyWatermark = nil
+    }
+
+    // MARK: TrainingPlanStore
+
+    /// See ``TrainingPlanStore/trainingPlans()``.
+    public func trainingPlans() async throws -> [TrainingPlan] {
+        Array(trainingPlansByID.values)
+    }
+
+    /// See ``TrainingPlanStore/trainingPlan(id:)``.
+    public func trainingPlan(id: UUID) async throws -> TrainingPlan? {
+        trainingPlansByID[id]
+    }
+
+    /// See ``TrainingPlanStore/upsertTrainingPlan(_:)``.
+    public func upsertTrainingPlan(_ plan: TrainingPlan) async throws {
+        if plan.status == .active {
+            for other in trainingPlansByID.values where other.status == .active && other.id != plan.id {
+                var demoted = other
+                demoted.status = .draft
+                trainingPlansByID[other.id] = demoted
+            }
+        }
+        trainingPlansByID[plan.id] = plan
+    }
+
+    /// See ``TrainingPlanStore/deleteTrainingPlan(id:)``.
+    public func deleteTrainingPlan(id: UUID) async throws {
+        guard trainingPlansByID.removeValue(forKey: id) != nil else { return }
+        for cycle in cyclesByID.values where cycle.planID == id {
+            cyclesByID.removeValue(forKey: cycle.id)
+        }
+        for plan in plansByID.values where plan.planID == id && plan.completedActivityID == nil {
+            plansByID.removeValue(forKey: plan.id)
+        }
     }
 }

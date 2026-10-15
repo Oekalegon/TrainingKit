@@ -18,7 +18,7 @@ public enum CycleNestingValidator {
     /// - Throws: ``CycleStoreError/parentNotFound(_:)`` if a cycle's `parentID` doesn't resolve in
     ///   `existing` or `cycles`; ``CycleStoreError/childOutsideParentRange(child:parent:)`` if a
     ///   child's `dateRange` isn't fully inside its parent's; ``CycleStoreError/overlappingSiblings(_:_:)``
-    ///   if two cycles sharing a `parentID` overlap.
+    ///   if two cycles sharing a `parentID` and a `planID` overlap.
     public static func validate(_ cycles: [TrainingCycle], existing: [UUID: TrainingCycle]) throws(CycleStoreError) {
         var workingSet = existing
         for cycle in cycles {
@@ -37,7 +37,7 @@ public enum CycleNestingValidator {
                 }
             }
 
-            let siblings = workingSet.values.filter { $0.parentID == cycle.parentID && $0.id != cycle.id }
+            let siblings = workingSet.values.filter { $0.parentID == cycle.parentID && $0.planID == cycle.planID && $0.id != cycle.id }
             for sibling in siblings where sibling.dateRange.overlaps(cycle.dateRange) {
                 throw .overlappingSiblings(cycle.id, sibling.id)
             }

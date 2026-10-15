@@ -171,4 +171,32 @@ struct PlanSandboxTests {
         #expect(result.evaluation.findings.contains { $0.rule == .tsbBand })
         #expect(!result.evaluation.isAcceptable)
     }
+
+    @Test("a snapshot holds only the active training plan's workouts, and commit puts new ones in it")
+    func snapshotAndCommitFollowActivePlan() async throws {
+        let store = InMemoryStore()
+        try await store.save(AthleteProfile.fixture())
+        let stores = StoreSet(
+            activityStore: store, planStore: store, workoutStore: store,
+            cycleStore: store, raceStore: store, athleteStore: store, trainingPlanStore: store
+        )
+        let workout = steadyWorkout()
+        try await store.upsert([workout])
+        let active = TrainingPlan(name: "Now", status: .active), draft = TrainingPlan(name: "Alt")
+        try await store.upsertTrainingPlan(active)
+        try await store.upsertTrainingPlan(draft)
+        let mine = PlannedActivity(workoutID: workout.id, date: day(1), planID: active.id)
+        let theirs = PlannedActivity(workoutID: workout.id, date: day(2), planID: draft.id)
+        try await store.upsert([mine, theirs])
+
+        let sandbox = try await PlanSandbox(snapshotOf: stores, range: day(0)...day(10))
+        #expect(await sandbox.plans.map(\.id) == [mine.id])
+
+        let added = PlannedActivity(workoutID: workout.id, date: day(3))
+        await sandbox.setPlans([mine, added])
+        try await sandbox.commit(to: stores)
+
+        #expect(try await store.plan(id: added.id)?.planID == active.id)
+        #expect(try await store.plan(id: theirs.id) != nil) // the draft's workout isn't touched
+    }
 }

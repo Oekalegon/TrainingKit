@@ -56,7 +56,7 @@ extension TrainingModel {
 
         let fetchRange = warmUpStart...periodEnd
         let fetchedActivities = try await stores.activityStore.activities(in: fetchRange)
-        let fetchedPlans = try await stores.planStore.plans(in: fetchRange)
+        let fetchedPlans = try await stores.activePlannedActivities(in: fetchRange)
         let fetchedWorkouts = try await stores.workoutStore.workouts()
 
         let estimator = await refinedEstimator()

@@ -21,11 +21,13 @@ public protocol TrainingPlanStore: Sendable {
     /// - Parameter plan: The plan to store.
     func upsertTrainingPlan(_ plan: TrainingPlan) async throws
 
-    /// Removes the plan with `id` together with what belongs to it, in one write: its cycles and the
-    /// planned workouts that no completed activity is linked to. A planned workout that was
-    /// completed stays, with its `planID` now pointing at nothing, so the history behind the
-    /// estimate refinement and the completed-workout list isn't lost. A no-op if there is no such plan.
+    /// Removes the plan with `id` together with its cycles and its planned workouts, in one write.
+    ///
+    /// A plan with at least one planned workout that an activity completed is part of the athlete's
+    /// history and is never deleted: nothing is changed and ``TrainingPlanError/hasCompletedWorkouts(_:)``
+    /// is thrown. Archive such a plan instead (``PlanStatus/archived``). A no-op if there is no such plan.
     ///
     /// - Parameter id: The plan to remove.
+    /// - Throws: ``TrainingPlanError/hasCompletedWorkouts(_:)`` as described, or whatever the store throws.
     func deleteTrainingPlan(id: UUID) async throws
 }

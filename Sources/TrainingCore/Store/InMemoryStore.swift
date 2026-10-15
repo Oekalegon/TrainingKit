@@ -410,11 +410,15 @@ public actor InMemoryStore: ActivityStore, PlanStore, WorkoutLibraryStore, Worko
 
     /// See ``TrainingPlanStore/deleteTrainingPlan(id:)``.
     public func deleteTrainingPlan(id: UUID) async throws {
-        guard trainingPlansByID.removeValue(forKey: id) != nil else { return }
+        guard trainingPlansByID[id] != nil else { return }
+        guard !plansByID.values.contains(where: { $0.planID == id && $0.completedActivityID != nil }) else {
+            throw TrainingPlanError.hasCompletedWorkouts(id)
+        }
+        trainingPlansByID.removeValue(forKey: id)
         for cycle in cyclesByID.values where cycle.planID == id {
             cyclesByID.removeValue(forKey: cycle.id)
         }
-        for plan in plansByID.values where plan.planID == id && plan.completedActivityID == nil {
+        for plan in plansByID.values where plan.planID == id {
             plansByID.removeValue(forKey: plan.id)
         }
     }

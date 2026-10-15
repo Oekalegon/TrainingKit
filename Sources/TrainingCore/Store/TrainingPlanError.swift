@@ -6,4 +6,7 @@ public enum TrainingPlanError: Error, Sendable, Hashable {
     case notConfigured
     /// There is no plan with this id.
     case notFound(UUID)
+    /// The plan has at least one planned workout that an activity completed, so it is history and is
+    /// never deleted (archive it instead).
+    case hasCompletedWorkouts(UUID)
 }

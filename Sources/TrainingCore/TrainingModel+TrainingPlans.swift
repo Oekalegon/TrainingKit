@@ -141,8 +141,10 @@ extension TrainingModel {
         return copy
     }
 
-    /// Removes the plan with `id` with its cycles and its planned workouts that no activity has
-    /// completed (see ``TrainingPlanStore/deleteTrainingPlan(id:)``), then reloads and recomputes.
+    /// Removes the plan with `id` with its cycles and its planned workouts (see
+    /// ``TrainingPlanStore/deleteTrainingPlan(id:)``), then reloads and recomputes. A plan with a
+    /// completed workout is history and is refused; check with ``trainingPlanHasCompletedWorkouts(id:)``
+    /// and offer to archive it instead.
     ///
     /// Nothing is removed from WorkoutKit from here, as for ``deletePlan(id:asOf:)``.
     ///
@@ -150,10 +152,22 @@ extension TrainingModel {
     ///   - id: The plan to remove.
     ///   - today: Passed through to ``recompute(asOf:)``.
     /// - Throws: ``TrainingPlanError/notConfigured`` without a ``StoreSet/trainingPlanStore``, or
-    ///   whatever the stores throw.
+    ///   ``TrainingPlanError/hasCompletedWorkouts(_:)`` for a plan with a completed workout, or whatever
+    ///   the stores throw.
     public func deleteTrainingPlan(id: UUID, asOf today: Date = .now) async throws {
         try await requiredTrainingPlanStore().deleteTrainingPlan(id: id)
         try await reloadPlanState(asOf: today)
+    }
+
+    /// Whether an activity has completed at least one planned workout of the plan with `id`, which makes
+    /// the plan history that ``deleteTrainingPlan(id:asOf:)`` refuses to remove. Read from the store,
+    /// whatever the loaded range.
+    ///
+    /// - Parameter id: The plan.
+    /// - Throws: Whatever the store throws.
+    public func trainingPlanHasCompletedWorkouts(id: UUID) async throws -> Bool {
+        try await stores.planStore.plans(in: Date.distantPast...Date.distantFuture)
+            .contains { $0.planID == id && $0.completedActivityID != nil }
     }
 
     /// The planned workouts of the plan with `id` in `range`, whether or not it is the active plan:

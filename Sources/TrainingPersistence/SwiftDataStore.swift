@@ -562,17 +562,19 @@ public actor SwiftDataStore: ActivityStore, PlanStore, WorkoutLibraryStore, Cycl
         try modelContext.save()
     }
 
-    /// See `TrainingPlanStore/deleteTrainingPlan(id:)`. The plan, its cycles and its uncompleted
-    /// planned workouts are removed in one save.
+    /// See `TrainingPlanStore/deleteTrainingPlan(id:)`. Refuses, before changing anything, a plan with a
+    /// completed workout; otherwise the plan, its cycles and its planned workouts go in one save.
     public func deleteTrainingPlan(id: UUID) async throws {
         guard let record = try fetchTrainingPlanRecord(id: id) else { return }
+        let ownedWorkouts = try modelContext.fetch(FetchDescriptor<PlannedActivityRecord>())
+            .filter { try $0.toPlan().planID == id }
+        guard try !ownedWorkouts.contains(where: { try $0.toPlan().completedActivityID != nil }) else {
+            throw TrainingPlanError.hasCompletedWorkouts(id)
+        }
         for cycleRecord in try modelContext.fetch(FetchDescriptor<TrainingCycleRecord>()) {
             if try cycleRecord.toCycle().planID == id { modelContext.delete(cycleRecord) }
         }
-        for planRecord in try modelContext.fetch(FetchDescriptor<PlannedActivityRecord>()) {
-            let plan = try planRecord.toPlan()
-            if plan.planID == id, plan.completedActivityID == nil { modelContext.delete(planRecord) }
-        }
+        for planRecord in ownedWorkouts { modelContext.delete(planRecord) }
         modelContext.delete(record)
         try modelContext.save()
     }

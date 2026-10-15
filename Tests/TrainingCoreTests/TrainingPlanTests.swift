@@ -64,7 +64,7 @@ struct TrainingPlanTests {
         #expect(try await store.trainingPlans().filter { $0.status == .active }.count == 1)
     }
 
-    @Test("deleting a plan removes its cycles and uncompleted workouts, keeps completed ones and other plans' items")
+    @Test("deleting a plan removes its cycles and workouts and leaves other plans' items")
     func deleteCascades() async throws {
         let store = InMemoryStore()
         let doomed = TrainingPlan(name: "Doomed"), kept = TrainingPlan(name: "Kept")
@@ -72,9 +72,9 @@ struct TrainingPlanTests {
         try await store.upsertTrainingPlan(kept)
         let workoutID = UUID()
         let future = PlannedActivity(workoutID: workoutID, date: day(5), planID: doomed.id)
-        let done = PlannedActivity(workoutID: workoutID, date: day(-5), completedActivityID: UUID(), planID: doomed.id)
+        let missed = PlannedActivity(workoutID: workoutID, date: day(-5), planID: doomed.id)
         let other = PlannedActivity(workoutID: workoutID, date: day(5), planID: kept.id)
-        try await store.upsert([future, done, other])
+        try await store.upsert([future, missed, other])
         let doomedMacro = macro(day(0)...day(30), planID: doomed.id)
         let keptMacro = macro(day(0)...day(30), planID: kept.id)
         try await store.upsert([doomedMacro, keptMacro])
@@ -83,11 +83,32 @@ struct TrainingPlanTests {
 
         #expect(try await store.trainingPlan(id: doomed.id) == nil)
         #expect(try await store.plan(id: future.id) == nil)
-        #expect(try await store.plan(id: done.id) != nil)
+        #expect(try await store.plan(id: missed.id) == nil)
         #expect(try await store.plan(id: other.id) != nil)
         #expect(try await store.cycle(id: doomedMacro.id) == nil)
         #expect(try await store.cycle(id: keptMacro.id) != nil)
         try await store.deleteTrainingPlan(id: doomed.id) // a second delete is a no-op
+    }
+
+    @Test("a plan with a completed workout is history: deleting it throws and changes nothing")
+    func completedPlanIsNeverDeleted() async throws {
+        let store = InMemoryStore()
+        let plan = TrainingPlan(name: "Done a run")
+        try await store.upsertTrainingPlan(plan)
+        let done = PlannedActivity(workoutID: UUID(), date: day(-5), completedActivityID: UUID(), planID: plan.id)
+        let future = PlannedActivity(workoutID: UUID(), date: day(5), planID: plan.id)
+        let cycle = macro(day(-10)...day(30), planID: plan.id)
+        try await store.upsert([done, future])
+        try await store.upsert([cycle])
+
+        await #expect(throws: TrainingPlanError.hasCompletedWorkouts(plan.id)) {
+            try await store.deleteTrainingPlan(id: plan.id)
+        }
+
+        #expect(try await store.trainingPlan(id: plan.id) == plan)
+        #expect(try await store.plan(id: done.id) == done)
+        #expect(try await store.plan(id: future.id) == future)
+        #expect(try await store.cycle(id: cycle.id) == cycle)
     }
 
     @Test("two plans can lay out overlapping cycles; one plan can't")
@@ -275,5 +296,27 @@ struct TrainingPlanTests {
         try await model.importActivities(from: StubImporter(activities: [activity]), asOf: day(0))
 
         #expect(try await store.plan(id: draftPlan.id)?.completedActivityID == nil)
+    }
+
+    @Test("the model refuses to delete a plan with a completed workout, and says so beforehand")
+    func modelRefusesCompletedPlan() async throws {
+        let (store, model) = makeModel()
+        let w = workout()
+        try await model.add(w, asOf: day(0))
+        let plan = try await model.createTrainingPlan(named: "Now", status: .active, asOf: day(0))
+        let empty = try await model.createTrainingPlan(named: "Empty", asOf: day(0))
+        try await model.load(in: day(0)...day(10), asOf: day(0))
+        let done = PlannedActivity(workoutID: w.id, date: day(0), completedActivityID: UUID(), planID: plan.id)
+        try await store.upsert([done])
+
+        #expect(try await model.trainingPlanHasCompletedWorkouts(id: plan.id))
+        #expect(try await model.trainingPlanHasCompletedWorkouts(id: empty.id) == false)
+        await #expect(throws: TrainingPlanError.hasCompletedWorkouts(plan.id)) {
+            try await model.deleteTrainingPlan(id: plan.id, asOf: self.day(0))
+        }
+        #expect(model.trainingPlans.count == 2)
+        try await model.setStatus(.archived, ofTrainingPlan: plan.id, asOf: day(0)) // archiving stays possible
+        try await model.deleteTrainingPlan(id: empty.id, asOf: day(0))
+        #expect(model.trainingPlans.map(\.id) == [plan.id])
     }
 }

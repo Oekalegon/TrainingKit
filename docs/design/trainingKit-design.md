@@ -629,7 +629,7 @@ struct VolumeIncrement: Sendable, Codable {
 }
 ```
 
-`PlanGenerator` reads `trainingDays` to decide which calendar days get a session at all, and `startingWeeklyVolume` + `weeklyIncrement` to size each week's total before splitting it across sessions. Days without a `dayPreferences` entry (or with `sessionType == nil`) default to an `.easy` session sized from `startingSessionVolume`, ramped the same way as the weekly total. Days with an explicit `sessionType` (e.g. `.long` on Sunday, `.interval` on Tuesday, `.hillRepeats` on Thursday) are filled from library workouts matching that `sessionType`/`sport`/`surface`, falling back to the closest match if the library has nothing tagged for it. `maxSingleSessionDistanceMeters`/`Duration` bounds any one session — most relevant to `.long` days — regardless of what the ramp would otherwise assign; this is a preference-level cap (e.g. "I don't want a long run over 32km"), independent of and typically tighter than anything `PlanGuardrails` enforces at the series level. None of this bypasses §8.2: a ramp the athlete asked for that would still breach `maxCTLRampPerWeek` or `maxATLtoCTLRatio` gets throttled by the same adjust step as any other proposal.
+`PlanGenerator` reads `trainingDays` to decide which calendar days get a session at all, and `startingWeeklyVolume` + `weeklyIncrement` to size each week's total before splitting it across sessions. Days without a `dayPreferences` entry (or with `sessionType == nil`) default to an `.easy` session sized from `startingSessionVolume`, ramped the same way as the weekly total. Days with an explicit `sessionType` (e.g. `.long` on Sunday, `.interval` on Tuesday, `.hillRepeats` on Thursday) are filled from library workouts matching that `sessionType`/`sport`/`surface`, falling back to the closest match if the library has nothing tagged for it. `maxSingleSessionDistanceMeters`/`Duration` bounds any one session — most relevant to `.long` days — regardless of what the ramp would otherwise assign; this is a preference-level cap (e.g. "I don't want a long run over 32km"), independent of and typically tighter than anything `PlanGuardrails` enforces at the series level. None of this bypasses §8.2: a ramp the athlete asked for that would still breach a guardrail (e.g. `minAcceptableTSB`) gets throttled by the same adjust step as any other proposal.
 
 ### 8.2 Guardrails
 
@@ -648,15 +648,14 @@ struct PlanFinding: Sendable {
 }
 
 struct PlanGuardrails: Sendable, Codable {
-    var maxCTLRampPerWeek: Double = 6          // CTL points gained per 7 days
-    var maxATLtoCTLRatio: Double = 1.4         // acute:chronic analogue
-    var minATLtoCTLRatio: Double = 0.7         // below this = detraining, not risk
     var maxMonotony: Double = 2.0
     var maxStrainPercentile: Double = 0.95     // relative to athlete's own trailing 12 weeks
     var minTSBOnRaceDay: Double = 5
     var maxTSBOnRaceDay: Double = 25
-    var minCTLGainPerMeso: Double = 2          // "is there progress" over a build/base meso
-    var maxMicrosWithoutRecovery: Int = 3      // e.g. 3:1 pattern
+    var minAcceptableTSB: Double = -30         // any day
+    var maxAcceptableTSB: Double = 25          // any day
+    var strainTrailingWindowDays: Int = 84
+    var maxBuildProgressionFraction: Double = 0.10
 }
 
 struct PlanEvaluator: Sendable {
@@ -669,14 +668,15 @@ Rules, all computed from the projected series:
 
 | Rule | Signal | Why |
 |---|---|---|
-| CTL ramp | CTL[d] − CTL[d−7] | Fitness climbing too fast is the classic overuse setup; fellrnr and Coggan both flag ~5–8/week as the ceiling for most runners |
-| ATL/CTL ratio | ATL[d] / CTL[d] | Acute:chronic workload ratio analogue; > ~1.4–1.5 is the danger band, < ~0.7 means the plan is losing fitness |
 | Monotony | 7-day mean / stdev | > 2.0 means the week has no easy/hard contrast, even at moderate volume |
 | Strain | weekly load × monotony | Absolute thresholds don't transfer across athletes in TRIMP units, so compare against the athlete's own trailing distribution |
-| Race-day TSB | TSB on `Race.date` | Taper landed: positive but not so high that fitness was lost |
-| Progress | CTL at meso end − CTL at meso start | Guards against a "safe" plan that's actually flat (cycle-aware rules in §10.4) |
+| Race-day TSB | TSB on `Race.date` | Taper landed: positive but not so high that fitness was lost (a warning, not a risk) |
+| TSB band | TSB on any day | Below `minAcceptableTSB` (−30) is the injury-risk band; above `maxAcceptableTSB` (25) reads as detraining (a warning) |
+| Build progression | mean daily load of a build micro vs the previous build micro | Cycle-aware (§10.4); to be replaced by a longest-run rule (MVP5-116) |
 
-Guardrail values are `Codable` and user-editable; MVP 4 can tune them from observed outcomes (e.g. the athlete who tolerates a 1.5 ratio without issue).
+Earlier iterations also had a CTL-ramp rule (CTL[d] − CTL[d−7]), an ATL/CTL ratio, and cycle-aware recovery-micro, meso-progress, taper-shape and consecutive-load rules. They were removed (MVP5-101 review) as thresholds nobody had asked for; ramp control is left to the generator's own volume curve (MVP5-117) and `buildProgression`. Only `.risk` findings make a plan unacceptable, so a missed race-day TSB or an over-high TSB is reported but doesn't by itself send the generator back to adjust.
+
+Guardrail values are `Codable` and user-editable; MVP 4 can tune them from observed outcomes (e.g. the athlete who tolerates a lower TSB without issue).
 
 The MVP 2 generator loop is then: propose from `PlanPreferences` (§8.1) → `DailyLoadSeries` → `FitnessMetricsCalculator` → `PlanEvaluator` → adjust (drop a session, swap hard for easy, insert a down-week, throttle the requested ramp) → repeat until acceptable. The "adjust" step is a fixed set of heuristics in MVP 2 — no model in the loop. MVP 3 adds an LLM-driven coach that can propose the same kind of edits conversationally, but it drives the identical `PlanEvaluator` gate rather than replacing it.
 
@@ -1049,11 +1049,7 @@ Added to `PlanGuardrails` (§8.2):
 
 | Rule | Signal | Check |
 |---|---|---|
-| Recovery micro actually recovers | recovery micro load / previous micro load | ≤ `recoveryLoadFraction` (default 0.6–0.7) |
-| Build progression | build micro load vs previous build micro | between 0 % and ~+10 % |
-| Meso progress | `CycleFitness.ctlGain` for a build/base meso | ≥ `minCTLGainPerMeso` |
-| Taper shape | CTL drop across taper micro(s) | small (≤ ~10 %) while TSB rises into the race window |
-| Consecutive load | number of micros since the last recovery-phase micro | ≤ template length, i.e. "you've gone 5 weeks without a rest week" |
+| Build progression | mean daily load of a build micro vs the previous build micro (per day, so 7-, 10- and 14-day micros compare alike) | between 0 % and ~+10 % |
 
 `PlanEvaluator.evaluate` gains a `cycles: [TrainingCycle]` parameter; without cycles it falls back to the cycle-free rules from §8.2.
 

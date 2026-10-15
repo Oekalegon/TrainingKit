@@ -7,9 +7,8 @@ import Foundation
 /// ``PlanEvaluation/isAcceptable``, but MVP 1 already exposes this as a read-only "how does my
 /// current plan look" check.
 ///
-/// The cycle-free rules (CTL ramp, ATL/CTL ratio, monotony, strain, race-day TSB) always run.
-/// Meso/micro-aware rules (recovery, build progression, meso progress, taper shape, consecutive
-/// load) additionally run whenever `cycles` is non-empty; see
+/// The cycle-free rules (TSB band, monotony, strain, race-day TSB) always run.
+/// The build-progression rule additionally runs whenever `cycles` is non-empty; see
 /// ``evaluate(_:races:cycles:guardrails:)``.
 public struct PlanEvaluator: Sendable {
     /// Creates a plan evaluator.
@@ -42,98 +41,30 @@ public struct PlanEvaluator: Sendable {
         let metricsByDay = Dictionary(metrics.map { ($0.day, $0) }, uniquingKeysWith: { _, latest in latest })
 
         var findings: [PlanFinding] = []
-        findings += ctlRampFindings(metrics: metrics, guardrails: guardrails)
-        findings += atlToCTLRatioFindings(metrics: metrics, guardrails: guardrails)
         findings += tsbBandFindings(metrics: metrics, guardrails: guardrails)
         findings += monotonyFindings(metrics: metrics, guardrails: guardrails)
         findings += strainFindings(metrics: metrics, guardrails: guardrails)
         findings += raceDayTSBFindings(metricsByDay: metricsByDay, races: races, guardrails: guardrails)
 
         if !cycles.isEmpty {
-            findings += recoveryMicroFindings(cycles: cycles, metrics: metrics, guardrails: guardrails)
             findings += buildProgressionFindings(cycles: cycles, metrics: metrics, guardrails: guardrails)
-            findings += mesoProgressFindings(cycles: cycles, metricsByDay: metricsByDay, guardrails: guardrails)
-            findings += taperShapeFindings(cycles: cycles, metricsByDay: metricsByDay, guardrails: guardrails)
-            findings += consecutiveLoadFindings(cycles: cycles, guardrails: guardrails)
         }
 
         return PlanEvaluation(findings: findings.sorted { $0.day < $1.day })
     }
 
-    /// CTL[d] − CTL[d−7] per day, flagged when it exceeds `maxCTLRampPerWeek`. Warming-up days are
-    /// skipped — CTL mechanically ramps up from zero during warmup regardless of whether training
-    /// load is actually excessive, so this would otherwise false-positive on every fresh series.
-    private func ctlRampFindings(metrics: [FitnessMetrics], guardrails: PlanGuardrails) -> [PlanFinding] {
-        guard metrics.count > 7 else { return [] }
-        var findings: [PlanFinding] = []
-        for index in 7..<metrics.count where !metrics[index].isWarmingUp {
-            let ramp = metrics[index].ctl - metrics[index - 7].ctl
-            if ramp > guardrails.maxCTLRampPerWeek {
-                findings.append(PlanFinding(day: metrics[index].day, rule: .ctlRamp, severity: .risk, value: ramp, threshold: guardrails.maxCTLRampPerWeek))
-            }
-        }
-        return findings
-    }
-
-    /// ATL[d] / CTL[d] per day; exceeding the max is `.risk`, undershooting the min is `.warning`
-    /// ("below this = detraining, not risk" per the guardrail's own documentation). Warming-up days
-    /// are skipped — ATL (τ=7) ramps faster than CTL (τ=42) from a cold start, inflating the ratio
-    /// independent of the actual training load. Days below `minCTLForRatioCheck` are skipped by
-    /// `bandFindings` returning `nil` for them (which also covers a zero-CTL day, avoiding the
-    /// divide-by-zero, without needing a separate check): the ratio is hypersensitive at a low
-    /// absolute CTL — see `minCTLForRatioCheck`'s own doc comment.
-    private func atlToCTLRatioFindings(metrics: [FitnessMetrics], guardrails: PlanGuardrails) -> [PlanFinding] {
-        bandFindings(
-            metrics: metrics, rule: .atlToCTLRatio,
-            value: { $0.ctl >= guardrails.minCTLForRatioCheck ? $0.atl / $0.ctl : nil },
-            lowerBound: guardrails.minATLtoCTLRatio, lowerSeverity: .warning,
-            upperBound: guardrails.maxATLtoCTLRatio, upperSeverity: .risk
-        )
-    }
-
     /// TSB per day, flagged when it drops below `minAcceptableTSB` (injury-risk territory) or
-    /// climbs above `maxAcceptableTSB` (sustained freshness reading as detraining) — the direct
-    /// freshness/fatigue signal, unlike ``atlToCTLRatioFindings(metrics:guardrails:)``'s ratio
-    /// proxy, and checked every day rather than only on a ``Race/date`` like
-    /// ``raceDayTSBFindings(metricsByDay:races:guardrails:)``. Warming-up days are skipped for the
-    /// same cold-start reason as the ratio check.
+    /// climbs above `maxAcceptableTSB` (sustained freshness reading as detraining) — checked every
+    /// day, unlike ``raceDayTSBFindings(metricsByDay:races:guardrails:)``, which only looks at a
+    /// ``Race/date``. Warming-up days are skipped: CTL and ATL ramp up from zero at different
+    /// rates regardless of the actual training load, so TSB means little until the series settles.
     private func tsbBandFindings(metrics: [FitnessMetrics], guardrails: PlanGuardrails) -> [PlanFinding] {
-        bandFindings(
-            metrics: metrics, rule: .tsbBand, value: { $0.tsb },
-            lowerBound: guardrails.minAcceptableTSB, lowerSeverity: .risk,
-            upperBound: guardrails.maxAcceptableTSB, upperSeverity: .warning
-        )
-    }
-
-    /// Shared shape behind ``atlToCTLRatioFindings(metrics:guardrails:)`` and
-    /// ``tsbBandFindings(metrics:guardrails:)``: a per-day scalar checked against a two-sided band,
-    /// skipping warming-up days. The two callers otherwise differed only in which scalar they read,
-    /// which side of the band is `.risk` vs `.warning`, and (for the ratio) an extra zero-CTL guard
-    /// before dividing — folded here into `value` returning `nil` to skip a day outright.
-    ///
-    /// - Parameters:
-    ///   - value: The day's value to check, or `nil` to skip that day entirely (e.g. a zero-CTL day
-    ///     for the ATL/CTL ratio).
-    ///   - lowerBound: Below this fires `lowerSeverity`.
-    ///   - upperBound: Above this fires `upperSeverity`. Checked first, so `lowerBound > upperBound`
-    ///     would silently only ever fire the upper side — every caller's bounds are a real band
-    ///     (`lowerBound < upperBound`), so this never arises in practice.
-    private func bandFindings(
-        metrics: [FitnessMetrics],
-        rule: PlanRule,
-        value: (FitnessMetrics) -> Double?,
-        lowerBound: Double,
-        lowerSeverity: Severity,
-        upperBound: Double,
-        upperSeverity: Severity
-    ) -> [PlanFinding] {
         var findings: [PlanFinding] = []
         for entry in metrics where !entry.isWarmingUp {
-            guard let value = value(entry) else { continue }
-            if value > upperBound {
-                findings.append(PlanFinding(day: entry.day, rule: rule, severity: upperSeverity, value: value, threshold: upperBound))
-            } else if value < lowerBound {
-                findings.append(PlanFinding(day: entry.day, rule: rule, severity: lowerSeverity, value: value, threshold: lowerBound))
+            if entry.tsb < guardrails.minAcceptableTSB {
+                findings.append(PlanFinding(day: entry.day, rule: .tsbBand, severity: .risk, value: entry.tsb, threshold: guardrails.minAcceptableTSB))
+            } else if entry.tsb > guardrails.maxAcceptableTSB {
+                findings.append(PlanFinding(day: entry.day, rule: .tsbBand, severity: .warning, value: entry.tsb, threshold: guardrails.maxAcceptableTSB))
             }
         }
         return findings
@@ -173,15 +104,16 @@ public struct PlanEvaluator: Sendable {
     }
 
     /// TSB on each race's date, flagged when it's below `minTSBOnRaceDay` (taper hasn't landed) or
-    /// above `maxTSBOnRaceDay` (fitness was lost in the taper).
+    /// above `maxTSBOnRaceDay` (fitness was lost in the taper). A ``Severity/warning``, not a risk: a
+    /// missed taper target is worth a second look but doesn't make the plan unsafe.
     private func raceDayTSBFindings(metricsByDay: [Date: FitnessMetrics], races: [Race], guardrails: PlanGuardrails) -> [PlanFinding] {
         var findings: [PlanFinding] = []
         for race in races {
             guard let entry = metricsByDay[race.date] else { continue }
             if entry.tsb < guardrails.minTSBOnRaceDay {
-                findings.append(PlanFinding(day: race.date, rule: .raceDayTSB, severity: .risk, value: entry.tsb, threshold: guardrails.minTSBOnRaceDay))
+                findings.append(PlanFinding(day: race.date, rule: .raceDayTSB, severity: .warning, value: entry.tsb, threshold: guardrails.minTSBOnRaceDay))
             } else if entry.tsb > guardrails.maxTSBOnRaceDay {
-                findings.append(PlanFinding(day: race.date, rule: .raceDayTSB, severity: .risk, value: entry.tsb, threshold: guardrails.maxTSBOnRaceDay))
+                findings.append(PlanFinding(day: race.date, rule: .raceDayTSB, severity: .warning, value: entry.tsb, threshold: guardrails.maxTSBOnRaceDay))
             }
         }
         return findings

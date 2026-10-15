@@ -153,8 +153,8 @@ struct PlanSandboxTests {
         let workout = steadyWorkout()
         try await store.upsert([workout])
 
-        // Beyond the default 42-day CTL warm-up, so the ramp rule actually evaluates (it skips
-        // every `isWarmingUp` day by design, see `PlanEvaluator.ctlRampFindings`).
+        // Beyond the default 42-day CTL warm-up, so the TSB rule actually evaluates (it skips
+        // every `isWarmingUp` day by design, see `PlanEvaluator.tsbBandFindings`).
         let plans = (1...49).map { PlannedActivity(workoutID: workout.id, date: self.day($0)) }
 
         let sandbox = try await PlanSandbox(snapshotOf: stores, range: day(0)...day(60))
@@ -165,10 +165,10 @@ struct PlanSandboxTests {
             engine: DefaultSeriesEngine(),
             evaluator: PlanEvaluator(),
             today: day(0),
-            guardrails: PlanGuardrails(maxCTLRampPerWeek: 0.01)
+            guardrails: PlanGuardrails(minAcceptableTSB: 0)
         )
 
-        #expect(result.evaluation.findings.contains { $0.rule == .ctlRamp })
+        #expect(result.evaluation.findings.contains { $0.rule == .tsbBand })
         #expect(!result.evaluation.isAcceptable)
     }
 }

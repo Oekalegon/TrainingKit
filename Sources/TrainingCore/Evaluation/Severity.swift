@@ -4,7 +4,7 @@ public enum Severity: Sendable, Codable, Hashable {
     /// as expected.
     case info
     /// A real concern that should prompt a second look, but isn't itself injury-risk — e.g. the
-    /// plan is losing fitness (``PlanGuardrails/minATLtoCTLRatio`` undershot).
+    /// plan is losing fitness (``PlanGuardrails/maxAcceptableTSB`` exceeded).
     case warning
     /// Injury-risk or plan-breaking; ``PlanEvaluation/isAcceptable`` is `false` whenever any
     /// finding has this severity.

@@ -664,7 +664,7 @@ Rules, all computed from the projected series:
 |---|---|---|
 | Monotony | 7-day mean / stdev | > 2.0 means the week has no easy/hard contrast, even at moderate volume |
 | Strain | weekly load × monotony | Absolute thresholds don't transfer across athletes in TRIMP units, so compare against the athlete's own trailing distribution |
-| Race-day TSB | TSB on `Race.date` | Taper landed: positive but not so high that fitness was lost |
+| Race-day TSB | TSB on `Race.date` | Taper landed: positive but not so high that fitness was lost (a warning, not a risk) |
 | Progress | CTL at meso end − CTL at meso start | Guards against a "safe" plan that's actually flat (cycle-aware rules in §10.4) |
 
 Guardrail values are `Codable` and user-editable; MVP 4 can tune them from observed outcomes (e.g. the athlete who tolerates a lower TSB without issue).

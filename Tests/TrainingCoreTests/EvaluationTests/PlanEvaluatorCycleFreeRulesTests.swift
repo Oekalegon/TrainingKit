@@ -131,7 +131,7 @@ struct PlanEvaluatorCycleFreeRulesTests {
 
     // MARK: - Race-day TSB
 
-    @Test("race-day TSB below the minimum or above the maximum fires risk; within range doesn't")
+    @Test("race-day TSB below the minimum or above the maximum fires warning, not risk; within range doesn't")
     func raceDayTSBBounds() {
         let metrics = [
             metric(0, tsb: 2), // below min (5)
@@ -148,8 +148,8 @@ struct PlanEvaluatorCycleFreeRulesTests {
 
         let findings = evaluation.findings.filter { $0.rule == .raceDayTSB }
         #expect(findings.count == 2)
-        #expect(findings.contains { $0.day == day(0) && $0.severity == .risk })
-        #expect(findings.contains { $0.day == day(1) && $0.severity == .risk })
+        #expect(findings.contains { $0.day == day(0) && $0.severity == .warning })
+        #expect(findings.contains { $0.day == day(1) && $0.severity == .warning })
     }
 
     @Test("race-day TSB exactly at the min or max threshold doesn't fire — comparisons are strict")

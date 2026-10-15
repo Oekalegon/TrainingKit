@@ -104,15 +104,16 @@ public struct PlanEvaluator: Sendable {
     }
 
     /// TSB on each race's date, flagged when it's below `minTSBOnRaceDay` (taper hasn't landed) or
-    /// above `maxTSBOnRaceDay` (fitness was lost in the taper).
+    /// above `maxTSBOnRaceDay` (fitness was lost in the taper). A ``Severity/warning``, not a risk: a
+    /// missed taper target is worth a second look but doesn't make the plan unsafe.
     private func raceDayTSBFindings(metricsByDay: [Date: FitnessMetrics], races: [Race], guardrails: PlanGuardrails) -> [PlanFinding] {
         var findings: [PlanFinding] = []
         for race in races {
             guard let entry = metricsByDay[race.date] else { continue }
             if entry.tsb < guardrails.minTSBOnRaceDay {
-                findings.append(PlanFinding(day: race.date, rule: .raceDayTSB, severity: .risk, value: entry.tsb, threshold: guardrails.minTSBOnRaceDay))
+                findings.append(PlanFinding(day: race.date, rule: .raceDayTSB, severity: .warning, value: entry.tsb, threshold: guardrails.minTSBOnRaceDay))
             } else if entry.tsb > guardrails.maxTSBOnRaceDay {
-                findings.append(PlanFinding(day: race.date, rule: .raceDayTSB, severity: .risk, value: entry.tsb, threshold: guardrails.maxTSBOnRaceDay))
+                findings.append(PlanFinding(day: race.date, rule: .raceDayTSB, severity: .warning, value: entry.tsb, threshold: guardrails.maxTSBOnRaceDay))
             }
         }
         return findings

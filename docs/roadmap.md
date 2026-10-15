@@ -41,6 +41,8 @@ The deterministic plan generator: `PlanPreferences` (training days, per-day spor
 
 Groundwork laid for paradigms (MVP5-102/103): `CyclePhase` is a named, paradigm-defined value rather than a fixed enum, and each micro carries a separate `MicroLoadRole` (build/recovery/taper/race) that rules such as build progression read (MVP5-113). Stored cycles written with the old enum still decode.
 
+Run availability (MVP5-104): `RunAvailability` (free `DaySlot`s per `Weekday`, independent of the paradigm and meant as one global athlete setting) and `PlanPreferences` carrying it as the generator's input; persistence of the global setting and the settings screen (MVP5-105) are still to do.
+
 See design doc §8 and the "Roadmap seams" table (§12) for how this plugs into MVP 1 without reshaping the core.
 
 ## MVP 6 — AI Coach

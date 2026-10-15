@@ -590,7 +590,9 @@ The assistant in MVP 2 doesn't just emit a plan — it proposes one, runs it thr
 
 ### 8.1 Plan preferences (generator input)
 
-`PlanGuardrails` (below) is the safety ceiling everyone shares; `PlanPreferences` is what one athlete actually wants, and it's what the generator proposes *from*. Preferences are soft — the generator honours them where it can, but backs off before it lets any proposal violate a guardrail. Stored per athlete, versionable like `HeartRateZoneSettings` isn't needed here since a stale preference just produces a worse first proposal, not a wrong load calculation.
+`PlanGuardrails` (below) is the safety ceiling everyone shares; `PlanPreferences` is what one athlete actually wants, and it's what the generator proposes *from*. Preferences are soft — the generator honours them where it can, but backs off before it lets any proposal violate a guardrail. Versioning like `HeartRateZoneSettings` isn't needed here since a stale preference just produces a worse first proposal, not a wrong load calculation.
+
+**Shipped so far (MVP5-104): run availability.** When the athlete can run is a fact about the athlete, not a choice for one plan, so it is its own value, `RunAvailability` (`slots: [Weekday: Set<DaySlot>]`, with `DaySlot` = `.morning` / `.afternoonEvening`), reusing the existing `Weekday`. It is independent of the training paradigm and meant to be stored as one global setting; `PlanPreferences.runAvailability` carries a copy as the generator's input (the generator will read the global setting and put it there). Weekdays without slots mean no running; both slots on a day allow a two-a-day (MVP5-119). Decoding is tolerant: missing fields default, unknown weekdays and slots are dropped. Where the global setting is persisted is decided separately; the per-plan fields below move onto the per-plan `TrainingPlan` (MVP5-124) as they are added (MVP5-110).
 
 ```swift
 struct PlanPreferences: Sendable, Codable {

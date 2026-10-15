@@ -650,6 +650,10 @@ struct PlanGuardrails: Sendable, Codable {
     var maxStrainPercentile: Double = 0.95     // relative to athlete's own trailing 12 weeks
     var minTSBOnRaceDay: Double = 5
     var maxTSBOnRaceDay: Double = 25
+    var minAcceptableTSB: Double = -30         // any day
+    var maxAcceptableTSB: Double = 25          // any day
+    var strainTrailingWindowDays: Int = 84
+    var maxBuildProgressionFraction: Double = 0.10
 }
 
 struct PlanEvaluator: Sendable {
@@ -665,7 +669,10 @@ Rules, all computed from the projected series:
 | Monotony | 7-day mean / stdev | > 2.0 means the week has no easy/hard contrast, even at moderate volume |
 | Strain | weekly load × monotony | Absolute thresholds don't transfer across athletes in TRIMP units, so compare against the athlete's own trailing distribution |
 | Race-day TSB | TSB on `Race.date` | Taper landed: positive but not so high that fitness was lost (a warning, not a risk) |
-| Progress | CTL at meso end − CTL at meso start | Guards against a "safe" plan that's actually flat (cycle-aware rules in §10.4) |
+| TSB band | TSB on any day | Below `minAcceptableTSB` (−30) is the injury-risk band; above `maxAcceptableTSB` (25) reads as detraining (a warning) |
+| Build progression | mean daily load of a build micro vs the previous build micro | Cycle-aware (§10.4); to be replaced by a longest-run rule (MVP5-116) |
+
+Earlier iterations also had a CTL-ramp rule (CTL[d] − CTL[d−7]), an ATL/CTL ratio, and cycle-aware recovery-micro, meso-progress, taper-shape and consecutive-load rules. They were removed (MVP5-101 review) as thresholds nobody had asked for; ramp control is left to the generator's own volume curve (MVP5-117) and `buildProgression`. Only `.risk` findings make a plan unacceptable, so a missed race-day TSB or an over-high TSB is reported but doesn't by itself send the generator back to adjust.
 
 Guardrail values are `Codable` and user-editable; MVP 4 can tune them from observed outcomes (e.g. the athlete who tolerates a lower TSB without issue).
 
@@ -1040,7 +1047,7 @@ Added to `PlanGuardrails` (§8.2):
 
 | Rule | Signal | Check |
 |---|---|---|
-| Build progression | build micro load vs previous build micro | between 0 % and ~+10 % |
+| Build progression | mean daily load of a build micro vs the previous build micro (per day, so 7-, 10- and 14-day micros compare alike) | between 0 % and ~+10 % |
 
 `PlanEvaluator.evaluate` gains a `cycles: [TrainingCycle]` parameter; without cycles it falls back to the cycle-free rules from §8.2.
 

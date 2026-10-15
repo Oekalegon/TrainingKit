@@ -190,4 +190,16 @@ struct PlanEvaluatorCycleFreeRulesTests {
         #expect(warningOnly.isAcceptable == true)
         #expect(clean.isAcceptable == true)
     }
+
+    // MARK: - Stored guardrails
+
+    @Test("guardrails stored with the removed thresholds' keys still decode, ignoring them")
+    func storedGuardrailsWithRemovedKeysDecode() throws {
+        var json = try JSONSerialization.jsonObject(with: JSONEncoder().encode(PlanGuardrails())) as! [String: Any]
+        for key in ["maxCTLRampPerWeek", "maxATLtoCTLRatio", "minATLtoCTLRatio", "minCTLForRatioCheck", "recoveryLoadFraction", "minCTLGainPerMeso", "maxMicrosWithoutRecovery", "maxTaperCTLDropFraction"] {
+            json[key] = 1
+        }
+        let decoded = try JSONDecoder().decode(PlanGuardrails.self, from: JSONSerialization.data(withJSONObject: json))
+        #expect(decoded == PlanGuardrails())
+    }
 }

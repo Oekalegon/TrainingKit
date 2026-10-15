@@ -30,18 +30,15 @@ extension PlanEvaluator {
         cycles.filter { $0.level == .micro }.sorted { $0.dateRange.lowerBound < $1.dateRange.lowerBound }
     }
 
-    /// The number of calendar days `range` spans, inclusive of both ends; day-granular like the
-    /// metrics, so a rounded seconds-per-day division is enough (no timezone needed).
-    private func dayCount(of range: ClosedRange<Date>) -> Int {
-        Int((range.upperBound.timeIntervalSince(range.lowerBound) / 86400).rounded()) + 1
-    }
-
-    /// The mean of `metrics[].load` over the `dayCount(of:)` days of `range`, with the metrics
-    /// matched by exact `Date` equality rather than calendar arithmetic — sidesteps needing a
-    /// timezone `PlanEvaluator` never receives, since `range` and `metrics[].day` are both already
-    /// day-granular in the same (athlete) timezone by the time they reach here. A day with no
-    /// metrics counts as zero load.
+    /// The mean of `metrics[].load` over the days of `range` that `metrics` covers, matched by exact
+    /// `Date` equality rather than calendar arithmetic — sidesteps needing a timezone
+    /// `PlanEvaluator` never receives, since `range` and `metrics[].day` are both already
+    /// day-granular in the same (athlete) timezone by the time they reach here. Days the series
+    /// doesn't cover (a micro running past the end of the projection) are left out of the mean
+    /// rather than counted as zero load; a micro with no covered day has a mean of zero.
     private func meanDailyLoad(in range: ClosedRange<Date>, metrics: [FitnessMetrics]) -> Double {
-        metrics.filter { range.contains($0.day) }.reduce(0) { $0 + $1.load } / Double(dayCount(of: range))
+        let covered = metrics.filter { range.contains($0.day) }
+        guard !covered.isEmpty else { return 0 }
+        return covered.reduce(0) { $0 + $1.load } / Double(covered.count)
     }
 }

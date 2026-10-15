@@ -103,4 +103,20 @@ struct PlanEvaluatorCycleAwareRulesTests {
             + (4...13).map { FitnessMetrics(day: day($0), load: 105, ctl: 50, atl: 50, tsb: 0, monotony: 1, strain: 105, isProjected: false, isWarmingUp: false) }
         #expect(!evaluator.evaluate(metrics, races: [], cycles: cycles).findings.contains { $0.rule == .buildProgression })
     }
+
+    @Test("a micro running past the end of the series is averaged over the days covered, not counted as zero load")
+    func partiallyCoveredMicroUsesCoveredDays() {
+        let mesoID = UUID()
+        let cycles = [
+            TrainingCycle(level: .micro, phase: .build, name: "Full", dateRange: day(0)...day(6), parentID: mesoID),
+            TrainingCycle(level: .micro, phase: .build, name: "Cut off", dateRange: day(7)...day(13), parentID: mesoID),
+        ]
+        // The series stops after 3 days of the second micro, at +30% per day: the risk is there even
+        // though the covered days' total (3 × 130) is far below the first micro's (7 × 100).
+        let metrics = metricsForWeek(0, dailyLoad: 100) + (7...9).map {
+            FitnessMetrics(day: day($0), load: 130, ctl: 50, atl: 50, tsb: 0, monotony: 1, strain: 130, isProjected: false, isWarmingUp: false)
+        }
+        let findings = evaluator.evaluate(metrics, races: [], cycles: cycles).findings.filter { $0.rule == .buildProgression }
+        #expect(findings.count == 1 && findings[0].severity == .risk)
+    }
 }

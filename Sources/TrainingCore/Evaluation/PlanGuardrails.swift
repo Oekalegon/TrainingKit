@@ -18,8 +18,9 @@ public struct PlanGuardrails: Sendable, Codable, Hashable {
     /// The highest acceptable TSB on race day — above this, fitness was lost in the taper.
     public var maxTSBOnRaceDay: Double
     /// The lowest acceptable TSB on *any* day — below this is the injury-risk band, independent of
-    /// whether the plan has any known phase to judge it against. Deliberately looser than ``minTSBOnRaceDay``: a normal build phase routinely dips
-    /// well below race-day freshness without that being a problem.
+    /// whether the plan has any known phase to judge it against. Deliberately looser than
+    /// ``minTSBOnRaceDay``: a normal build phase routinely dips well below race-day freshness
+    /// without that being a problem.
     public var minAcceptableTSB: Double
     /// The highest acceptable TSB on *any* day — above this for a sustained period reads as
     /// detraining (fitness being lost to insufficient load), the same freshness-band check as

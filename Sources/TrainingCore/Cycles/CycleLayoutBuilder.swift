@@ -4,13 +4,17 @@ import Foundation
 /// micro-cycle by hand.
 ///
 /// The algorithm works backwards from `race.date`:
-/// 1. The very last micro (the one covering race day itself) is always phase `.race`.
-/// 2. Every other micro in a `.taper`-phase ``MacroTemplate/MesoBlock`` is phase `.taper`.
-/// 3. Every micro in any other block cycles through its pattern's `microPhases` (e.g. "3:1"'s
+/// 1. Every micro takes its block's ``CyclePhase``; the load role says how hard it is.
+/// 2. The very last micro (the one covering race day itself) always has role `.race`.
+/// 3. Every other micro in a `.taper`- or `.race`-phase ``MacroTemplate/MesoBlock`` has role
+///    `.taper` or `.race` respectively.
+///    Taper and race blocks are recognised by the built-in `.taper` and `.race` phases only; a
+///    paradigm's differently named taper phase is laid out like any other block.
+/// 4. Every micro in any other block cycles through its pattern's `microRoles` (e.g. "3:1"'s
 ///    `build, build, build, recovery`), restarting the pattern at each block's boundary. The
 ///    pattern is `meso`, unless the block sets its own ``MacroTemplate/MesoBlock/pattern``, so a
 ///    single layout can mix e.g. a "2:1" base phase with a "3:1" build phase.
-/// 4. Filling continues backward through every block in `macro.mesoBlocks` until reaching `from`.
+/// 5. Filling continues backward through every block in `macro.mesoBlocks` until reaching `from`.
 ///    If `from` falls in the middle of the oldest surviving block, that block (and only that one)
 ///    is trimmed short rather than starting before `from`; if `from` falls so close to the race
 ///    that some of the oldest blocks wouldn't fit at all, they're dropped entirely instead of
@@ -116,8 +120,8 @@ public struct CycleLayoutBuilder: Sendable {
             for positionFromBlockEnd in 0..<block.microCount {
                 let positionInBlock = block.microCount - 1 - positionFromBlockEnd
                 let lowerBound = calendar.date(byAdding: .day, value: -(pattern.microLengthDays - 1), to: cursorEnd)!
-                let phase = phase(forPositionInBlock: positionInBlock, block: block, meso: pattern, isRaceMicro: slots.isEmpty)
-                slots.append(Microcycle(dateRange: lowerBound...cursorEnd, phase: phase, mesoBlockIndex: blockIndex))
+                let role = loadRole(forPositionInBlock: positionInBlock, block: block, meso: pattern, isRaceMicro: slots.isEmpty)
+                slots.append(Microcycle(dateRange: lowerBound...cursorEnd, phase: block.phase, loadRole: role, mesoBlockIndex: blockIndex))
                 cursorEnd = calendar.date(byAdding: .day, value: -pattern.microLengthDays, to: cursorEnd)!
             }
         }
@@ -125,11 +129,12 @@ public struct CycleLayoutBuilder: Sendable {
         return slots.reversed()
     }
 
-    private func phase(forPositionInBlock position: Int, block: MacroTemplate.MesoBlock, meso: MesocycleTemplate, isRaceMicro: Bool) -> CyclePhase {
+    private func loadRole(forPositionInBlock position: Int, block: MacroTemplate.MesoBlock, meso: MesocycleTemplate, isRaceMicro: Bool) -> MicroLoadRole {
         guard !isRaceMicro else { return .race }
-        guard block.phase != .taper, block.phase != .race else { return block.phase }
-        guard !meso.microPhases.isEmpty else { return block.phase }
-        return meso.microPhases[position % meso.microPhases.count]
+        if block.phase == .taper { return .taper }
+        if block.phase == .race { return .race }
+        guard !meso.microRoles.isEmpty else { return .build }
+        return meso.microRoles[position % meso.microRoles.count]
     }
 
     /// Drops any micro entirely before `startDay`, and clamps the one micro that straddles it —
@@ -138,7 +143,7 @@ public struct CycleLayoutBuilder: Sendable {
         micros.compactMap { slot in
             guard slot.dateRange.upperBound >= startDay else { return nil }
             guard slot.dateRange.lowerBound < startDay else { return slot }
-            return Microcycle(dateRange: startDay...slot.dateRange.upperBound, phase: slot.phase, mesoBlockIndex: slot.mesoBlockIndex)
+            return Microcycle(dateRange: startDay...slot.dateRange.upperBound, phase: slot.phase, loadRole: slot.loadRole, mesoBlockIndex: slot.mesoBlockIndex)
         }
     }
 
@@ -180,6 +185,7 @@ public struct CycleLayoutBuilder: Sendable {
                     TrainingCycle(
                         level: .micro,
                         phase: micro.phase,
+                        loadRole: micro.loadRole,
                         name: "\(macro.name) Week \(weekNumber)",
                         dateRange: micro.dateRange,
                         parentID: mesoID

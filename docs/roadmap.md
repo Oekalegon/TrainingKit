@@ -39,6 +39,8 @@ This is the foundation the MVP 5 plan generator builds on: everything it produce
 
 The deterministic plan generator: `PlanPreferences` (training days, per-day sport/session-type, starting volume, weekly ramp), a Create Plan wizard sheet (training days, primary race/target, preferred long-run/interval days, recovery-week cadence, max TRIMP ramp), `PlanGenerator` that lays out cycles via `CycleLayoutBuilder` (already built in MVP 1) and fills them with library workouts, iterated against `PlanEvaluator`'s guardrails via a fixed set of heuristic adjustments — no LLM involved yet. Also covers a set of standard plans by target distance.
 
+Groundwork laid for paradigms (MVP5-102/103): `CyclePhase` is a named, paradigm-defined value rather than a fixed enum, and each micro carries a separate `MicroLoadRole` (build/recovery/taper/race) that rules such as build progression read (MVP5-113). Stored cycles written with the old enum still decode.
+
 See design doc §8 and the "Roadmap seams" table (§12) for how this plugs into MVP 1 without reshaping the core.
 
 ## MVP 6 — AI Coach

@@ -8,8 +8,7 @@ import Foundation
 /// current plan look" check.
 ///
 /// The cycle-free rules (TSB band, monotony, strain, race-day TSB) always run.
-/// Meso/micro-aware rules (recovery, build progression, meso progress, taper shape, consecutive
-/// load) additionally run whenever `cycles` is non-empty; see
+/// The build-progression rule additionally runs whenever `cycles` is non-empty; see
 /// ``evaluate(_:races:cycles:guardrails:)``.
 public struct PlanEvaluator: Sendable {
     /// Creates a plan evaluator.
@@ -48,11 +47,7 @@ public struct PlanEvaluator: Sendable {
         findings += raceDayTSBFindings(metricsByDay: metricsByDay, races: races, guardrails: guardrails)
 
         if !cycles.isEmpty {
-            findings += recoveryMicroFindings(cycles: cycles, metrics: metrics, guardrails: guardrails)
             findings += buildProgressionFindings(cycles: cycles, metrics: metrics, guardrails: guardrails)
-            findings += mesoProgressFindings(cycles: cycles, metricsByDay: metricsByDay, guardrails: guardrails)
-            findings += taperShapeFindings(cycles: cycles, metricsByDay: metricsByDay, guardrails: guardrails)
-            findings += consecutiveLoadFindings(cycles: cycles, guardrails: guardrails)
         }
 
         return PlanEvaluation(findings: findings.sorted { $0.day < $1.day })

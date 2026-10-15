@@ -650,8 +650,6 @@ struct PlanGuardrails: Sendable, Codable {
     var maxStrainPercentile: Double = 0.95     // relative to athlete's own trailing 12 weeks
     var minTSBOnRaceDay: Double = 5
     var maxTSBOnRaceDay: Double = 25
-    var minCTLGainPerMeso: Double = 2          // "is there progress" over a build/base meso
-    var maxDaysWithoutRecovery: Int = 21       // e.g. 3:1 pattern of 7-day micros
 }
 
 struct PlanEvaluator: Sendable {
@@ -1042,11 +1040,7 @@ Added to `PlanGuardrails` (§8.2):
 
 | Rule | Signal | Check |
 |---|---|---|
-| Recovery micro actually recovers | recovery micro load / previous micro load | ≤ `recoveryLoadFraction` (default 0.6–0.7) |
 | Build progression | build micro load vs previous build micro | between 0 % and ~+10 % |
-| Meso progress | `CycleFitness.ctlGain` for a build/base meso | ≥ `minCTLGainPerMeso` |
-| Taper shape | CTL drop across taper micro(s) | small (≤ ~10 %) while TSB rises into the race window |
-| Consecutive load | number of micros since the last recovery-phase micro | ≤ template length, i.e. "you've gone 5 weeks without a rest week" |
 
 `PlanEvaluator.evaluate` gains a `cycles: [TrainingCycle]` parameter; without cycles it falls back to the cycle-free rules from §8.2.
 

@@ -79,6 +79,11 @@ public struct AthleteProfile: Sendable, Codable, Equatable {
     /// athlete, never read from another source. It's stored in the profile and so travels with it, so
     /// a host app should keep it small (a few tens of kilobytes). Nothing in `TrainingCore` reads it.
     public var avatarImageData: Data?
+    /// When the athlete can run (MVP5-104): the free ``DaySlot``s per weekday. A fact about the
+    /// athlete rather than a plan choice, so it is one global setting; a plan's ``PlanPreferences``
+    /// takes a copy as the generator's input. Empty (no availability) by default. It doesn't feed the
+    /// fitness series.
+    public var runAvailability: RunAvailability
 
     /// Creates an athlete profile.
     ///
@@ -98,6 +103,7 @@ public struct AthleteProfile: Sendable, Codable, Equatable {
     ///     to `true`.
     ///   - avatarImageData: The athlete's picture as encoded image data, if they chose one; defaults
     ///     to `nil`.
+    ///   - runAvailability: When the athlete can run; defaults to no availability.
     ///   - paceHistory: Every ``PaceSettings`` this athlete has recorded; when given and not empty, it
     ///     replaces the single entry `paceModel` would make.
     public init(
@@ -113,6 +119,7 @@ public struct AthleteProfile: Sendable, Codable, Equatable {
         dateOfBirth: Date? = nil,
         usesHealthKitRestingHeartRate: Bool = true,
         avatarImageData: Data? = nil,
+        runAvailability: RunAvailability = RunAvailability(),
         paceHistory: [PaceSettings]? = nil
     ) {
         self.id = id
@@ -129,15 +136,17 @@ public struct AthleteProfile: Sendable, Codable, Equatable {
         self.dateOfBirth = dateOfBirth
         self.usesHealthKitRestingHeartRate = usesHealthKitRestingHeartRate
         self.avatarImageData = avatarImageData
+        self.runAvailability = runAvailability
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, name, sex, paceModel, paceHistory, timeZone, weekStartsOn, mainSport, mainVenue, heartRateZoneHistory
-        case dateOfBirth, usesHealthKitRestingHeartRate, avatarImageData
+        case dateOfBirth, usesHealthKitRestingHeartRate, avatarImageData, runAvailability
     }
 
     /// Custom decoding so profiles persisted before `mainSport`, `dateOfBirth`, `paceHistory`,
-    /// `usesHealthKitRestingHeartRate` or `avatarImageData` existed still decode, defaulting a
+    /// `usesHealthKitRestingHeartRate`, `avatarImageData` or `runAvailability` existed still decode,
+    /// defaulting a missing `runAvailability` to no availability, a
     /// missing `mainSport` to running, a missing `dateOfBirth` or `avatarImageData` to `nil`, a
     /// missing `paceHistory` to the single `paceModel` entry and a missing
     /// `usesHealthKitRestingHeartRate` to `true`, rather than failing to load the athlete's whole
@@ -162,6 +171,7 @@ public struct AthleteProfile: Sendable, Codable, Equatable {
         dateOfBirth = try container.decodeIfPresent(Date.self, forKey: .dateOfBirth)
         usesHealthKitRestingHeartRate = try container.decodeIfPresent(Bool.self, forKey: .usesHealthKitRestingHeartRate) ?? true
         avatarImageData = try container.decodeIfPresent(Data.self, forKey: .avatarImageData)
+        runAvailability = try container.decodeIfPresent(RunAvailability.self, forKey: .runAvailability) ?? RunAvailability()
     }
 
     /// Encodes the full ``paceHistory`` and also the current ``paceModel`` under its old key, so a
@@ -181,6 +191,7 @@ public struct AthleteProfile: Sendable, Codable, Equatable {
         try container.encodeIfPresent(dateOfBirth, forKey: .dateOfBirth)
         try container.encode(usesHealthKitRestingHeartRate, forKey: .usesHealthKitRestingHeartRate)
         try container.encodeIfPresent(avatarImageData, forKey: .avatarImageData)
+        try container.encode(runAvailability, forKey: .runAvailability)
     }
 
     /// The venue to preselect for a plan of `sport`: ``mainVenue`` when `sport` is ``mainSport``,

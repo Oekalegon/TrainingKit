@@ -72,6 +72,9 @@ See `docs/design/trainingKit-design.md` in the package repository for the full m
 ### Planning
 
 - ``PlannedActivity``
+- ``PlanPreferences``
+- ``RunAvailability``
+- ``DaySlot``
 - ``PlannedLoadEstimator``
 - ``TRIMPPlanEstimator``
 - ``LinkedActivityRefinedEstimator``

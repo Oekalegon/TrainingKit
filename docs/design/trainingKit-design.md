@@ -654,7 +654,7 @@ struct PlanGuardrails: Sendable, Codable {
     var minTSBOnRaceDay: Double = 5
     var maxTSBOnRaceDay: Double = 25
     var minCTLGainPerMeso: Double = 2          // "is there progress" over a build/base meso
-    var maxMicrosWithoutRecovery: Int = 3      // e.g. 3:1 pattern
+    var maxDaysWithoutRecovery: Int = 21       // e.g. 3:1 pattern of 7-day micros
 }
 
 struct PlanEvaluator: Sendable {

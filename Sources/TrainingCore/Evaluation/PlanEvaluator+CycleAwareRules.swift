@@ -3,15 +3,17 @@ import Foundation
 /// The `cycles`-dependent rules from design doc §10.4, split out of the main file since they only
 /// run when the caller supplies cycles (see ``PlanEvaluator/evaluate(_:races:cycles:guardrails:)``).
 extension PlanEvaluator {
-    /// A recovery-phase micro's total load relative to the micro immediately before it, flagged
-    /// when it exceeds `recoveryLoadFraction` — i.e. the recovery micro didn't actually recover.
+    /// A recovery-phase micro's mean daily load relative to the micro immediately before it,
+    /// flagged when it exceeds `recoveryLoadFraction` — i.e. the recovery micro didn't actually
+    /// recover. Compared per day, not in total, so micros of different lengths (a trimmed first
+    /// micro, or a 10- or 14-day micro next to a shorter one) compare fairly.
     func recoveryMicroFindings(cycles: [TrainingCycle], metrics: [FitnessMetrics], guardrails: PlanGuardrails) -> [PlanFinding] {
         let micros = sortedMicros(cycles)
         var findings: [PlanFinding] = []
         for (previous, current) in zip(micros, micros.dropFirst()) where current.phase == .recovery {
-            let previousLoad = totalLoad(in: previous.dateRange, metrics: metrics)
+            let previousLoad = meanDailyLoad(in: previous.dateRange, metrics: metrics)
             guard previousLoad > 0 else { continue }
-            let recoveryLoad = totalLoad(in: current.dateRange, metrics: metrics)
+            let recoveryLoad = meanDailyLoad(in: current.dateRange, metrics: metrics)
             let fraction = recoveryLoad / previousLoad
             if fraction > guardrails.recoveryLoadFraction {
                 findings.append(PlanFinding(day: current.dateRange.lowerBound, rule: .recoveryMicro, severity: .risk, value: fraction, threshold: guardrails.recoveryLoadFraction))
@@ -20,7 +22,7 @@ extension PlanEvaluator {
         return findings
     }
 
-    /// A build-phase micro's total load relative to the previous build-phase micro (skipping over
+    /// A build-phase micro's mean daily load relative to the previous build-phase micro (skipping over
     /// any recovery micros in between). Below 0% is ``Severity/info`` (the plan isn't building, but
     /// that alone isn't a trend worth a second look); above `maxBuildProgressionFraction` is
     /// ``Severity/risk`` (too aggressive a jump).
@@ -28,7 +30,7 @@ extension PlanEvaluator {
         var findings: [PlanFinding] = []
         var previousBuildLoad: Double?
         for micro in sortedMicros(cycles) where micro.phase == .build {
-            let load = totalLoad(in: micro.dateRange, metrics: metrics)
+            let load = meanDailyLoad(in: micro.dateRange, metrics: metrics)
             defer { previousBuildLoad = load }
 
             guard let previousLoad = previousBuildLoad, previousLoad > 0 else { continue }
@@ -85,28 +87,31 @@ extension PlanEvaluator {
         return findings
     }
 
-    /// The number of consecutive non-recovery micros since the last recovery-phase micro, flagged
-    /// once it exceeds `maxMicrosWithoutRecovery` — "you've gone N weeks without a rest week."
+    /// A non-recovery micro that starts after at least `maxDaysWithoutRecovery` days of consecutive
+    /// non-recovery micros since the last recovery-phase micro — "you've gone N days without a
+    /// rest week." Counted in days of the micros' own ranges, so a 3:1 of 7-day micros and a 2:1 of
+    /// 14-day micros are judged by how long the athlete has been loading, not by how many micros
+    /// that took. The finding's value is the days already loaded before the flagged micro.
     func consecutiveLoadFindings(cycles: [TrainingCycle], guardrails: PlanGuardrails) -> [PlanFinding] {
         var findings: [PlanFinding] = []
-        var consecutiveCount = 0
+        var daysWithoutRecovery = 0
         for micro in sortedMicros(cycles) {
             if micro.phase == .recovery {
-                consecutiveCount = 0
+                daysWithoutRecovery = 0
                 continue
             }
-            consecutiveCount += 1
-            if consecutiveCount > guardrails.maxMicrosWithoutRecovery {
+            if daysWithoutRecovery >= guardrails.maxDaysWithoutRecovery {
                 findings.append(
                     PlanFinding(
                         day: micro.dateRange.lowerBound,
                         rule: .consecutiveLoad,
                         severity: .risk,
-                        value: Double(consecutiveCount),
-                        threshold: Double(guardrails.maxMicrosWithoutRecovery)
+                        value: Double(daysWithoutRecovery),
+                        threshold: Double(guardrails.maxDaysWithoutRecovery)
                     )
                 )
             }
+            daysWithoutRecovery += dayCount(of: micro.dateRange)
         }
         return findings
     }
@@ -116,11 +121,18 @@ extension PlanEvaluator {
         cycles.filter { $0.level == .micro }.sorted { $0.dateRange.lowerBound < $1.dateRange.lowerBound }
     }
 
-    /// The sum of `metrics[].load` for every day within `range`, matched by exact `Date` equality
-    /// rather than calendar arithmetic — sidesteps needing a timezone `PlanEvaluator` never
-    /// receives, since `range` and `metrics[].day` are both already day-granular in the same
-    /// (athlete) timezone by the time they reach here.
-    private func totalLoad(in range: ClosedRange<Date>, metrics: [FitnessMetrics]) -> Double {
-        metrics.filter { range.contains($0.day) }.reduce(0) { $0 + $1.load }
+    /// The number of calendar days `range` spans, inclusive of both ends; day-granular like the
+    /// metrics, so a rounded seconds-per-day division is enough (no timezone needed).
+    private func dayCount(of range: ClosedRange<Date>) -> Int {
+        Int((range.upperBound.timeIntervalSince(range.lowerBound) / 86400).rounded()) + 1
+    }
+
+    /// The mean of `metrics[].load` over the `dayCount(of:)` days of `range`, with the metrics
+    /// matched by exact `Date` equality rather than calendar arithmetic — sidesteps needing a
+    /// timezone `PlanEvaluator` never receives, since `range` and `metrics[].day` are both already
+    /// day-granular in the same (athlete) timezone by the time they reach here. A day with no
+    /// metrics counts as zero load.
+    private func meanDailyLoad(in range: ClosedRange<Date>, metrics: [FitnessMetrics]) -> Double {
+        metrics.filter { range.contains($0.day) }.reduce(0) { $0 + $1.load } / Double(dayCount(of: range))
     }
 }

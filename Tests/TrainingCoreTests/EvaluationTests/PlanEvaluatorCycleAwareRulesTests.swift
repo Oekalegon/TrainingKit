@@ -211,7 +211,88 @@ struct PlanEvaluatorCycleAwareRulesTests {
         let findings = evaluation.findings.filter { $0.rule == .consecutiveLoad }
         #expect(findings.count == 1)
         #expect(findings.first?.day == week(3).lowerBound)
-        #expect(findings.first?.value == 4)
-        #expect(findings.first?.threshold == 3)
+        #expect(findings.first?.value == 21)
+        #expect(findings.first?.threshold == 21)
+    }
+
+    // MARK: - Micro lengths other than 7 days
+
+    /// Micros of `length` days back to back from day 0, one per phase, and a metrics series with
+    /// each micro's days at its `dailyLoad`.
+    private func layout(length: Int, _ micros: [(phase: CyclePhase, dailyLoad: Double)]) -> (cycles: [TrainingCycle], metrics: [FitnessMetrics]) {
+        let mesoID = UUID()
+        var cycles: [TrainingCycle] = []
+        var metrics: [FitnessMetrics] = []
+        for (index, entry) in micros.enumerated() {
+            let start = index * length
+            cycles.append(TrainingCycle(level: .micro, phase: entry.phase, name: "Micro \(index)", dateRange: day(start)...day(start + length - 1), parentID: mesoID))
+            metrics += (0..<length).map {
+                FitnessMetrics(day: day(start + $0), load: entry.dailyLoad, ctl: 50, atl: 50, tsb: 0, monotony: 1, strain: entry.dailyLoad, isProjected: false, isWarmingUp: false)
+            }
+        }
+        return (cycles, metrics)
+    }
+
+    @Test("consecutive load counts days, so the same default flags the 4th 10-day micro but already the 3rd 14-day one")
+    func consecutiveLoadInDaysForLongMicros() {
+        for length in [10, 14] {
+            let (cycles, metrics) = layout(length: length, Array(repeating: (CyclePhase.build, 50.0), count: 4))
+            let findings = evaluator.evaluate(metrics, races: [], cycles: cycles).findings.filter { $0.rule == .consecutiveLoad }
+            // 10-day micros start at day 0, 10, 20, 30: the 4th starts after 30 >= 21 days.
+            // 14-day micros start at 0, 14, 28, 42: the 3rd starts after 28 >= 21 days.
+            let expectedDays = length == 10 ? [30] : [28, 42]
+            #expect(findings.map { Int($0.value) } == expectedDays, "micro length \(length)")
+        }
+    }
+
+    @Test("consecutive load honours a threshold raised for long micros, and a recovery micro resets it")
+    func consecutiveLoadThresholdAndReset() {
+        let (cycles, metrics) = layout(length: 14, [(.build, 50), (.build, 50), (.recovery, 20), (.build, 50), (.build, 50)])
+        var guardrails = PlanGuardrails()
+        guardrails.maxDaysWithoutRecovery = 28
+        #expect(!evaluator.evaluate(metrics, races: [], cycles: cycles, guardrails: guardrails).findings.contains { $0.rule == .consecutiveLoad })
+
+        guardrails.maxDaysWithoutRecovery = 14
+        let findings = evaluator.evaluate(metrics, races: [], cycles: cycles, guardrails: guardrails).findings.filter { $0.rule == .consecutiveLoad }
+        #expect(findings.map(\.day) == [day(14), day(56)])
+    }
+
+    @Test("recovery and build progression compare mean daily load, so 10- and 14-day micros read like 7-day ones")
+    func perDayLoadComparison() {
+        for length in [10, 14] {
+            let (good, goodMetrics) = layout(length: length, [(.build, 100), (.recovery, 50), (.build, 105)])
+            let goodFindings = evaluator.evaluate(goodMetrics, races: [], cycles: good).findings
+            #expect(!goodFindings.contains { $0.rule == .recoveryMicro || $0.rule == .buildProgression }, "micro length \(length)")
+
+            let (bad, badMetrics) = layout(length: length, [(.build, 100), (.recovery, 90), (.build, 130)])
+            let badFindings = evaluator.evaluate(badMetrics, races: [], cycles: bad).findings
+            #expect(badFindings.contains { $0.rule == .recoveryMicro && $0.day == day(length) }, "micro length \(length)")
+            #expect(badFindings.contains { $0.rule == .buildProgression && $0.severity == .risk && $0.day == day(2 * length) }, "micro length \(length)")
+        }
+    }
+
+    @Test("a shorter first micro isn't mistaken for a recovery by total load")
+    func unequalMicroLengthsCompareByDay() {
+        let mesoID = UUID()
+        let cycles = [
+            TrainingCycle(level: .micro, phase: .build, name: "Trimmed", dateRange: day(0)...day(3), parentID: mesoID),
+            TrainingCycle(level: .micro, phase: .recovery, name: "Recovery", dateRange: day(4)...day(13), parentID: mesoID),
+        ]
+        // 4 days at 100 = 400 total; 10 days at 90 = 900 total. Per day the recovery is only 10% lighter.
+        let metrics = (0...3).map { FitnessMetrics(day: day($0), load: 100, ctl: 50, atl: 50, tsb: 0, monotony: 1, strain: 100, isProjected: false, isWarmingUp: false) }
+            + (4...13).map { FitnessMetrics(day: day($0), load: 90, ctl: 50, atl: 50, tsb: 0, monotony: 1, strain: 90, isProjected: false, isWarmingUp: false) }
+        let finding = evaluator.evaluate(metrics, races: [], cycles: cycles).findings.first { $0.rule == .recoveryMicro }
+        #expect(finding != nil)
+        #expect(abs((finding?.value ?? 0) - 0.9) < 1e-9)
+    }
+
+    @Test("guardrails stored with the micro-count threshold decode as 7-day micros")
+    func legacyGuardrailsDecode() throws {
+        var json = try JSONSerialization.jsonObject(with: JSONEncoder().encode(PlanGuardrails())) as! [String: Any]
+        json["maxMicrosWithoutRecovery"] = 4
+        json.removeValue(forKey: "maxDaysWithoutRecovery")
+        let decoded = try JSONDecoder().decode(PlanGuardrails.self, from: JSONSerialization.data(withJSONObject: json))
+        #expect(decoded.maxDaysWithoutRecovery == 28)
+        #expect(try JSONDecoder().decode(PlanGuardrails.self, from: JSONEncoder().encode(decoded)) == decoded)
     }
 }

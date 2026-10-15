@@ -29,6 +29,6 @@ public enum PlanRule: Sendable, Codable, Hashable {
     case mesoProgress
     /// CTL drop and TSB trend across a taper meso, against ``PlanGuardrails/maxTaperCTLDropFraction``.
     case taperShape
-    /// Consecutive non-recovery micros, against ``PlanGuardrails/maxMicrosWithoutRecovery``.
+    /// Days of consecutive non-recovery micros, against ``PlanGuardrails/maxDaysWithoutRecovery``.
     case consecutiveLoad
 }

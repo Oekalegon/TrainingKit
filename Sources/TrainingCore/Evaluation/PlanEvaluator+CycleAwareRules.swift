@@ -3,14 +3,14 @@ import Foundation
 /// The `cycles`-dependent rule from design doc §10.4, split out of the main file since it only
 /// runs when the caller supplies cycles (see ``PlanEvaluator/evaluate(_:races:cycles:guardrails:)``).
 extension PlanEvaluator {
-    /// A build-phase micro's mean daily load relative to the previous build-phase micro (skipping over
+    /// A build-role micro's mean daily load relative to the previous build-role micro (skipping over
     /// any recovery micros in between). Below 0% is ``Severity/info`` (the plan isn't building, but
     /// that alone isn't a trend worth a second look); above `maxBuildProgressionFraction` is
     /// ``Severity/risk`` (too aggressive a jump).
     func buildProgressionFindings(cycles: [TrainingCycle], metrics: [FitnessMetrics], guardrails: PlanGuardrails) -> [PlanFinding] {
         var findings: [PlanFinding] = []
         var previousBuildLoad: Double?
-        for micro in sortedMicros(cycles) where micro.phase == .build {
+        for micro in sortedMicros(cycles) where micro.loadRole == .build {
             let load = meanDailyLoad(in: micro.dateRange, metrics: metrics)
             defer { previousBuildLoad = load }
 

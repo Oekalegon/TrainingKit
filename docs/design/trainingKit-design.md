@@ -553,7 +553,7 @@ Sources/
     Evaluation/       PlanEvaluator, PlanEvaluation, PlanFinding, PlanGuardrails
     Statistics/       ActivitySummary, TimeInZone, PeriodStats, PeriodDelta, WeeklyStats,
                       CycleStats, CycleFitness, StatisticsCalculator, HeartRateSegmentIterator
-    Cycles/           TrainingCycle, CycleLevel, CyclePhase, MesocycleTemplate,
+    Cycles/           TrainingCycle, CycleLevel, CyclePhase, MicroLoadRole, MesocycleTemplate,
                       MacroTemplate, CycleLayoutBuilder
     Goals/            Goal, GoalTarget, GoalMeasure, GoalPeriod
     Store/            ActivityStore, PlanStore, WorkoutLibraryStore, CycleStore, RaceStore,
@@ -672,7 +672,7 @@ Rules, all computed from the projected series:
 | Strain | weekly load × monotony | Absolute thresholds don't transfer across athletes in TRIMP units, so compare against the athlete's own trailing distribution |
 | Race-day TSB | TSB on `Race.date` | Taper landed: positive but not so high that fitness was lost (a warning, not a risk) |
 | TSB band | TSB on any day | Below `minAcceptableTSB` (−30) is the injury-risk band; above `maxAcceptableTSB` (25) reads as detraining (a warning) |
-| Build progression | mean daily load of a build micro vs the previous build micro | Cycle-aware (§10.4); to be replaced by a longest-run rule (MVP5-116) |
+| Build progression | mean daily load of a build-role micro vs the previous build-role micro | Cycle-aware (§10.4); to be replaced by a longest-run rule (MVP5-116) |
 
 Earlier iterations also had a CTL-ramp rule (CTL[d] − CTL[d−7]), an ATL/CTL ratio, and cycle-aware recovery-micro, meso-progress, taper-shape and consecutive-load rules. They were removed (MVP5-101 review) as thresholds nobody had asked for; ramp control is left to the generator's own volume curve (MVP5-117) and `buildProgression`. Only `.risk` findings make a plan unacceptable, so a missed race-day TSB or an over-high TSB is reported but doesn't by itself send the generator back to adjust.
 
@@ -953,14 +953,20 @@ Cycles are the calendar structure that plans and statistics hang off, and they s
 ```swift
 enum CycleLevel: Sendable, Codable { case macro, meso, micro }
 
-enum CyclePhase: Sendable, Codable {
-    case base, build, peak, taper, race, recovery, transition
-}
+/// What the athlete is working on: a named, paradigm-defined value (MVP5-113). The built-ins
+/// are static constants (`.base`, `.build`, `.peak`, `.taper`, `.race`, `.recovery`, `.transition`);
+/// a paradigm adds its own, e.g. `CyclePhase("structural")`. Encodes as its `id` string; the old
+/// enum payload (`{"build":{}}`) still decodes.
+struct CyclePhase: Sendable, Hashable, Codable, ExpressibleByStringLiteral { let id: String }
+
+/// How hard a micro is meant to be, independent of its phase. Rules read this, not the phase name.
+enum MicroLoadRole: String, Sendable, Codable { case build, recovery, taper, race }
 
 struct TrainingCycle: Identifiable, Sendable, Codable {
     let id: UUID
     var level: CycleLevel
     var phase: CyclePhase
+    var loadRole: MicroLoadRole?          // micros only; derived from a legacy phase when absent
     var name: String                      // "Ultra prep 2027", "Meso 3", "Week 11"
     var dateRange: ClosedRange<Date>      // day-granular, athlete timezone
     var parentID: UUID?                   // micro → meso → macro
@@ -977,7 +983,7 @@ A template describes a repeating pattern so the user (or the generator) doesn't 
 ```swift
 struct MesocycleTemplate: Sendable, Codable {
     var name: String                      // "3:1"
-    var microPhases: [CyclePhase]         // [.build, .build, .build, .recovery]
+    var microRoles: [MicroLoadRole]       // [.build, .build, .build, .recovery]
     var microLengthDays: Int = 7
     var recoveryLoadFraction: Double = 0.6 // recovery micro target relative to prior micro peak
     var buildLoadStep: Double = 0.08       // load increase per build micro, fractional
@@ -989,7 +995,7 @@ struct CycleLayoutBuilder: Sendable {
 }
 ```
 
-`CycleLayoutBuilder` works backwards from the race: race micro, taper micro(s), then fills toward the start with repeating meso templates, trimming the first meso if the total doesn't divide. Output is just `[TrainingCycle]`; the user can edit the result. Built-in templates: `3:1`, `2:1`, and `linear` (no recovery micro, for short blocks).
+`CycleLayoutBuilder` works backwards from the race: every micro takes its block's phase, and its load role comes from the pattern — the race micro is `.race`, taper-block micros are `.taper`, and the rest cycle `microRoles`. It lays out the race micro, taper micro(s), then fills toward the start with repeating meso templates, trimming the first meso if the total doesn't divide. Output is just `[TrainingCycle]`; the user can edit the result. Built-in templates: `3:1`, `2:1`, and `linear` (no recovery micro, for short blocks).
 
 In MVP 1 the builder is driven by the user ("lay out a 3:1 block from today to this race"); in MVP 2 the generator calls it and then fills the micros. A `MacroTemplate` is the ordered list of meso phases (`[.base, .base, .build, .build, .peak, .taper]`) with meso lengths; `Race` in MVP 1 is just `id`, `name`, `date`, `priority` (`RacePriority`: `.primary`/`.secondary`/`.tertiary`, model-only until MVP 5) — enough to anchor a layout and the race-day TSB rule.
 

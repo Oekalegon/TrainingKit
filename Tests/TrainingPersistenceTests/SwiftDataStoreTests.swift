@@ -592,6 +592,32 @@ struct SwiftDataStoreTests {
         }
     }
 
+    @Test("CycleStore reads a cycle record written before phases became named values")
+    func cycleStoreReadsLegacyPayload() async throws {
+        let container = try TestContainers.make(cloudKitDatabase: .none, isStoredInMemoryOnly: true)
+        let id = UUID()
+        let legacy = Data("""
+        {"id":"\(id.uuidString)","level":{"micro":{}},"phase":{"recovery":{}},"name":"Week 4","dateRange":[1000,2000]}
+        """.utf8)
+        let context = ModelContext(container)
+        context.insert(TrainingCycleRecord(id: id, payload: legacy))
+        try context.save()
+
+        let cycle = try #require(try await SwiftDataStore(modelContainer: container).cycle(id: id))
+
+        #expect(cycle.phase == .recovery)
+        #expect(cycle.loadRole == .recovery)
+    }
+
+    @Test("CycleStore round-trips a paradigm-defined phase and load role")
+    func cycleStoreRoundTripsNamedPhase() async throws {
+        let store = try makeStore()
+        let cycle = TrainingCycle(level: .micro, phase: "structural", loadRole: .build, name: "Week 1", dateRange: day(0)...day(6))
+        try await store.upsert([cycle])
+
+        #expect(try await store.cycle(id: cycle.id) == cycle)
+    }
+
     @Test("CycleStore delete removes a cycle")
     func cycleStoreDelete() async throws {
         let store = try makeStore()

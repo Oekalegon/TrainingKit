@@ -58,13 +58,18 @@ struct CycleLayoutBuilderTests {
         }
 
         // The last micro overall is always the race micro; the one before it (still within the
-        // taper block) is .taper rather than cycling the build/recovery pattern.
-        #expect(sortedMicros.last?.phase == .race)
-        #expect(sortedMicros[sortedMicros.count - 2].phase == .taper)
+        // taper block) has the taper role rather than cycling the build/recovery pattern. Both stay
+        // in the block's own phase.
+        #expect(sortedMicros.last?.loadRole == .race)
+        #expect(sortedMicros[sortedMicros.count - 2].loadRole == .taper)
+        #expect(sortedMicros.suffix(2).allSatisfy { $0.phase == .taper })
 
         // Base and build blocks each restart the 3:1 pattern at their own boundary.
-        #expect(sortedMicros[0..<4].map(\.phase) == [.build, .build, .build, .recovery])
-        #expect(sortedMicros[4..<8].map(\.phase) == [.build, .build, .build, .recovery])
+        #expect(sortedMicros[0..<4].map(\.loadRole) == [.build, .build, .build, .recovery])
+        #expect(sortedMicros[4..<8].map(\.loadRole) == [.build, .build, .build, .recovery])
+        // Phase comes from the block, not the pattern.
+        #expect(sortedMicros[0..<4].allSatisfy { $0.phase == .base })
+        #expect(sortedMicros[4..<8].allSatisfy { $0.phase == .build })
 
         let macroCycle = macros[0]
         #expect(macroCycle.dateRange == start...raceDay)
@@ -110,7 +115,7 @@ struct CycleLayoutBuilderTests {
         let micros = cycles.filter { $0.level == .micro }
         let mesos = cycles.filter { $0.level == .meso }
         #expect(micros.count == 1)
-        #expect(micros.first?.phase == .race)
+        #expect(micros.first?.loadRole == .race)
         #expect(micros.first?.dateRange == start...raceDay)
         #expect(mesos.count == 1)
         #expect(mesos.first?.phase == .taper)
@@ -132,7 +137,7 @@ struct CycleLayoutBuilderTests {
         let micros = cycles.filter { $0.level == .micro }
         #expect(micros.count == 1)
         #expect(micros.first?.dateRange == raceDay...raceDay)
-        #expect(micros.first?.phase == .race)
+        #expect(micros.first?.loadRole == .race)
     }
 
     @Test("a race date before start returns no cycles")
@@ -179,7 +184,8 @@ struct CycleLayoutBuilderTests {
         #expect(micros.count == 10)
         #expect(micros.map(\.dateRange) == microCycles.map(\.dateRange))
         #expect(micros.map(\.phase) == microCycles.map(\.phase))
-        #expect(micros.last?.phase == .race)
+        #expect(micros.map(\.loadRole) == microCycles.map(\.loadRole))
+        #expect(micros.last?.loadRole == .race)
         #expect(micros.map(\.id) == micros.map(\.dateRange.lowerBound))
     }
 
@@ -197,8 +203,8 @@ struct CycleLayoutBuilderTests {
     func nonPositiveMicroLengthDaysReturnsEmpty() {
         let race = race()
         let start = calendar.date(byAdding: .day, value: -30, to: raceDate)!
-        let zeroLength = MesocycleTemplate(name: "zero", microPhases: [.build], microLengthDays: 0)
-        let negativeLength = MesocycleTemplate(name: "negative", microPhases: [.build], microLengthDays: -7)
+        let zeroLength = MesocycleTemplate(name: "zero", microRoles: [.build], microLengthDays: 0)
+        let negativeLength = MesocycleTemplate(name: "negative", microRoles: [.build], microLengthDays: -7)
 
         #expect(builder.layout(from: start, to: race, macro: macro, meso: zeroLength, athlete: athlete).isEmpty)
         #expect(builder.layout(from: start, to: race, macro: macro, meso: negativeLength, athlete: athlete).isEmpty)
@@ -209,7 +215,7 @@ struct CycleLayoutBuilderTests {
     func nonPositiveMicroLengthDaysInBlockOverrideReturnsEmpty() {
         let race = race()
         let start = calendar.date(byAdding: .day, value: -30, to: raceDate)!
-        let badOverride = MesocycleTemplate(name: "bad", microPhases: [.build], microLengthDays: 0)
+        let badOverride = MesocycleTemplate(name: "bad", microRoles: [.build], microLengthDays: 0)
         let macroWithBadOverride = MacroTemplate(name: "Bad Override", mesoBlocks: [
             MacroTemplate.MesoBlock(phase: .base, microCount: 4, pattern: badOverride),
         ])
@@ -221,7 +227,7 @@ struct CycleLayoutBuilderTests {
     func disabledBlockWithBadPatternIsIgnored() {
         let race = race()
         let raceDay = calendar.startOfDay(for: raceDate)
-        let badPattern = MesocycleTemplate(name: "bad", microPhases: [.build], microLengthDays: 0)
+        let badPattern = MesocycleTemplate(name: "bad", microRoles: [.build], microLengthDays: 0)
         let macroWithDisabledBlock = MacroTemplate(name: "Test", mesoBlocks: [
             MacroTemplate.MesoBlock(phase: .peak, microCount: 0, pattern: badPattern), // disabled, shouldn't matter
             MacroTemplate.MesoBlock(phase: .build, microCount: 4),
@@ -280,10 +286,10 @@ struct CycleLayoutBuilderTests {
         let micros = cycles.filter { $0.level == .micro }.sorted { $0.dateRange.lowerBound < $1.dateRange.lowerBound }
         #expect(micros.count == 11)
         // Base block uses its own 2:1 override, restarting at its own boundary.
-        #expect(micros[0..<6].map(\.phase) == [.build, .build, .recovery, .build, .build, .recovery])
+        #expect(micros[0..<6].map(\.loadRole) == [.build, .build, .recovery, .build, .build, .recovery])
         // Build block has no override, so it falls back to the default 3:1 `meso` parameter.
-        #expect(micros[6..<10].map(\.phase) == [.build, .build, .build, .recovery])
+        #expect(micros[6..<10].map(\.loadRole) == [.build, .build, .build, .recovery])
         // The taper block's one micro is always the forced race micro, regardless of pattern.
-        #expect(micros[10].phase == .race)
+        #expect(micros[10].loadRole == .race)
     }
 }

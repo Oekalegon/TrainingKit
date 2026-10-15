@@ -14,6 +14,8 @@ public struct Microcycle: Identifiable, Sendable, Codable, Hashable {
     public let dateRange: ClosedRange<Date>
     /// This micro-cycle's training emphasis.
     public let phase: CyclePhase
+    /// How hard this micro-cycle is meant to be within its mesocycle.
+    public let loadRole: MicroLoadRole
     /// The index into the originating ``MacroTemplate/mesoBlocks`` this micro-cycle belongs to.
     public let mesoBlockIndex: Int
 
@@ -22,11 +24,13 @@ public struct Microcycle: Identifiable, Sendable, Codable, Hashable {
     /// - Parameters:
     ///   - dateRange: Day-granular date range, in the athlete's timezone.
     ///   - phase: This micro-cycle's training emphasis.
+    ///   - loadRole: How hard this micro-cycle is meant to be within its mesocycle.
     ///   - mesoBlockIndex: The index into the originating ``MacroTemplate/mesoBlocks`` this
     ///     micro-cycle belongs to.
-    public init(dateRange: ClosedRange<Date>, phase: CyclePhase, mesoBlockIndex: Int) {
+    public init(dateRange: ClosedRange<Date>, phase: CyclePhase, loadRole: MicroLoadRole, mesoBlockIndex: Int) {
         self.dateRange = dateRange
         self.phase = phase
+        self.loadRole = loadRole
         self.mesoBlockIndex = mesoBlockIndex
     }
 }

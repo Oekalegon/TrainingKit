@@ -22,8 +22,8 @@ struct PlanEvaluatorCycleAwareRulesTests {
         }
     }
 
-    private func micro(week weekIndex: Int, phase: CyclePhase, parentID: UUID) -> TrainingCycle {
-        TrainingCycle(level: .micro, phase: phase, name: "Week \(weekIndex)", dateRange: week(weekIndex), parentID: parentID)
+    private func micro(week weekIndex: Int, phase: CyclePhase = .build, role: MicroLoadRole, parentID: UUID) -> TrainingCycle {
+        TrainingCycle(level: .micro, phase: phase, loadRole: role, name: "Week \(weekIndex)", dateRange: week(weekIndex), parentID: parentID)
     }
 
     // MARK: - Cycles empty
@@ -43,10 +43,10 @@ struct PlanEvaluatorCycleAwareRulesTests {
     func buildProgressionBounds() {
         let mesoID = UUID()
         let cycles = [
-            micro(week: 0, phase: .build, parentID: mesoID), // baseline: 100
-            micro(week: 1, phase: .recovery, parentID: mesoID), // skipped when comparing builds
-            micro(week: 2, phase: .build, parentID: mesoID), // +50% vs week 0 -> risk
-            micro(week: 3, phase: .build, parentID: mesoID), // -20% vs week 2 -> info
+            micro(week: 0, role: .build, parentID: mesoID), // baseline: 100
+            micro(week: 1, role: .recovery, parentID: mesoID), // skipped when comparing builds
+            micro(week: 2, phase: "structural", role: .build, parentID: mesoID), // +50% vs week 0 -> risk
+            micro(week: 3, role: .build, parentID: mesoID), // -20% vs week 2 -> info
         ]
         let metrics = metricsForWeek(0, dailyLoad: 100)
             + metricsForWeek(1, dailyLoad: 20)
@@ -61,17 +61,33 @@ struct PlanEvaluatorCycleAwareRulesTests {
         #expect(findings.first { $0.day == week(3).lowerBound }?.severity == .info)
     }
 
+    @Test("build progression reads the load role, not the phase name")
+    func buildProgressionReadsLoadRole() {
+        let mesoID = UUID()
+        // Phase `.build` but a recovery role is skipped; a custom phase with a build role counts.
+        let cycles = [
+            micro(week: 0, phase: "structural", role: .build, parentID: mesoID),
+            micro(week: 1, phase: .build, role: .recovery, parentID: mesoID),
+            micro(week: 2, phase: "specific", role: .build, parentID: mesoID),
+        ]
+        let metrics = metricsForWeek(0, dailyLoad: 100) + metricsForWeek(1, dailyLoad: 10) + metricsForWeek(2, dailyLoad: 150)
+
+        let findings = evaluator.evaluate(metrics, races: [], cycles: cycles).findings.filter { $0.rule == .buildProgression }
+
+        #expect(findings.count == 1 && findings[0].severity == .risk && findings[0].day == week(2).lowerBound)
+    }
+
     // MARK: - Micro lengths other than 7 days
 
     /// Micros of `length` days back to back from day 0, one per phase, and a metrics series with
     /// each micro's days at its `dailyLoad`.
-    private func layout(length: Int, _ micros: [(phase: CyclePhase, dailyLoad: Double)]) -> (cycles: [TrainingCycle], metrics: [FitnessMetrics]) {
+    private func layout(length: Int, _ micros: [(role: MicroLoadRole, dailyLoad: Double)]) -> (cycles: [TrainingCycle], metrics: [FitnessMetrics]) {
         let mesoID = UUID()
         var cycles: [TrainingCycle] = []
         var metrics: [FitnessMetrics] = []
         for (index, entry) in micros.enumerated() {
             let start = index * length
-            cycles.append(TrainingCycle(level: .micro, phase: entry.phase, name: "Micro \(index)", dateRange: day(start)...day(start + length - 1), parentID: mesoID))
+            cycles.append(TrainingCycle(level: .micro, phase: .build, loadRole: entry.role, name: "Micro \(index)", dateRange: day(start)...day(start + length - 1), parentID: mesoID))
             metrics += (0..<length).map {
                 FitnessMetrics(day: day(start + $0), load: entry.dailyLoad, ctl: 50, atl: 50, tsb: 0, monotony: 1, strain: entry.dailyLoad, isProjected: false, isWarmingUp: false)
             }
@@ -95,8 +111,8 @@ struct PlanEvaluatorCycleAwareRulesTests {
     func unequalMicroLengthsCompareByDay() {
         let mesoID = UUID()
         let cycles = [
-            TrainingCycle(level: .micro, phase: .build, name: "Trimmed", dateRange: day(0)...day(3), parentID: mesoID),
-            TrainingCycle(level: .micro, phase: .build, name: "Full", dateRange: day(4)...day(13), parentID: mesoID),
+            TrainingCycle(level: .micro, phase: .build, loadRole: .build, name: "Trimmed", dateRange: day(0)...day(3), parentID: mesoID),
+            TrainingCycle(level: .micro, phase: .build, loadRole: .build, name: "Full", dateRange: day(4)...day(13), parentID: mesoID),
         ]
         // 4 days at 100 = 400 total; 10 days at 105 = 1050 total, but only +5% per day.
         let metrics = (0...3).map { FitnessMetrics(day: day($0), load: 100, ctl: 50, atl: 50, tsb: 0, monotony: 1, strain: 100, isProjected: false, isWarmingUp: false) }
@@ -108,8 +124,8 @@ struct PlanEvaluatorCycleAwareRulesTests {
     func partiallyCoveredMicroUsesCoveredDays() {
         let mesoID = UUID()
         let cycles = [
-            TrainingCycle(level: .micro, phase: .build, name: "Full", dateRange: day(0)...day(6), parentID: mesoID),
-            TrainingCycle(level: .micro, phase: .build, name: "Cut off", dateRange: day(7)...day(13), parentID: mesoID),
+            TrainingCycle(level: .micro, phase: .build, loadRole: .build, name: "Full", dateRange: day(0)...day(6), parentID: mesoID),
+            TrainingCycle(level: .micro, phase: .build, loadRole: .build, name: "Cut off", dateRange: day(7)...day(13), parentID: mesoID),
         ]
         // The series stops after 3 days of the second micro, at +30% per day: the risk is there even
         // though the covered days' total (3 × 130) is far below the first micro's (7 × 100).

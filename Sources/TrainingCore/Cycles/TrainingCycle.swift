@@ -13,6 +13,9 @@ public struct TrainingCycle: Identifiable, Sendable, Codable, Hashable {
     public var level: CycleLevel
     /// This cycle's training emphasis.
     public var phase: CyclePhase
+    /// How hard this micro is meant to be (build, recovery, taper or race). Only micro-level cycles
+    /// carry one; it is `nil` for macro- and meso-level cycles (any role passed for them is dropped).
+    public var loadRole: MicroLoadRole?
     /// A display name, e.g. "Ultra prep 2027", "Meso 3", "Week 11".
     public var name: String
     /// Day-granular date range, in the athlete's timezone.
@@ -29,6 +32,9 @@ public struct TrainingCycle: Identifiable, Sendable, Codable, Hashable {
     ///   - id: A stable identifier; defaults to a new random `UUID`.
     ///   - level: Where this cycle sits in the macro/meso/micro hierarchy.
     ///   - phase: This cycle's training emphasis.
+    ///   - loadRole: The micro's load role. Macro and meso cycles have none. For a micro, `nil` (the
+    ///     default) derives it from `phase` the way legacy payloads are decoded — `build`,
+    ///     `recovery`, `taper` and `race` map to the role of the same name, any other phase to `build`.
     ///   - name: A display name.
     ///   - dateRange: Day-granular date range, in the athlete's timezone.
     ///   - parentID: The parent cycle this one nests inside, if any.
@@ -37,6 +43,7 @@ public struct TrainingCycle: Identifiable, Sendable, Codable, Hashable {
         id: UUID = UUID(),
         level: CycleLevel,
         phase: CyclePhase,
+        loadRole: MicroLoadRole? = nil,
         name: String,
         dateRange: ClosedRange<Date>,
         parentID: UUID? = nil,
@@ -45,9 +52,39 @@ public struct TrainingCycle: Identifiable, Sendable, Codable, Hashable {
         self.id = id
         self.level = level
         self.phase = phase
+        self.loadRole = level == .micro ? loadRole ?? Self.derivedLoadRole(from: phase) : nil
         self.name = name
         self.dateRange = dateRange
         self.parentID = parentID
         self.targetRaceID = targetRaceID
+    }
+
+    private static func derivedLoadRole(from phase: CyclePhase) -> MicroLoadRole {
+        MicroLoadRole(rawValue: phase.id) ?? .build
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, level, phase, loadRole, name, dateRange, parentID, targetRaceID
+    }
+
+    /// Decodes a cycle, including payloads written before the load role existed. For those, a
+    /// micro's role is derived from its stored phase (`build`, `recovery`, `taper` and `race` map
+    /// to the role of the same name; any other phase counts as `build`).
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        level = try container.decode(CycleLevel.self, forKey: .level)
+        phase = try container.decode(CyclePhase.self, forKey: .phase)
+        name = try container.decode(String.self, forKey: .name)
+        dateRange = try container.decode(ClosedRange<Date>.self, forKey: .dateRange)
+        parentID = try container.decodeIfPresent(UUID.self, forKey: .parentID)
+        targetRaceID = try container.decodeIfPresent(UUID.self, forKey: .targetRaceID)
+        if let stored = try container.decodeIfPresent(MicroLoadRole.self, forKey: .loadRole) {
+            loadRole = stored
+        } else if level == .micro {
+            loadRole = Self.derivedLoadRole(from: phase)
+        } else {
+            loadRole = nil
+        }
     }
 }

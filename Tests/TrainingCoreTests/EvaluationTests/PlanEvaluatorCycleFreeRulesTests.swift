@@ -23,113 +23,6 @@ struct PlanEvaluatorCycleFreeRulesTests {
         FitnessMetrics(day: day(offset), load: load, ctl: ctl, atl: atl, tsb: tsb, monotony: monotony, strain: strain, isProjected: false, isWarmingUp: isWarmingUp)
     }
 
-    // MARK: - CTL ramp
-
-    @Test("a CTL ramp over the threshold fires risk on the day it's measured")
-    func ctlRampExceeded() {
-        var metrics = (0..<8).map { metric($0, ctl: 50) }
-        metrics[7] = metric(7, ctl: 57) // +7 over 7 days, threshold is 6
-
-        let evaluation = evaluator.evaluate(metrics, races: [])
-
-        let finding = evaluation.findings.first { $0.rule == .ctlRamp }
-        #expect(finding != nil)
-        #expect(finding?.severity == .risk)
-        #expect(finding?.day == day(7))
-        #expect(abs((finding?.value ?? 0) - 7) < 1e-9)
-        #expect(finding?.threshold == 6)
-    }
-
-    @Test("a CTL ramp within the threshold doesn't fire, and days without 7 days of history are skipped")
-    func ctlRampWithinThreshold() {
-        // Only day 7 has a day-7 predecessor to compare against; its ramp is 3.5, under the 6 threshold.
-        let metrics = (0..<8).map { metric($0, ctl: 50 + Double($0) * 0.5) }
-
-        let evaluation = evaluator.evaluate(metrics, races: [])
-
-        #expect(!evaluation.findings.contains { $0.rule == .ctlRamp })
-    }
-
-    @Test("a CTL ramp during warmup doesn't fire, even though the raw ramp exceeds the threshold")
-    func ctlRampSkipsWarmingUpDays() {
-        var metrics = (0..<8).map { metric($0, ctl: 50, isWarmingUp: true) }
-        metrics[7] = metric(7, ctl: 57, isWarmingUp: true) // would be a risk finding if not warming up
-
-        let evaluation = evaluator.evaluate(metrics, races: [])
-
-        #expect(!evaluation.findings.contains { $0.rule == .ctlRamp })
-    }
-
-    // MARK: - ATL/CTL ratio
-
-    @Test("ATL/CTL above the max fires risk; below the min fires warning, not risk")
-    func atlToCTLRatioBounds() {
-        let metrics = [
-            metric(0, ctl: 50, atl: 80), // ratio 1.6 > 1.4 max
-            metric(1, ctl: 50, atl: 20), // ratio 0.4 < 0.7 min
-            metric(2, ctl: 50, atl: 50), // ratio 1.0, within band
-        ]
-
-        let evaluation = evaluator.evaluate(metrics, races: [])
-
-        let findings = evaluation.findings.filter { $0.rule == .atlToCTLRatio }
-        #expect(findings.count == 2)
-        #expect(findings.first { $0.day == day(0) }?.severity == .risk)
-        #expect(findings.first { $0.day == day(1) }?.severity == .warning)
-        #expect(!findings.contains { $0.day == day(2) })
-    }
-
-    @Test("ATL/CTL exactly at the max or min threshold doesn't fire — comparisons are strict")
-    func atlToCTLRatioExactlyAtThresholdDoesNotFire() {
-        // Guards against an accidental `>=`/`<=` flip: the guardrail's own defaults (1.4 max,
-        // 0.7 min) describe a band, and a ratio sitting exactly on its edge is documented as
-        // still within it, not already over.
-        let metrics = [
-            metric(0, ctl: 50, atl: 70), // ratio exactly 1.4 (the default max)
-            metric(1, ctl: 50, atl: 35), // ratio exactly 0.7 (the default min)
-        ]
-
-        let evaluation = evaluator.evaluate(metrics, races: [])
-
-        #expect(!evaluation.findings.contains { $0.rule == .atlToCTLRatio })
-    }
-
-    @Test("a zero CTL day is skipped rather than dividing by zero")
-    func atlToCTLRatioSkipsZeroCTL() {
-        let metrics = [metric(0, ctl: 0, atl: 10)]
-
-        let evaluation = evaluator.evaluate(metrics, races: [])
-
-        #expect(!evaluation.findings.contains { $0.rule == .atlToCTLRatio })
-    }
-
-    @Test("an ATL/CTL ratio during warmup doesn't fire, even though the raw ratio exceeds the max")
-    func atlToCTLRatioSkipsWarmingUpDays() {
-        let metrics = [metric(0, ctl: 50, atl: 80, isWarmingUp: true)] // would be risk if not warming up
-
-        let evaluation = evaluator.evaluate(metrics, races: [])
-
-        #expect(!evaluation.findings.contains { $0.rule == .atlToCTLRatio })
-    }
-
-    @Test("a below-minCTLForRatioCheck day is skipped even with a genuinely mild TSB, but fires once CTL clears the threshold")
-    func atlToCTLRatioSkipsBelowMinCTL() {
-        // Real-world numbers from an athlete returning from surgery: CTL=9, ATL=14 gives ratio
-        // 1.56 (over the 1.4 risk default) from a low baseline alone -- TSB=-5 is unremarkable.
-        let metrics = [
-            metric(0, ctl: 9, atl: 14, tsb: -5),
-            metric(1, ctl: 19.99, atl: 40, tsb: -5), // just under the default 20 minCTLForRatioCheck
-            metric(2, ctl: 20, atl: 40, tsb: -5), // ratio 2.0 -- at the threshold, check now applies
-        ]
-
-        let evaluation = evaluator.evaluate(metrics, races: [])
-
-        let findings = evaluation.findings.filter { $0.rule == .atlToCTLRatio }
-        #expect(!findings.contains { $0.day == day(0) })
-        #expect(!findings.contains { $0.day == day(1) })
-        #expect(findings.first { $0.day == day(2) }?.severity == .risk)
-    }
-
     // MARK: - TSB band
 
     @Test("TSB below the min fires risk; above the max fires warning, not risk")
@@ -290,7 +183,7 @@ struct PlanEvaluatorCycleFreeRulesTests {
     @Test("isAcceptable is false with any risk finding and true otherwise")
     func isAcceptable() {
         let risky = PlanEvaluation(findings: [PlanFinding(day: day(0), rule: .monotony, severity: .risk, value: 3, threshold: 2)])
-        let warningOnly = PlanEvaluation(findings: [PlanFinding(day: day(0), rule: .atlToCTLRatio, severity: .warning, value: 0.5, threshold: 0.7)])
+        let warningOnly = PlanEvaluation(findings: [PlanFinding(day: day(0), rule: .tsbBand, severity: .warning, value: 30, threshold: 25)])
         let clean = PlanEvaluation(findings: [])
 
         #expect(risky.isAcceptable == false)

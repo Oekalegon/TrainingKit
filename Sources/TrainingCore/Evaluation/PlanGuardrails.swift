@@ -1,25 +1,8 @@
 /// Tunable thresholds ``PlanEvaluator`` checks a plan's projected metrics against.
 ///
 /// `Codable` and user-editable; MVP 3 can tune these from observed outcomes (e.g. an athlete who
-/// tolerates a 1.5 ATL/CTL ratio without issue).
+/// tolerates a lower TSB without issue).
 public struct PlanGuardrails: Sendable, Codable, Hashable {
-    /// CTL points gained per 7 days above which fitness is climbing too fast — the classic
-    /// overuse setup; fellrnr and Coggan both flag ~5–8/week as the ceiling for most runners.
-    public var maxCTLRampPerWeek: Double
-    /// The acute:chronic workload ratio analogue (ATL/CTL) above which is the injury-risk band.
-    public var maxATLtoCTLRatio: Double
-    /// The ATL/CTL ratio below which the plan is losing fitness rather than at risk — flagged as
-    /// ``Severity/warning``, not ``Severity/risk``.
-    public var minATLtoCTLRatio: Double
-    /// The CTL below which ``PlanEvaluator`` skips the ATL/CTL ratio check entirely, on top of the
-    /// existing zero-CTL divide-by-zero guard. The ratio normalizes fatigue against fitness, which
-    /// is hypersensitive at a low absolute CTL — e.g. CTL=9, ATL=14 (TSB=-6, an unremarkable,
-    /// mild fatigue level) already reads as ratio=1.56, over the default 1.4 risk threshold, from
-    /// a low baseline alone rather than anything the ratio is actually meant to catch. Below this
-    /// CTL, ``minAcceptableTSB``/``maxAcceptableTSB`` is the more reliable freshness signal for an
-    /// athlete who hasn't built up a meaningful fitness base yet (e.g. returning from injury or
-    /// surgery), since it's an absolute measure rather than a ratio against a small denominator.
-    public var minCTLForRatioCheck: Double
     /// Trailing-window mean/stdev above which a week has no easy/hard contrast, even at moderate
     /// volume.
     public var maxMonotony: Double
@@ -62,12 +45,6 @@ public struct PlanGuardrails: Sendable, Codable, Hashable {
     /// Creates a set of plan guardrails, defaulting to the values discussed in the design doc.
     ///
     /// - Parameters:
-    ///   - maxCTLRampPerWeek: CTL points gained per 7 days above which fitness is climbing too
-    ///     fast; defaults to 6.
-    ///   - maxATLtoCTLRatio: The ATL/CTL ratio above which is the injury-risk band; defaults to 1.4.
-    ///   - minATLtoCTLRatio: The ATL/CTL ratio below which the plan is losing fitness; defaults to 0.7.
-    ///   - minCTLForRatioCheck: The CTL below which the ratio check is skipped entirely; defaults
-    ///     to 20.
     ///   - maxMonotony: Trailing-window mean/stdev above which a week lacks easy/hard contrast;
     ///     defaults to 2.0.
     ///   - maxStrainPercentile: The trailing-distribution percentile above which a day's strain is
@@ -88,10 +65,6 @@ public struct PlanGuardrails: Sendable, Codable, Hashable {
     ///   - maxTaperCTLDropFraction: The fractional CTL drop across a taper meso above which too
     ///     much fitness was lost; defaults to 0.10.
     public init(
-        maxCTLRampPerWeek: Double = 6,
-        maxATLtoCTLRatio: Double = 1.4,
-        minATLtoCTLRatio: Double = 0.7,
-        minCTLForRatioCheck: Double = 20,
         maxMonotony: Double = 2.0,
         maxStrainPercentile: Double = 0.95,
         strainTrailingWindowDays: Int = 84,
@@ -105,10 +78,6 @@ public struct PlanGuardrails: Sendable, Codable, Hashable {
         maxBuildProgressionFraction: Double = 0.10,
         maxTaperCTLDropFraction: Double = 0.10
     ) {
-        self.maxCTLRampPerWeek = maxCTLRampPerWeek
-        self.maxATLtoCTLRatio = maxATLtoCTLRatio
-        self.minATLtoCTLRatio = minATLtoCTLRatio
-        self.minCTLForRatioCheck = minCTLForRatioCheck
         self.maxMonotony = maxMonotony
         self.maxStrainPercentile = maxStrainPercentile
         self.strainTrailingWindowDays = strainTrailingWindowDays
@@ -124,7 +93,7 @@ public struct PlanGuardrails: Sendable, Codable, Hashable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case maxCTLRampPerWeek, maxATLtoCTLRatio, minATLtoCTLRatio, minCTLForRatioCheck, maxMonotony
+        case maxMonotony
         case maxStrainPercentile, strainTrailingWindowDays, minTSBOnRaceDay, maxTSBOnRaceDay
         case minAcceptableTSB, maxAcceptableTSB, minCTLGainPerMeso, maxDaysWithoutRecovery
         case recoveryLoadFraction, maxBuildProgressionFraction, maxTaperCTLDropFraction
@@ -132,14 +101,11 @@ public struct PlanGuardrails: Sendable, Codable, Hashable {
         case maxMicrosWithoutRecovery
     }
 
-    /// Decodes guardrails, reading a stored `maxMicrosWithoutRecovery` (a count of micros, from
+    /// Decodes guardrails, ignoring the keys of the removed CTL-ramp and ATL/CTL-ratio guardrails
+    /// if present, and reading a stored `maxMicrosWithoutRecovery` (a count of micros, from
     /// before the threshold was in days) as that many 7-day micros.
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        maxCTLRampPerWeek = try c.decode(Double.self, forKey: .maxCTLRampPerWeek)
-        maxATLtoCTLRatio = try c.decode(Double.self, forKey: .maxATLtoCTLRatio)
-        minATLtoCTLRatio = try c.decode(Double.self, forKey: .minATLtoCTLRatio)
-        minCTLForRatioCheck = try c.decode(Double.self, forKey: .minCTLForRatioCheck)
         maxMonotony = try c.decode(Double.self, forKey: .maxMonotony)
         maxStrainPercentile = try c.decode(Double.self, forKey: .maxStrainPercentile)
         strainTrailingWindowDays = try c.decode(Int.self, forKey: .strainTrailingWindowDays)
@@ -161,10 +127,6 @@ public struct PlanGuardrails: Sendable, Codable, Hashable {
     /// Encodes guardrails with `maxDaysWithoutRecovery`; the legacy key is only ever read.
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
-        try c.encode(maxCTLRampPerWeek, forKey: .maxCTLRampPerWeek)
-        try c.encode(maxATLtoCTLRatio, forKey: .maxATLtoCTLRatio)
-        try c.encode(minATLtoCTLRatio, forKey: .minATLtoCTLRatio)
-        try c.encode(minCTLForRatioCheck, forKey: .minCTLForRatioCheck)
         try c.encode(maxMonotony, forKey: .maxMonotony)
         try c.encode(maxStrainPercentile, forKey: .maxStrainPercentile)
         try c.encode(strainTrailingWindowDays, forKey: .strainTrailingWindowDays)

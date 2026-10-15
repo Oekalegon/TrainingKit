@@ -1,12 +1,8 @@
 /// Which guardrail a ``PlanFinding`` came from.
 ///
-/// The first five run on `[FitnessMetrics]` alone; the rest need the `cycles` parameter of
+/// The first four run on `[FitnessMetrics]` alone; the rest need the `cycles` parameter of
 /// ``PlanEvaluator/evaluate(_:races:cycles:guardrails:)`` and are skipped without it.
 public enum PlanRule: Sendable, Codable, Hashable {
-    /// CTL[d] − CTL[d−7] against ``PlanGuardrails/maxCTLRampPerWeek``.
-    case ctlRamp
-    /// ATL[d] / CTL[d] against ``PlanGuardrails/maxATLtoCTLRatio``/``PlanGuardrails/minATLtoCTLRatio``.
-    case atlToCTLRatio
     /// A day's monotony against ``PlanGuardrails/maxMonotony``.
     case monotony
     /// A day's strain percentile within the athlete's own trailing distribution, against
@@ -17,7 +13,7 @@ public enum PlanRule: Sendable, Codable, Hashable {
     /// Any day's TSB against ``PlanGuardrails/minAcceptableTSB``/``PlanGuardrails/maxAcceptableTSB``
     /// — unlike ``raceDayTSB``, checked every day, not just race days: the direct freshness/fatigue
     /// signal (TSB = CTL − ATL), independent of whether the plan has any known phase (build,
-    /// recovery, taper) to judge the ATL/CTL ratio against.
+    /// recovery, taper) to judge it against.
     case tsbBand
     /// A recovery-phase micro's load relative to the micro before it, against
     /// ``PlanGuardrails/recoveryLoadFraction``.

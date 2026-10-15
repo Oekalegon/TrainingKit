@@ -627,7 +627,7 @@ struct VolumeIncrement: Sendable, Codable {
 }
 ```
 
-`PlanGenerator` reads `trainingDays` to decide which calendar days get a session at all, and `startingWeeklyVolume` + `weeklyIncrement` to size each week's total before splitting it across sessions. Days without a `dayPreferences` entry (or with `sessionType == nil`) default to an `.easy` session sized from `startingSessionVolume`, ramped the same way as the weekly total. Days with an explicit `sessionType` (e.g. `.long` on Sunday, `.interval` on Tuesday, `.hillRepeats` on Thursday) are filled from library workouts matching that `sessionType`/`sport`/`surface`, falling back to the closest match if the library has nothing tagged for it. `maxSingleSessionDistanceMeters`/`Duration` bounds any one session — most relevant to `.long` days — regardless of what the ramp would otherwise assign; this is a preference-level cap (e.g. "I don't want a long run over 32km"), independent of and typically tighter than anything `PlanGuardrails` enforces at the series level. None of this bypasses §8.2: a ramp the athlete asked for that would still breach `maxCTLRampPerWeek` or `maxATLtoCTLRatio` gets throttled by the same adjust step as any other proposal.
+`PlanGenerator` reads `trainingDays` to decide which calendar days get a session at all, and `startingWeeklyVolume` + `weeklyIncrement` to size each week's total before splitting it across sessions. Days without a `dayPreferences` entry (or with `sessionType == nil`) default to an `.easy` session sized from `startingSessionVolume`, ramped the same way as the weekly total. Days with an explicit `sessionType` (e.g. `.long` on Sunday, `.interval` on Tuesday, `.hillRepeats` on Thursday) are filled from library workouts matching that `sessionType`/`sport`/`surface`, falling back to the closest match if the library has nothing tagged for it. `maxSingleSessionDistanceMeters`/`Duration` bounds any one session — most relevant to `.long` days — regardless of what the ramp would otherwise assign; this is a preference-level cap (e.g. "I don't want a long run over 32km"), independent of and typically tighter than anything `PlanGuardrails` enforces at the series level. None of this bypasses §8.2: a ramp the athlete asked for that would still breach a guardrail (e.g. `minAcceptableTSB`) gets throttled by the same adjust step as any other proposal.
 
 ### 8.2 Guardrails
 
@@ -646,9 +646,6 @@ struct PlanFinding: Sendable {
 }
 
 struct PlanGuardrails: Sendable, Codable {
-    var maxCTLRampPerWeek: Double = 6          // CTL points gained per 7 days
-    var maxATLtoCTLRatio: Double = 1.4         // acute:chronic analogue
-    var minATLtoCTLRatio: Double = 0.7         // below this = detraining, not risk
     var maxMonotony: Double = 2.0
     var maxStrainPercentile: Double = 0.95     // relative to athlete's own trailing 12 weeks
     var minTSBOnRaceDay: Double = 5
@@ -667,14 +664,12 @@ Rules, all computed from the projected series:
 
 | Rule | Signal | Why |
 |---|---|---|
-| CTL ramp | CTL[d] − CTL[d−7] | Fitness climbing too fast is the classic overuse setup; fellrnr and Coggan both flag ~5–8/week as the ceiling for most runners |
-| ATL/CTL ratio | ATL[d] / CTL[d] | Acute:chronic workload ratio analogue; > ~1.4–1.5 is the danger band, < ~0.7 means the plan is losing fitness |
 | Monotony | 7-day mean / stdev | > 2.0 means the week has no easy/hard contrast, even at moderate volume |
 | Strain | weekly load × monotony | Absolute thresholds don't transfer across athletes in TRIMP units, so compare against the athlete's own trailing distribution |
 | Race-day TSB | TSB on `Race.date` | Taper landed: positive but not so high that fitness was lost |
 | Progress | CTL at meso end − CTL at meso start | Guards against a "safe" plan that's actually flat (cycle-aware rules in §10.4) |
 
-Guardrail values are `Codable` and user-editable; MVP 4 can tune them from observed outcomes (e.g. the athlete who tolerates a 1.5 ratio without issue).
+Guardrail values are `Codable` and user-editable; MVP 4 can tune them from observed outcomes (e.g. the athlete who tolerates a lower TSB without issue).
 
 The MVP 2 generator loop is then: propose from `PlanPreferences` (§8.1) → `DailyLoadSeries` → `FitnessMetricsCalculator` → `PlanEvaluator` → adjust (drop a session, swap hard for easy, insert a down-week, throttle the requested ramp) → repeat until acceptable. The "adjust" step is a fixed set of heuristics in MVP 2 — no model in the loop. MVP 3 adds an LLM-driven coach that can propose the same kind of edits conversationally, but it drives the identical `PlanEvaluator` gate rather than replacing it.
 

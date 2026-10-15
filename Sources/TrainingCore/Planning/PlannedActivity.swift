@@ -17,6 +17,9 @@ public struct PlannedActivity: Identifiable, Sendable, Codable, Hashable {
     public var completedActivityID: UUID?
     /// The micro-cycle this plan belongs to; derived from `date` when `nil`.
     public var cycleID: UUID?
+    /// The ``TrainingPlan`` this belongs to. `nil` for a workout stored before plans existed (or by
+    /// a store without a ``TrainingPlanStore``); ``TrainingModel`` adopts those into a plan.
+    public var planID: UUID?
 
     /// Creates a planned activity.
     ///
@@ -27,13 +30,15 @@ public struct PlannedActivity: Identifiable, Sendable, Codable, Hashable {
     ///   - expectedLoadOverride: Manual override of the estimated load.
     ///   - completedActivityID: The matched ``Activity``'s id, if already reconciled.
     ///   - cycleID: The micro-cycle this plan belongs to; derived from `date` when `nil`.
+    ///   - planID: The training plan this belongs to, if any.
     public init(
         id: UUID = UUID(),
         workoutID: UUID,
         date: Date,
         expectedLoadOverride: Double? = nil,
         completedActivityID: UUID? = nil,
-        cycleID: UUID? = nil
+        cycleID: UUID? = nil,
+        planID: UUID? = nil
     ) {
         self.id = id
         self.workoutID = workoutID
@@ -41,5 +46,6 @@ public struct PlannedActivity: Identifiable, Sendable, Codable, Hashable {
         self.expectedLoadOverride = expectedLoadOverride
         self.completedActivityID = completedActivityID
         self.cycleID = cycleID
+        self.planID = planID
     }
 }

@@ -7,7 +7,7 @@ import Foundation
 /// `delete(id:)`) — Swift can't satisfy identically-shaped requirements from different protocols
 /// with different implementations on one conforming type.
 public actor InMemoryStore: ActivityStore, PlanStore, WorkoutLibraryStore, WorkoutTemplateStore, CycleStore,
-    AthleteStore, FitnessMetricsCacheStore, RaceStore, GoalStore {
+    AthleteStore, FitnessMetricsCacheStore, RaceStore, GoalStore, TrainingPlanStore {
     private var activitiesByID: [UUID: Activity] = [:]
     private var deletedSources: Set<ActivitySource> = []
     /// Joined activity id → its component ids. See ``ActivityStore/saveJoin(_:components:replacing:)``.
@@ -18,6 +18,7 @@ public actor InMemoryStore: ActivityStore, PlanStore, WorkoutLibraryStore, Worko
     private var cyclesByID: [UUID: TrainingCycle] = [:]
     private var racesByID: [UUID: Race] = [:]
     private var goalsByID: [UUID: Goal] = [:]
+    private var trainingPlansByID: [UUID: TrainingPlan] = [:]
     private var profile: AthleteProfile?
     private var anchor: ImportAnchor?
     private var cachedMetricsByDay: [Date: FitnessMetrics] = [:]
@@ -381,5 +382,71 @@ public actor InMemoryStore: ActivityStore, PlanStore, WorkoutLibraryStore, Worko
     /// See ``FitnessMetricsCacheStore/clearDirtyWatermark()``.
     public func clearDirtyWatermark() async throws {
         cacheDirtyWatermark = nil
+    }
+
+    // MARK: TrainingPlanStore
+
+    /// See ``TrainingPlanStore/trainingPlans()``.
+    public func trainingPlans() async throws -> [TrainingPlan] {
+        Array(trainingPlansByID.values)
+    }
+
+    /// See ``TrainingPlanStore/trainingPlan(id:)``.
+    public func trainingPlan(id: UUID) async throws -> TrainingPlan? {
+        trainingPlansByID[id]
+    }
+
+    /// See ``TrainingPlanStore/upsertTrainingPlan(_:cancelingActivePlanOn:)``.
+    public func upsertTrainingPlan(_ plan: TrainingPlan, cancelingActivePlanOn date: Date?) async throws {
+        if plan.status == .active {
+            for other in trainingPlansByID.values where other.status == .active && other.id != plan.id {
+                var demoted = other
+                demoted.status = date == nil ? .draft : .cancelled
+                demoted.cancelledDate = date
+                trainingPlansByID[other.id] = demoted
+            }
+        }
+        trainingPlansByID[plan.id] = plan
+    }
+
+    /// See ``TrainingPlanStore/adoptUnassigned(intoActivePlanOrNew:)``.
+    public func adoptUnassigned(intoActivePlanOrNew newPlan: TrainingPlan) async throws -> Bool {
+        let orphanPlans = plansByID.values.filter { $0.planID == nil }
+        let orphanCycles = cyclesByID.values.filter { $0.planID == nil }
+        guard !orphanPlans.isEmpty || !orphanCycles.isEmpty else { return false }
+        let target = trainingPlansByID.values.canonicalActivePlan ?? newPlan
+        trainingPlansByID[target.id] = target
+        for var plan in orphanPlans {
+            plan.planID = target.id
+            plansByID[plan.id] = plan
+        }
+        for var cycle in orphanCycles {
+            cycle.planID = target.id
+            cyclesByID[cycle.id] = cycle
+        }
+        return true
+    }
+
+    /// See ``TrainingPlanStore/insertTrainingPlan(_:cycles:plannedActivities:)``.
+    public func insertTrainingPlan(_ plan: TrainingPlan, cycles: [TrainingCycle], plannedActivities: [PlannedActivity]) async throws {
+        try CycleNestingValidator.validate(cycles, existing: cyclesByID)
+        try await upsertTrainingPlan(plan)
+        for cycle in cycles { cyclesByID[cycle.id] = cycle }
+        for planned in plannedActivities { plansByID[planned.id] = planned }
+    }
+
+    /// See ``TrainingPlanStore/deleteTrainingPlan(id:)``.
+    public func deleteTrainingPlan(id: UUID) async throws {
+        guard trainingPlansByID[id] != nil else { return }
+        guard !plansByID.values.contains(where: { $0.planID == id && $0.completedActivityID != nil }) else {
+            throw TrainingPlanError.hasCompletedWorkouts(id)
+        }
+        trainingPlansByID.removeValue(forKey: id)
+        for cycle in cyclesByID.values where cycle.planID == id {
+            cyclesByID.removeValue(forKey: cycle.id)
+        }
+        for plan in plansByID.values where plan.planID == id {
+            plansByID.removeValue(forKey: plan.id)
+        }
     }
 }

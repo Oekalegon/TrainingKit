@@ -25,7 +25,7 @@ extension TrainingModel {
         paceHistoryRefreshCount += 1
         let refresh = paceHistoryRefreshCount
         let activities = try await stores.activityStore.activities(in: range)
-        let plans = try await stores.planStore.plans(in: range)
+        let plans = try await stores.activePlannedActivities(in: range)
         let workouts = self.workouts
         let athlete = self.athlete
         let history = await Task.detached(priority: .utility) {

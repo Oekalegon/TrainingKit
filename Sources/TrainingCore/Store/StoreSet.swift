@@ -20,6 +20,9 @@ public struct StoreSet: Sendable {
     /// ``TrainingModel/templates`` empty, and makes adding or removing a template throw
     /// ``WorkoutTemplateStoreError/notConfigured``.
     public var templateStore: (any WorkoutTemplateStore)?
+    /// Where ``TrainingPlan`` values live; `nil` means there are no plans and every planned workout and
+    /// cycle counts (MVP5-124).
+    public var trainingPlanStore: (any TrainingPlanStore)?
     /// Storage for the persisted CTL/ATL/TSB/monotony/strain cache. `nil` disables caching
     /// entirely — ``TrainingModel`` recomputes the full daily series from scratch on every
     /// `recompute(asOf:)`, exactly as it did before this store existed.
@@ -40,6 +43,8 @@ public struct StoreSet: Sendable {
     ///     unaffected.
     ///   - templateStore: Storage for custom workout templates; defaults to `nil` (none), so every
     ///     existing caller is unaffected.
+    ///   - trainingPlanStore: Storage for training plans; defaults to `nil` (no plans: every planned
+    ///     workout and cycle counts), so every existing caller is unaffected.
     public init(
         activityStore: any ActivityStore,
         planStore: any PlanStore,
@@ -49,7 +54,8 @@ public struct StoreSet: Sendable {
         athleteStore: any AthleteStore,
         fitnessMetricsCacheStore: (any FitnessMetricsCacheStore)? = nil,
         goalStore: (any GoalStore)? = nil,
-        templateStore: (any WorkoutTemplateStore)? = nil
+        templateStore: (any WorkoutTemplateStore)? = nil,
+        trainingPlanStore: (any TrainingPlanStore)? = nil
     ) {
         self.activityStore = activityStore
         self.planStore = planStore
@@ -60,5 +66,6 @@ public struct StoreSet: Sendable {
         self.fitnessMetricsCacheStore = fitnessMetricsCacheStore
         self.goalStore = goalStore
         self.templateStore = templateStore
+        self.trainingPlanStore = trainingPlanStore
     }
 }

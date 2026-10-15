@@ -3,7 +3,7 @@ import Foundation
 /// A macro-, meso-, or micro-cycle: the calendar structure that plans and statistics hang off.
 ///
 /// Rules enforced by ``CycleStore`` on insert: a child's `dateRange` must lie inside its parent's,
-/// and siblings (cycles sharing the same `parentID`) must not overlap. Micros are not required to
+/// and siblings (cycles sharing the same `parentID` and `planID`) must not overlap. Micros are not required to
 /// be exactly 7 days — a 10-day micro is legitimate. Gaps are allowed; untracked time is just no
 /// cycle.
 public struct TrainingCycle: Identifiable, Sendable, Codable, Hashable {
@@ -25,6 +25,10 @@ public struct TrainingCycle: Identifiable, Sendable, Codable, Hashable {
     /// The ``Race`` this cycle's macro/meso targets, if any. Only macro- and meso-level cycles set
     /// this; a micro doesn't carry its own copy since it can always be read from its meso parent.
     public var targetRaceID: UUID?
+    /// The ``TrainingPlan`` this cycle belongs to. `nil` for a cycle stored before plans existed;
+    /// ``TrainingModel`` adopts those into a plan. Sibling cycles only have to avoid overlapping
+    /// within the same plan, so two plans can lay out the same weeks differently.
+    public var planID: UUID?
 
     /// Creates a training cycle.
     ///
@@ -39,6 +43,7 @@ public struct TrainingCycle: Identifiable, Sendable, Codable, Hashable {
     ///   - dateRange: Day-granular date range, in the athlete's timezone.
     ///   - parentID: The parent cycle this one nests inside, if any.
     ///   - targetRaceID: The race this cycle targets, if any.
+    ///   - planID: The training plan this cycle belongs to, if any.
     public init(
         id: UUID = UUID(),
         level: CycleLevel,
@@ -47,7 +52,8 @@ public struct TrainingCycle: Identifiable, Sendable, Codable, Hashable {
         name: String,
         dateRange: ClosedRange<Date>,
         parentID: UUID? = nil,
-        targetRaceID: UUID? = nil
+        targetRaceID: UUID? = nil,
+        planID: UUID? = nil
     ) {
         self.id = id
         self.level = level
@@ -57,10 +63,11 @@ public struct TrainingCycle: Identifiable, Sendable, Codable, Hashable {
         self.dateRange = dateRange
         self.parentID = parentID
         self.targetRaceID = targetRaceID
+        self.planID = planID
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, level, phase, loadRole, name, dateRange, parentID, targetRaceID
+        case id, level, phase, loadRole, name, dateRange, parentID, targetRaceID, planID
     }
 
     /// Decodes a cycle, including payloads written before the load role existed. For those, a
@@ -77,6 +84,7 @@ public struct TrainingCycle: Identifiable, Sendable, Codable, Hashable {
         dateRange = try container.decode(ClosedRange<Date>.self, forKey: .dateRange)
         parentID = try container.decodeIfPresent(UUID.self, forKey: .parentID)
         targetRaceID = try container.decodeIfPresent(UUID.self, forKey: .targetRaceID)
+        planID = try container.decodeIfPresent(UUID.self, forKey: .planID)
         if let stored = try container.decodeIfPresent(MicroLoadRole.self, forKey: .loadRole) {
             loadRole = stored
         } else if level == .micro {

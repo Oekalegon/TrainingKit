@@ -54,4 +54,42 @@ struct AthleteProfileIdentityTests {
 
         #expect(decoded.mainSport == .cycling)
     }
+
+    @Test("a profile has no usual venue by default, and one set round-trips through JSON encoding")
+    func mainVenueRoundTrips() throws {
+        #expect(AthleteProfile.fixture().mainVenue == nil)
+        var original = AthleteProfile.fixture(name: "Alex Athlete")
+        original.mainVenue = .outdoor(.road)
+
+        let decoded = try JSONDecoder().decode(AthleteProfile.self, from: JSONEncoder().encode(original))
+
+        #expect(decoded.mainVenue == .outdoor(.road))
+    }
+
+    @Test("a profile whose mainSport was saved as outdoorRunning reads as running outdoors")
+    func legacyMainSportVenue() throws {
+        var json = try JSONSerialization.jsonObject(
+            with: JSONEncoder().encode(AthleteProfile.fixture())
+        ) as! [String: Any]
+        json["mainSport"] = ["outdoorRunning": [String: Any]()]
+        json.removeValue(forKey: "mainVenue")
+
+        let decoded = try JSONDecoder().decode(AthleteProfile.self, from: JSONSerialization.data(withJSONObject: json))
+
+        #expect(decoded.mainSport == .running)
+        #expect(decoded.mainVenue == .outdoor(nil))
+    }
+
+    @Test("the usual venue only applies to the main sport, and preselects a template's venue when allowed")
+    func defaultVenueForSport() {
+        var athlete = AthleteProfile.fixture()
+        athlete.mainVenue = .indoor(.treadmill)
+        #expect(athlete.defaultVenue(for: .running) == .indoor(.treadmill))
+        #expect(athlete.defaultVenue(for: .cycling) == nil)
+
+        let open = WorkoutTemplate(name: "Open", sport: .running, parameters: [], blocks: [])
+        let outdoorOnly = WorkoutTemplate(name: "Out", sport: .running, venue: .outdoor(nil), parameters: [], blocks: [])
+        #expect(open.defaultVenue(for: athlete) == .indoor(.treadmill))
+        #expect(outdoorOnly.defaultVenue(for: athlete) == .outdoor(.road))
+    }
 }

@@ -14,7 +14,7 @@ struct SwiftDataStoreTests {
     /// per-test isolation, but backed by a real `ModelContainer`/`ModelContext` so this exercises
     /// actual SwiftData behavior (predicates, save semantics) rather than a hand-rolled dictionary.
     private func makeStore() throws -> SwiftDataStore {
-        let container = try TrainingPersistenceContainer.make(cloudKitDatabase: .none, isStoredInMemoryOnly: true)
+        let container = try TestContainers.make(cloudKitDatabase: .none, isStoredInMemoryOnly: true)
         return SwiftDataStore(modelContainer: container)
     }
 
@@ -29,6 +29,129 @@ struct SwiftDataStoreTests {
         let fetched = try await store.activities(in: day(0)...day(10))
         #expect(fetched.map(\.id) == [inRange.id])
         #expect(try await store.activity(id: outOfRange.id) == outOfRange)
+    }
+
+    @Test("a calendar placeholder keeps its imported load and flag, in the list item too (MVP2-107)")
+    func calendarPlaceholderRoundTrip() async throws {
+        let store = try makeStore()
+        let placeholder = Activity(
+            source: .healthKit(UUID()), sport: .running, start: day(1), duration: 1800,
+            importedLoad: 72, isCalendarImport: true
+        )
+        try await store.upsert([placeholder])
+
+        #expect(try await store.activity(id: placeholder.id) == placeholder)
+        let item = try #require(try await store.activityListItems(in: day(0)...day(2)).first)
+        #expect(item.isCalendarImport)
+    }
+
+    @Test("an activity's venue round-trips, in the list item too")
+    func venueRoundTrip() async throws {
+        let store = try makeStore()
+        let activity = Activity(source: .manual, sport: .running, venue: .outdoor(.trail), start: day(1), duration: 1800)
+        try await store.upsert([activity])
+
+        #expect(try await store.activity(id: activity.id)?.venue == .outdoor(.trail))
+        let item = try #require(try await store.activityListItems(in: day(0)...day(2)).first)
+        #expect(item.venue == .outdoor(.trail))
+    }
+
+    @Test("an edited sport and venue round-trips, and a payload without the edit flag decodes as unedited")
+    func editedSportRoundTrip() async throws {
+        let store = try makeStore()
+        let activity = Activity(
+            source: .manual, sport: .hiking, venue: .outdoor(.trail), start: day(1), duration: 1800, isSportEdited: true
+        )
+        try await store.upsert([activity])
+        #expect(try await store.activity(id: activity.id) == activity)
+
+        let record = try ActivityRecord(activity: activity)
+        var json = try #require(JSONSerialization.jsonObject(with: record.payload) as? [String: Any])
+        json["isSportEdited"] = nil
+        record.payload = try JSONSerialization.data(withJSONObject: json)
+        #expect(try record.toActivity().isSportEdited == false)
+    }
+
+    @Test("a payload saved with the old outdoorRunning sport lists as running outdoors")
+    func legacyVenueListItem() throws {
+        let activity = Activity(source: .manual, sport: .running, start: day(1), duration: 1800)
+        let record = try ActivityRecord(activity: activity)
+        var json = try #require(JSONSerialization.jsonObject(with: record.payload) as? [String: Any])
+        json["sport"] = ["outdoorRunning": [String: Any]()]
+        json["venue"] = nil
+        record.payload = try JSONSerialization.data(withJSONObject: json)
+
+        let item = try record.toListItem()
+        #expect(item.sport == .running)
+        #expect(item.venue == .outdoor(nil))
+        #expect(try record.toActivity().venue == .outdoor(nil))
+    }
+
+    @Test("ActivityStore activityListItems matches activities(in:) without the samples, joins included (MVP2-129)")
+    func activityStoreSummaries() async throws {
+        let store = try makeStore()
+        let planID = UUID()
+        let hr = (0..<50).map { HeartRateSample(time: day(0).addingTimeInterval(Double($0)), bpm: 140) }
+        let run = Activity(
+            source: .manual, sport: .running, start: day(1), duration: 1800, distanceMeters: 5000,
+            heartRate: hr, linkedPlanID: planID
+        )
+        let first = Activity(source: .healthKit(UUID()), sport: .cycling, start: day(2), duration: 900)
+        let second = Activity(source: .healthKit(UUID()), sport: .cycling, start: day(2).addingTimeInterval(1000), duration: 900)
+        let outOfRange = Activity(source: .manual, sport: .running, start: day(50), duration: 600)
+        try await store.upsert([run, first, second, outOfRange])
+        let joined = try #require(Activity.joined([first, second]))
+        try await store.saveJoin(joined, components: [first.id, second.id], replacing: [])
+
+        let summaries = try await store.activityListItems(in: day(0)...day(10))
+        let full = try await store.activities(in: day(0)...day(10))
+
+        #expect(Set(summaries) == Set(full.map(ActivityListItem.init)))
+        #expect(summaries.count == 2)
+        let runSummary = try #require(summaries.first { $0.id == run.id })
+        #expect(runSummary.distanceMeters == 5000)
+        #expect(runSummary.linkedPlanID == planID)
+        #expect(runSummary.sport == .running)
+        #expect(summaries.contains { $0.id == joined.id })
+    }
+
+    @Test("ActivityStore activityListItems keeps nil optionals, and an empty range is empty (MVP2-129)")
+    func activityStoreSummariesBare() async throws {
+        let store = try makeStore()
+        let bare = Activity(source: .manual, sport: .cycling, start: day(1), duration: 600)
+        try await store.upsert([bare])
+
+        let items = try await store.activityListItems(in: day(0)...day(10))
+        #expect(items == [ActivityListItem(bare)])
+        #expect(items.first?.distanceMeters == nil)
+        #expect(items.first?.linkedPlanID == nil)
+        #expect(try await store.activityListItems(in: day(20)...day(30)).isEmpty)
+    }
+
+    @Test("ActivityStore activityListItems returns a join when the range reaches only a later piece (MVP2-129)")
+    func activityStoreSummariesLaterPiece() async throws {
+        let store = try makeStore()
+        let first = Activity(source: .healthKit(UUID()), sport: .cycling, start: day(2), duration: 900)
+        let second = Activity(source: .healthKit(UUID()), sport: .cycling, start: day(5), duration: 900)
+        try await store.upsert([first, second])
+        let joined = try #require(Activity.joined([first, second]))
+        try await store.saveJoin(joined, components: [first.id, second.id], replacing: [])
+
+        let items = try await store.activityListItems(in: day(4)...day(6))
+        #expect(items.map(\.id) == [joined.id])
+    }
+
+    @Test("ActivityStore activities(ids:) returns the stored ones keyed by id, skipping unknown ids")
+    func activityStoreBatchLookup() async throws {
+        let store = try makeStore()
+        let a = Activity(source: .manual, sport: .running, start: day(0), duration: 1800)
+        let b = Activity(source: .manual, sport: .cycling, start: day(1), duration: 3600)
+        try await store.upsert([a, b])
+
+        let found = try await store.activities(ids: [a.id, b.id, UUID()])
+
+        #expect(found == [a.id: a, b.id: b])
+        #expect(try await store.activities(ids: []).isEmpty)
     }
 
     @Test("ActivityStore upsert replaces an existing record matched by id, rather than duplicating it")
@@ -340,6 +463,34 @@ struct SwiftDataStoreTests {
         #expect(try await store.athleteProfile() == profile)
     }
 
+    @Test("AthleteStore keeps the date of birth (MVP2-124)")
+    func athleteStoreKeepsDateOfBirth() async throws {
+        let store = try makeStore()
+        var profile = AthleteProfile.fixture()
+        profile.dateOfBirth = Date(timeIntervalSince1970: 631_152_000)
+        try await store.save(profile)
+
+        let fetched = try #require(await store.athleteProfile())
+
+        #expect(fetched.dateOfBirth == profile.dateOfBirth)
+        #expect(fetched == profile)
+    }
+
+    @Test("AthleteStore keeps the pace history and the HealthKit resting-HR switch (MVP2-132)")
+    func athleteStoreKeepsPaceHistoryAndSwitch() async throws {
+        let store = try makeStore()
+        var profile = AthleteProfile.fixture()
+            .recordingPaceModel(PaceModel(thresholdPaceSecondsPerKilometer: 280), from: Date(timeIntervalSince1970: 1_700_000_000))
+        profile.usesHealthKitRestingHeartRate = false
+        try await store.save(profile)
+
+        let fetched = try #require(await store.athleteProfile())
+
+        #expect(fetched == profile)
+        #expect(fetched.paceHistory.count == 2)
+        #expect(!fetched.usesHealthKitRestingHeartRate)
+    }
+
     @Test("AthleteStore profile and import anchor are independent: saving one doesn't clobber the other")
     func athleteStoreProfileAndAnchorAreIndependent() async throws {
         let store = try makeStore()
@@ -469,6 +620,187 @@ struct SwiftDataStoreTests {
         #expect(try await store.cycle(id: meso.id) == nil)
     }
 
+    // MARK: RaceStore
+
+    @Test("RaceStore upsert/fetch round-trips and filters by date range")
+    func raceStoreRoundTrip() async throws {
+        let store = try makeStore()
+        let inRange = Race(name: "Local 10K", date: day(5), priority: .secondary)
+        let outOfRange = Race(name: "Marathon", date: day(50), priority: .primary)
+
+        try await store.upsert([inRange, outOfRange])
+
+        let fetched = try await store.races(in: day(0)...day(10))
+        #expect(fetched.map(\.id) == [inRange.id])
+        #expect(try await store.race(id: outOfRange.id) == outOfRange)
+    }
+
+    @Test("RaceStore upsert replaces an existing race matched by id rather than duplicating")
+    func raceStoreUpsertReplaces() async throws {
+        let store = try makeStore()
+        var race = Race(name: "Local 10K", date: day(5), priority: .tertiary)
+        try await store.upsert([race])
+
+        race.name = "Local 10K (renamed)"
+        race.priority = .primary
+        try await store.upsert([race])
+
+        let stored = try await store.races(in: day(0)...day(10))
+        #expect(stored == [race])
+    }
+
+    @Test("RaceStore delete removes a race")
+    func raceStoreDelete() async throws {
+        let store = try makeStore()
+        let race = Race(name: "Local 10K", date: day(5), priority: .primary)
+        try await store.upsert([race])
+
+        try await store.deleteRace(id: race.id)
+
+        #expect(try await store.race(id: race.id) == nil)
+    }
+
+    // MARK: GoalStore
+
+    @Test("GoalStore upsert/fetch round-trips every target kind, replaces by id and deletes")
+    func goalStoreRoundTrip() async throws {
+        let store = try makeStore()
+        var time = Goal(name: "Sub-20 5k", target: .time(sport: .running, distanceMeters: 5000, seconds: 1200), notes: "Parkrun")
+        let volume = Goal(name: "1500 km", target: .volume(sport: nil, measure: .distanceMeters, amount: 1_500_000, per: .year))
+        let text = Goal(name: "Enjoy running again", target: .freeText)
+
+        try await store.upsert([time, volume, text])
+        time.notes = nil
+        try await store.upsert([time])
+
+        let stored = try await store.goals()
+        #expect(Set(stored) == [time, volume, text])
+        #expect(try await store.goal(id: volume.id) == volume)
+
+        try await store.deleteGoal(id: volume.id)
+        try await store.deleteGoal(id: UUID())
+
+        #expect(try await store.goal(id: volume.id) == nil)
+        #expect(try await store.goals().count == 2)
+    }
+
+    @Test("GoalStore skips a record it can't decode instead of failing the whole list (MVP2-139)")
+    func goalStoreSkipsUndecodableRecord() async throws {
+        let container = try TestContainers.make(cloudKitDatabase: .none, isStoredInMemoryOnly: true)
+        let store = SwiftDataStore(modelContainer: container)
+        let good = Goal(name: "Sub-20 5k", target: .time(sport: .running, distanceMeters: 5000, seconds: 1200))
+        try await store.upsert([good])
+        // A target kind a newer version might write: valid JSON, but not a case this version knows.
+        let context = ModelContext(container)
+        context.insert(GoalRecord(id: UUID(), payload: Data(#"{"id":"\#(UUID().uuidString)","name":"Future","target":{"swim":{}}}"#.utf8)))
+        try context.save()
+
+        let goals = try await store.goals()
+
+        #expect(goals == [good])
+    }
+
+    // MARK: WorkoutTemplateStore
+
+    @Test("WorkoutTemplateStore upsert/fetch round-trips parameters and parameterised blocks, replaces by id and deletes")
+    func templateStoreRoundTrip() async throws {
+        let store = try makeStore()
+        var intervals = WorkoutTemplate(
+            name: "Intervals", titleName: "Reps", sport: .running,
+            parameters: [
+                WorkoutTemplateParameter(key: "reps", name: "Repeats", unit: .count, defaultValue: 6, range: 2...12),
+                WorkoutTemplateParameter(key: "work", name: "Work", unit: .minutes, defaultValue: 3)
+            ],
+            blocks: [
+                TemplateBlock(steps: [TemplateStep(kind: .warmup, goal: .time(.fixed(600)), target: .heartRateZone(2))]),
+                TemplateBlock(
+                    steps: [
+                        TemplateStep(kind: .work, goal: .time(.parameter("work")), target: .heartRateZone(4)),
+                        TemplateStep(kind: .recovery, goal: .open)
+                    ],
+                    repetitions: .parameter("reps")
+                )
+            ]
+        )
+        let easy = WorkoutTemplate(name: "Easy", sport: .cycling, parameters: [], blocks: [])
+
+        try await store.upsert([intervals, easy])
+        intervals.name = "Track intervals"
+        try await store.upsert([intervals])
+
+        let stored = try await store.templates()
+        #expect(Set(stored) == [intervals, easy])
+        #expect(try await store.template(id: intervals.id) == intervals)
+
+        try await store.deleteTemplate(id: easy.id)
+        try await store.deleteTemplate(id: UUID())
+
+        #expect(try await store.template(id: easy.id) == nil)
+        #expect(try await store.templates().count == 1)
+    }
+
+    @Test("a template saved before archivedDate existed decodes as not archived, and the date round-trips (MVP2-142)")
+    func templateStoreArchiveDate() async throws {
+        let container = try TestContainers.make(cloudKitDatabase: .none, isStoredInMemoryOnly: true)
+        let store = SwiftDataStore(modelContainer: container)
+        let old = WorkoutTemplate(name: "Old", sport: .running, parameters: [], blocks: [])
+        var json = try JSONSerialization.jsonObject(with: JSONEncoder().encode(old)) as! [String: Any]
+        json.removeValue(forKey: "archivedDate")
+        let context = ModelContext(container)
+        context.insert(WorkoutTemplateRecord(id: old.id, payload: try JSONSerialization.data(withJSONObject: json)))
+        try context.save()
+        #expect(try await store.template(id: old.id)?.isArchived == false)
+
+        var archived = old
+        archived.archivedDate = Date(timeIntervalSince1970: 1_700_000_000)
+        try await store.upsert([archived])
+        #expect(try await store.template(id: old.id)?.archivedDate == archived.archivedDate)
+    }
+
+    @Test("WorkoutTemplateStore skips a record it can't decode instead of failing the whole list (MVP2-140)")
+    func templateStoreSkipsUndecodableRecord() async throws {
+        let container = try TestContainers.make(cloudKitDatabase: .none, isStoredInMemoryOnly: true)
+        let store = SwiftDataStore(modelContainer: container)
+        let good = WorkoutTemplate(name: "Easy", sport: .running, parameters: [], blocks: [])
+        try await store.upsert([good])
+        let context = ModelContext(container)
+        context.insert(WorkoutTemplateRecord(id: UUID(), payload: Data(#"{"name":"Future","blocks":"?"}"#.utf8)))
+        try context.save()
+
+        let templates = try await store.templates()
+
+        #expect(templates == [good])
+    }
+
+    @Test("a template with a step kind this version doesn't know is skipped by both templates() and template(id:)")
+    func templateStoreSkipsUnknownStepKind() async throws {
+        let container = try TestContainers.make(cloudKitDatabase: .none, isStoredInMemoryOnly: true)
+        let store = SwiftDataStore(modelContainer: container)
+        let good = WorkoutTemplate(name: "Easy", sport: .running, parameters: [], blocks: [])
+        try await store.upsert([good])
+        // Right shape, but a step kind a newer version might add.
+        let futureID = UUID()
+        let future = try JSONEncoder().encode(
+            WorkoutTemplate(
+                id: futureID, name: "Future", sport: .running, parameters: [],
+                blocks: [TemplateBlock(steps: [TemplateStep(kind: .work, goal: .open)])]
+            )
+        )
+        let json = String(decoding: future, as: UTF8.self).replacingOccurrences(of: "\"work\"", with: "\"sprint\"")
+        let context = ModelContext(container)
+        context.insert(WorkoutTemplateRecord(id: futureID, payload: Data(json.utf8)))
+        try context.save()
+
+        #expect(try await store.templates() == [good])
+        #expect(try await store.template(id: futureID) == nil)
+    }
+
+    @Test("RaceStore delete is a no-op for an id that doesn't exist")
+    func raceStoreDeleteMissingIsNoOp() async throws {
+        let store = try makeStore()
+        try await store.deleteRace(id: UUID())
+    }
+
     // MARK: FitnessMetricsCacheStore
 
     private func metrics(day: Date, load: Double = 50) -> FitnessMetrics {
@@ -526,5 +858,35 @@ struct SwiftDataStoreTests {
 
         try await store.clearDirtyWatermark()
         #expect(try await store.dirtyWatermark() == nil)
+    }
+
+    @Test("an activity's recorded steps survive the store with their times, and a payload saved before steps decodes with none (MVP2-146)")
+    func activityStepsRoundTrip() async throws {
+        let store = try makeStore()
+        let steps = [
+            ActivityStep(
+                block: 0, repetition: 0, step: 0, start: day(1), end: day(1).addingTimeInterval(300), duration: 298,
+                distanceMeters: 801.65, averageHeartRateBPM: 112.98, elevationAscendedMeters: 4.11, wasGoalMet: true
+            ),
+            ActivityStep(
+                block: 2, repetition: 3, step: 1, start: day(1).addingTimeInterval(300), end: day(1).addingTimeInterval(600)
+            ),
+        ]
+        let activity = Activity(source: .manual, sport: .running, start: day(1), duration: 600, steps: steps)
+
+        try await store.upsert([activity])
+
+        let fetched = try #require(try await store.activity(id: activity.id))
+        #expect(fetched.steps == steps)
+        #expect(fetched == activity)
+
+        // A payload written before steps existed has no `steps` key.
+        var json = try #require(try JSONSerialization.jsonObject(with: PersistenceCoding.encode(activity)) as? [String: Any])
+        json["steps"] = nil
+        let legacy = ActivityRecord(
+            id: activity.id, sourceKey: activity.source.persistenceKey, start: activity.start,
+            payload: try JSONSerialization.data(withJSONObject: json)
+        )
+        #expect(try legacy.toActivity().steps.isEmpty)
     }
 }

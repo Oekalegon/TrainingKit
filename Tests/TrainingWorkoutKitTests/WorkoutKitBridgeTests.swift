@@ -10,14 +10,68 @@ import TrainingCore
 struct WorkoutKitBridgeTests {
     private let bridge = WorkoutKitBridge()
 
+    // MARK: - Scheduled entry ids
+
+    @Test("workoutPlan(for:workout:) gives the entry its PlannedActivity's id, not the workout's")
+    func workoutPlanUsesPlanID() throws {
+        let workout = StructuredWorkout(
+            name: "Easy run", sport: .running,
+            blocks: [WorkoutBlock(steps: [WorkoutStep(kind: .work, goal: .time(1800))])],
+            workoutKitID: UUID()
+        )
+        let plan = PlannedActivity(workoutID: workout.id, date: Date())
+
+        let workoutPlan = try bridge.workoutPlan(for: plan, workout: workout)
+
+        #expect(workoutPlan.id == plan.id)
+    }
+
+    @Test("workoutPlan(for:workout:) gives two plans of the same workout on one day distinct ids")
+    func workoutPlanDistinguishesPlansOfOneWorkout() throws {
+        let workout = StructuredWorkout(
+            name: "Easy run", sport: .running,
+            blocks: [WorkoutBlock(steps: [WorkoutStep(kind: .work, goal: .time(1800))])]
+        )
+        let day = Date()
+        let first = try bridge.workoutPlan(for: PlannedActivity(workoutID: workout.id, date: day), workout: workout)
+        let second = try bridge.workoutPlan(for: PlannedActivity(workoutID: workout.id, date: day), workout: workout)
+
+        #expect(first.id != second.id)
+    }
+
+    @Test("workoutPlan(for:workout:) throws what customWorkout(from:) throws")
+    func workoutPlanPropagatesMappingErrors() {
+        let bridge = WorkoutKitBridge(support: WorkoutKitSupportChecking(
+            supportsActivity: { _ in false },
+            supportsGoal: { _, _, _ in true },
+            supportsAlert: { _, _, _ in true }
+        ))
+        let workout = StructuredWorkout(
+            name: "Easy run", sport: .running,
+            blocks: [WorkoutBlock(steps: [WorkoutStep(kind: .work, goal: .time(1800))])]
+        )
+
+        #expect(throws: WorkoutKitMappingError.unsupportedActivity(.running)) {
+            try bridge.workoutPlan(for: PlannedActivity(workoutID: workout.id, date: Date()), workout: workout)
+        }
+    }
+
+    @Test("isSameDay compares year/month/day only, ignoring time-of-day fields")
+    func isSameDayIgnoresTimeOfDay() {
+        let scheduled = DateComponents(year: 2026, month: 9, day: 20, hour: 7, minute: 30)
+        #expect(WorkoutKitBridge.isSameDay(scheduled, DateComponents(year: 2026, month: 9, day: 20)))
+        #expect(!WorkoutKitBridge.isSameDay(scheduled, DateComponents(year: 2026, month: 9, day: 21)))
+        #expect(!WorkoutKitBridge.isSameDay(scheduled, DateComponents(year: 2025, month: 9, day: 20)))
+    }
+
     // MARK: - Support validation
 
     @Test("customWorkout(from:) throws unsupportedActivity when the sport's activity type isn't supported at all")
     func customWorkoutThrowsForUnsupportedActivity() {
         let bridge = WorkoutKitBridge(support: WorkoutKitSupportChecking(
             supportsActivity: { _ in false },
-            supportsGoal: { _, _ in true },
-            supportsAlert: { _, _ in true }
+            supportsGoal: { _, _, _ in true },
+            supportsAlert: { _, _, _ in true }
         ))
         let workout = StructuredWorkout(
             name: "Easy run",
@@ -34,8 +88,8 @@ struct WorkoutKitBridgeTests {
     func customWorkoutThrowsForUnsupportedGoal() {
         let bridge = WorkoutKitBridge(support: WorkoutKitSupportChecking(
             supportsActivity: { _ in true },
-            supportsGoal: { _, _ in false },
-            supportsAlert: { _, _ in true }
+            supportsGoal: { _, _, _ in false },
+            supportsAlert: { _, _, _ in true }
         ))
         let workout = StructuredWorkout(
             name: "Easy run",
@@ -52,8 +106,8 @@ struct WorkoutKitBridgeTests {
     func customWorkoutThrowsForUnsupportedAlert() {
         let bridge = WorkoutKitBridge(support: WorkoutKitSupportChecking(
             supportsActivity: { _ in true },
-            supportsGoal: { _, _ in true },
-            supportsAlert: { _, _ in false }
+            supportsGoal: { _, _, _ in true },
+            supportsAlert: { _, _, _ in false }
         ))
         let workout = StructuredWorkout(
             name: "Easy run",
@@ -70,8 +124,8 @@ struct WorkoutKitBridgeTests {
     func customWorkoutSkipsAlertCheckWhenNoTarget() throws {
         let bridge = WorkoutKitBridge(support: WorkoutKitSupportChecking(
             supportsActivity: { _ in true },
-            supportsGoal: { _, _ in true },
-            supportsAlert: { _, _ in false } // would fail every step if consulted
+            supportsGoal: { _, _, _ in true },
+            supportsAlert: { _, _, _ in false } // would fail every step if consulted
         ))
         let workout = StructuredWorkout(
             name: "Easy run",
@@ -169,6 +223,7 @@ struct WorkoutKitBridgeTests {
 
     // MARK: - sync(_:)
 
+    @available(*, deprecated)
     @Test("sync(_:) returns the workout's existing workoutKitID when it has one, rather than a new id")
     func syncReusesExistingWorkoutKitID() async throws {
         let existingID = UUID()
@@ -182,6 +237,22 @@ struct WorkoutKitBridgeTests {
         let returnedID = try await bridge.sync(workout)
 
         #expect(returnedID == existingID)
+    }
+
+    @available(*, deprecated)
+    @Test("the field-test templates map to one warmup, one cooldown and the efforts in between")
+    func fieldTestsMapEdgesToWarmupAndCooldown() throws {
+        for template in [BuiltInWorkoutTemplates.maxHRTest, BuiltInWorkoutTemplates.lthrTest] {
+            let custom = try bridge.customWorkout(from: template.instantiate())
+
+            #expect(custom.warmup != nil, "\(template.name)")
+            #expect(custom.cooldown != nil, "\(template.name)")
+            #expect(!custom.blocks.isEmpty, "\(template.name)")
+        }
+        // The ramp-in, three efforts and the all-out effort: 1 + 1 blocks of work around the repeated one.
+        let maxHR = try bridge.customWorkout(from: BuiltInWorkoutTemplates.maxHRTest.instantiate())
+        #expect(maxHR.blocks.count == 3)
+        #expect(maxHR.blocks[1].iterations == 3)
     }
 
     @Test("sync(_:) mints a fresh id when the workout hasn't been synced before")

@@ -18,19 +18,17 @@ public struct WorkoutDurationEstimator: Sendable {
         self.defaultOpenStepDuration = defaultOpenStepDuration
     }
 
-    /// The estimated duration of a single step. A `.distance` step with no `.heartRateZone`
-    /// target assumes zone 3, for lack of a better default.
+    /// The estimated duration of a single step. A `.distance` step is paced at the zone
+    /// ``HeartRateZoneModel/zone(for:)`` gives its target (zone 4 for `.pace`/`.power`, zone 3
+    /// with no target), the same choice the projector and the TRIMP estimator make.
     public func duration(for step: WorkoutStep, athlete: AthleteProfile) -> TimeInterval {
         switch step.goal {
         case .time(let interval):
             return interval
         case .distance(let meters):
-            let zone: Int
-            if case .heartRateZone(let value) = step.target {
-                zone = value
-            } else {
-                zone = 3
-            }
+            let zone = athlete.currentHeartRateZoneSettings
+                .map { HeartRateZoneModel(settings: $0).zone(for: step.target) }
+                ?? HeartRateZoneModel.fallbackZone(for: step.target)
             return athlete.paceModel.duration(forMeters: meters, atZone: zone)
         case .open:
             return defaultOpenStepDuration

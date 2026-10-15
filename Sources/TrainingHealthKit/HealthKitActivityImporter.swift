@@ -3,6 +3,7 @@ import Foundation
 
 #if canImport(HealthKit)
 import HealthKit
+import WorkoutKit
 
 /// Imports completed workouts and their heart-rate samples from HealthKit.
 ///
@@ -86,16 +87,40 @@ public struct HealthKitActivityImporter: ActivityImporting {
         // problem than one workout's heart-rate query timing out.
         let activities = try await mapBounded(result.addedSamples, maxConcurrent: maxConcurrentWorkouts) { workout in
             async let heartRateTask = self.heartRateOrEmpty(for: workout)
+            async let speedTask = self.speedOrEmpty(for: workout)
             async let existingIDTask = self.activityStore?.activity(source: .healthKit(workout.uuid))?.id
+            async let scheduledPlanIDTask = self.scheduledPlanID(for: workout)
             let heartRate = await heartRateTask
+            let speed = await speedTask
+            let scheduledPlanID = await scheduledPlanIDTask
             let existingID = try await existingIDTask
-            return Activity(healthKitWorkout: workout, heartRate: heartRate, existingID: existingID)
+            return Activity(
+                healthKitWorkout: workout, heartRate: heartRate, speed: speed, existingID: existingID,
+                scheduledPlanID: scheduledPlanID
+            )
         }
 
         let deletedSources = result.deletedObjects.map { ActivitySource.healthKit($0.uuid) }
         let newAnchor = try Self.encode(result.newAnchor)
 
         return ImportResult(upserted: activities, deletedSources: deletedSources, anchor: newAnchor)
+    }
+
+    /// The id of the scheduled `WorkoutPlan` `workout` was started from (MVP2-120), or `nil` for a
+    /// workout that wasn't started from one. With per-plan ids (`WorkoutKitBridge`) that id is the
+    /// `PlannedActivity`'s own.
+    ///
+    /// A failed lookup is caught and logged, like ``heartRateOrEmpty(for:)``: the workout is still
+    /// imported, just matched to its plan by the same-day heuristic instead.
+    private func scheduledPlanID(for workout: HKWorkout) async -> UUID? {
+        do {
+            return try await workout.workoutPlan?.id
+        } catch {
+            Logging.importer.error(
+                "workoutPlan lookup failed for workout \(workout.uuid, privacy: .public): \(String(describing: error), privacy: .public); matching it to a plan by day and sport instead"
+            )
+            return nil
+        }
     }
 
     /// Like ``heartRateSamples(for:)``, but a failed query is caught and logged rather than thrown,
@@ -112,58 +137,70 @@ public struct HealthKitActivityImporter: ActivityImporting {
         }
     }
 
-    private func heartRateSamples(for workout: HKWorkout) async throws -> [HeartRateSample] {
+    /// The workout's speed, averaged over ``speedWindowSeconds``-long windows (MVP2-146): running speed
+    /// for most sports, cycling speed for a ride, none for sports that record neither (swimming,
+    /// strength). Like ``heartRateOrEmpty(for:)`` a failed query is caught and logged, so a workout
+    /// without speed still imports.
+    private func speedOrEmpty(for workout: HKWorkout) async -> [SpeedSample] {
+        let type = HKQuantityType(workout.workoutActivityType == .cycling ? .cyclingSpeed : .runningSpeed)
+        do {
+            let readings = try await readings(of: type, unit: SpeedSample.speedUnit, in: workout)
+            return readings.map { SpeedSample(time: $0.time, metersPerSecond: $0.value) }
+                .downsampled(everySeconds: Self.speedWindowSeconds)
+        } catch {
+            Logging.importer.error(
+                "speed samples failed for workout \(workout.uuid, privacy: .public): \(String(describing: error), privacy: .public); continuing with no speed data for this workout"
+            )
+            return []
+        }
+    }
+
+    /// How long a window the stored speed is averaged over.
+    static let speedWindowSeconds: TimeInterval = 5
+
+    /// Every reading of `type` during `workout`, series unpacked, in time order.
+    private func readings(of type: HKQuantityType, unit: HKUnit, in workout: HKWorkout) async throws -> [(time: Date, value: Double)] {
         let predicate = HKQuery.predicateForSamples(withStart: workout.startDate, end: workout.endDate)
         let descriptor = HKSampleQueryDescriptor(
-            predicates: [.quantitySample(type: HKQuantityType(.heartRate), predicate: predicate)],
+            predicates: [.quantitySample(type: type, predicate: predicate)],
             sortDescriptors: [SortDescriptor(\.startDate)]
         )
         let samples = try await descriptor.result(for: healthStore)
-        let firstSampleDate = samples.first?.startDate
-        let lastSampleDate = samples.last?.startDate
         Logging.importer.debug(
             """
-            heartRateSamples(for:) workout \(workout.uuid, privacy: .public) \
+            readings(of:in:) \(type.identifier, privacy: .public) workout \(workout.uuid, privacy: .public) \
             window \(workout.startDate, privacy: .public)...\(workout.endDate, privacy: .public) \
             source \(workout.sourceRevision.source.bundleIdentifier, privacy: .public) \
             returned \(samples.count, privacy: .public) samples, \
-            first \(String(describing: firstSampleDate), privacy: .public) \
-            last \(String(describing: lastSampleDate), privacy: .public)
+            first \(String(describing: samples.first?.startDate), privacy: .public) \
+            last \(String(describing: samples.last?.startDate), privacy: .public)
             """
         )
-
         // A sample whose `count` is > 1 is a series anchor (e.g. Apple Watch/AirPods' high-frequency
-        // in-workout heart rate): its own `.quantity`/`.startDate` are just the series' bookkeeping,
-        // and the actual per-reading values must be unpacked via `HKQuantitySeriesSampleQueryDescriptor`.
-        var expanded: [HeartRateSample] = []
-        expanded.reserveCapacity(samples.count)
+        // in-workout heart rate or speed): its own `.quantity`/`.startDate` are just the series'
+        // bookkeeping, and the actual per-reading values must be unpacked via
+        // `HKQuantitySeriesSampleQueryDescriptor`.
+        var result: [(time: Date, value: Double)] = []
+        result.reserveCapacity(samples.count)
         for sample in samples {
             if sample.count > 1 {
-                expanded.append(contentsOf: try await seriesSamples(for: sample))
+                let series = HKQuantitySeriesSampleQueryDescriptor(
+                    predicate: .quantitySample(type: type, predicate: HKQuery.predicateForObject(with: sample.uuid))
+                )
+                for try await reading in series.results(for: healthStore) {
+                    result.append((reading.dateInterval.start, reading.quantity.doubleValue(for: unit)))
+                }
             } else {
-                expanded.append(HeartRateSample(healthKitQuantitySample: sample))
+                result.append((sample.startDate, sample.quantity.doubleValue(for: unit)))
             }
         }
-        expanded.sort { $0.time < $1.time }
-        return expanded
+        result.sort { $0.time < $1.time }
+        return result
     }
 
-    /// Unpacks the individual readings inside a series-anchor `HKQuantitySample` (see
-    /// ``heartRateSamples(for:)``).
-    private func seriesSamples(for sample: HKQuantitySample) async throws -> [HeartRateSample] {
-        let predicate: HKSamplePredicate<HKQuantitySample> = .quantitySample(
-            type: HKQuantityType(.heartRate),
-            predicate: HKQuery.predicateForObject(with: sample.uuid)
-        )
-        let descriptor = HKQuantitySeriesSampleQueryDescriptor(predicate: predicate)
-        var results: [HeartRateSample] = []
-        for try await result in descriptor.results(for: healthStore) {
-            results.append(HeartRateSample(
-                time: result.dateInterval.start,
-                bpm: result.quantity.doubleValue(for: HeartRateSample.heartRateUnit)
-            ))
-        }
-        return results
+    private func heartRateSamples(for workout: HKWorkout) async throws -> [HeartRateSample] {
+        try await readings(of: HKQuantityType(.heartRate), unit: HeartRateSample.heartRateUnit, in: workout)
+            .map { HeartRateSample(time: $0.time, bpm: $0.value) }
     }
 
     private static func encode(_ anchor: HKQueryAnchor) throws -> ImportAnchor {

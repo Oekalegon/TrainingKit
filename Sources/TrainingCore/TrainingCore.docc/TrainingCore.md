@@ -20,9 +20,17 @@ See `docs/design/trainingKit-design.md` in the package repository for the full m
 - ``BiologicalSex``
 - ``Weekday``
 - ``PaceModel``
+- ``PaceSettings``
 - ``HeartRateZoneModel``
 - ``HeartRateZoneMethod``
 - ``HeartRateZoneSettings``
+- ``MaxHeartRateSource``
+- ``PeakHeartRateDetector``
+- ``MaxHeartRateSuggestion``
+- ``LactateThresholdSource``
+- ``FieldTestMeasurer``
+- ``FieldTestResult``
+- ``FieldTestError``
 - ``TanakaHRMaxEstimator``
 
 ### Activity
@@ -30,10 +38,12 @@ See `docs/design/trainingKit-design.md` in the package repository for the full m
 - ``Activity``
 - ``HeartRateSample``
 - ``SpeedSample``
+- ``ActivityStep``
 - ``ElevationStats``
 - ``CadenceStats``
 - ``GeographicBounds``
 - ``Sport``
+- ``Venue``
 - ``ActivitySource``
 
 ### Training Load
@@ -45,10 +55,14 @@ See `docs/design/trainingKit-design.md` in the package repository for the full m
 - ``LoadCalculator``
 - ``ExponentialTRIMPCalculator``
 - ``DurationRPECalculator``
+- ``ImportedLoadCalculator``
 
 ### Structured Workouts
 
+- ``WorkoutTemplate``
+- ``DistanceSystem``
 - ``StructuredWorkout``
+- ``WorkoutPurpose``
 - ``WorkoutBlock``
 - ``WorkoutStep``
 - ``StepKind``
@@ -60,7 +74,9 @@ See `docs/design/trainingKit-design.md` in the package repository for the full m
 - ``PlannedActivity``
 - ``PlannedLoadEstimator``
 - ``TRIMPPlanEstimator``
+- ``LinkedActivityRefinedEstimator``
 - ``PlanReconciler``
+- ``ActivityStepAligner``
 - ``WorkoutDurationEstimator``
 
 ### Fitness Series
@@ -74,6 +90,7 @@ See `docs/design/trainingKit-design.md` in the package repository for the full m
 ### Statistics
 
 - ``ActivitySummary``
+- ``ActivityListItem``
 - ``TimeInZone``
 - ``WeeklyStats``
 - ``WeeklyDelta``
@@ -82,6 +99,8 @@ See `docs/design/trainingKit-design.md` in the package repository for the full m
 - ``PeriodDelta``
 - ``SportPeriodStats``
 - ``StatisticsCalculator``
+- ``WorkoutProjection``
+- ``PaceHistory``
 
 ### Periodisation
 
@@ -94,6 +113,13 @@ See `docs/design/trainingKit-design.md` in the package repository for the full m
 - ``CycleLayoutBuilder``
 - ``Race``
 - ``RacePriority``
+
+### Goals
+
+- ``Goal``
+- ``GoalTarget``
+- ``GoalMeasure``
+- ``GoalPeriod``
 
 ### Plan Evaluation
 
@@ -112,12 +138,27 @@ See `docs/design/trainingKit-design.md` in the package repository for the full m
 - ``CycleStore``
 - ``CycleStoreError``
 - ``CycleNestingValidator``
+- ``RaceStore``
+- ``GoalStore``
+- ``GoalStoreError``
+- ``WorkoutTemplateStore``
+- ``WorkoutTemplateStoreError``
+- ``TemplateRemoval``
 - ``AthleteStore``
 - ``InMemoryStore``
 - ``StoreSet``
 - ``ImportAnchor``
 - ``ImportResult``
 - ``ActivityImporting``
+
+### Export
+
+- ``CalendarExport``
+- ``CalendarExportBuilder``
+- ``CalendarImportPlanner``
+- ``CalendarImportPlan``
+- ``CalendarImportReport``
+- ``CalendarImportError``
 
 ### Facade
 

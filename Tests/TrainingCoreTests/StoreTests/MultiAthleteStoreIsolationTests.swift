@@ -17,7 +17,7 @@ struct MultiAthleteStoreIsolationTests {
         let store = InMemoryStore()
         return StoreSet(
             activityStore: store, planStore: store, workoutStore: store,
-            cycleStore: store, athleteStore: store
+            cycleStore: store, raceStore: store, athleteStore: store
         )
     }
 

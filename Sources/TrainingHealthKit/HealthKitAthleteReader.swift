@@ -3,8 +3,8 @@ import TrainingCore
 #if canImport(HealthKit)
 import HealthKit
 
-/// Reads resting heart rate, biological sex, and (via `TanakaHRMaxEstimator`) an estimated
-/// maximum heart rate from HealthKit, to pre-fill an `AthleteProfile`.
+/// Reads resting heart rate, biological sex, date of birth and (via `TanakaHRMaxEstimator`, from that
+/// date of birth) an estimated maximum heart rate from HealthKit, to pre-fill an `AthleteProfile`.
 ///
 /// Never reads HRmax directly — HealthKit doesn't report one, so this always estimates from date
 /// of birth instead, leaving the user to override it, per the design's Tanaka-formula-with-override
@@ -45,11 +45,13 @@ public struct HealthKitAthleteReader: Sendable {
     public func snapshot(asOf today: Date) async -> HealthKitAthleteSnapshot {
         async let restingHeartRate = readSmoothedRestingHeartRateBPM(asOf: today)
         async let biologicalSex = readBiologicalSex()
-        async let maxHeartRate = estimatedMaxHeartRateBPM(asOf: today)
+        async let dateOfBirth = readDateOfBirth()
+        let birthDate = await dateOfBirth
         return await HealthKitAthleteSnapshot(
             restingHeartRateBPM: restingHeartRate,
             biologicalSex: biologicalSex,
-            estimatedMaxHeartRateBPM: maxHeartRate
+            estimatedMaxHeartRateBPM: birthDate.map { hrMaxEstimator.estimatedMaxHeartRateBPM(dateOfBirth: $0, asOf: today) },
+            dateOfBirth: birthDate
         )
     }
 
@@ -83,9 +85,8 @@ public struct HealthKitAthleteReader: Sendable {
 
     /// - Note: Swallows any HealthKit error (e.g. denied authorization) into `nil` rather than
     ///   throwing, so one field's failure can never take down the others in ``snapshot(asOf:)``.
-    private func estimatedMaxHeartRateBPM(asOf today: Date) async -> Double? {
-        guard let dateOfBirth = try? healthStore.dateOfBirthComponents().date else { return nil }
-        return hrMaxEstimator.estimatedMaxHeartRateBPM(dateOfBirth: dateOfBirth, asOf: today)
+    private func readDateOfBirth() async -> Date? {
+        try? healthStore.dateOfBirthComponents().date
     }
 }
 #endif

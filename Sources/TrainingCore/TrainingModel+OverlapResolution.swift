@@ -32,11 +32,14 @@ extension TrainingModel {
         // deleting it — once it's gone, only the store (not the in-memory, `loadedRange`-scoped
         // `activities`) can reliably answer whether/when it existed.
         guard let removedDay = try await stores.activityStore.activity(id: id)?.start else { return }
+        // Everything that goes with it: a joined activity's pieces, or the join a piece belongs to.
+        var removedIDs = [id]
+        removedIDs += try await stores.activityStore.components(ofJoinedActivity: id).map(\.id)
+        if let join = try await stores.activityStore.joinedActivity(containing: id) { removedIDs.append(join.id) }
+        try await releasePlans(heldBy: removedIDs)
         try await stores.activityStore.deleteActivity(id: id)
 
-        if let cache = stores.fitnessMetricsCacheStore {
-            try? await cache.markDirty(from: removedDay)
-        }
+        await markCacheDirty(from: removedDay)
 
         let range = loadedRange ?? (today...today)
         activities = try await stores.activityStore.activities(in: range)

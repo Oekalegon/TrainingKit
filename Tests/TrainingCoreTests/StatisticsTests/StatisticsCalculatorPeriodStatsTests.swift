@@ -11,6 +11,26 @@ struct StatisticsCalculatorPeriodStatsTests {
         Activity(source: .manual, sport: sport, start: start, duration: duration, distanceMeters: distanceMeters, perceivedExertion: perceivedExertion)
     }
 
+    @Test("runs at any venue all count as running")
+    func runningVenuesGroupAsRunning() {
+        let day = Date(timeIntervalSince1970: 0)
+        let venues: [Venue?] = [nil, .indoor(.treadmill), .outdoor(.road), .outdoor(.trail), .outdoor(.track)]
+        let activities = venues.enumerated().map { index, venue in
+            Activity(
+                source: .manual, sport: .running, venue: venue, start: day.addingTimeInterval(Double(index) * 3600),
+                duration: 600, distanceMeters: 1000, perceivedExertion: 5
+            )
+        }
+
+        let stats = calculator.periodStats(
+            activities: activities, plans: [], workouts: [], athlete: athlete, range: day...day, asOf: day, previous: nil
+        )
+
+        #expect(stats.bySport.count == 1)
+        #expect(stats.bySport[.running]?.activityCount == 5)
+        #expect(stats.bySport[.running]?.distanceMeters == 5000)
+    }
+
     @Test("bySport groups totals correctly across two sports")
     func bySportGrouping() {
         let day = Date(timeIntervalSince1970: 0)

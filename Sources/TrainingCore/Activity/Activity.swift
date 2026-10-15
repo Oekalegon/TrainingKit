@@ -14,6 +14,8 @@ public struct Activity: Identifiable, Sendable, Codable, Hashable {
     public var source: ActivitySource
     /// The kind of activity performed.
     public var sport: Sport
+    /// Where the activity took place, if known.
+    public var venue: Venue?
     /// When the activity began.
     public var start: Date
     /// How long the activity lasted.
@@ -35,6 +37,28 @@ public struct Activity: Identifiable, Sendable, Codable, Hashable {
     public var perceivedExertion: Int?
     /// Set by ``PlanReconciler`` once this activity is matched to a ``PlannedActivity``.
     public var linkedPlanID: UUID?
+    /// The ``PlannedActivity`` this workout was started from on the Apple Watch, if the source
+    /// reports one (the id of the scheduled `WorkoutPlan`, which is the plan's own id).
+    ///
+    /// A hint, not a link: ``PlanReconciler`` turns it into ``linkedPlanID`` when that plan still
+    /// exists, is unmatched and falls on the activity's day, and otherwise ignores it.
+    public var scheduledPlanID: UUID?
+    /// The steps of the plan this workout was started from, as the Watch recorded them (MVP2-146), in
+    /// order; empty for a workout that wasn't started from a plan, for one imported before steps were
+    /// read, and for a joined activity (its pieces' steps belong to different workouts). See
+    /// ``ActivityStepAligner`` for laying them over the plan.
+    public var steps: [ActivityStep]
+    /// A training load carried in from outside (MVP2-107), in TRIMP: the figure a calendar export file
+    /// gave for an activity whose heart rate the file doesn't hold. ``ImportedLoadCalculator`` uses it
+    /// when there are no heart-rate samples to score. `nil` for every other activity.
+    public var importedLoad: Double?
+    /// Whether this activity was made from a calendar export file (MVP2-107), not read from its source:
+    /// a placeholder with a start, a duration, a distance and a load but no heart rate, which the real
+    /// workout replaces when HealthKit imports it. `false` for every other activity.
+    public var isCalendarImport: Bool
+    /// Whether the athlete chose ``sport`` and ``venue`` themselves (``TrainingModel/setSport(_:venue:forActivityID:asOf:)``),
+    /// so a re-import or a rebuilt join keeps them instead of the source's. Defaults to `false`.
+    public var isSportEdited: Bool
 
     /// The time span this activity covers, from ``start`` to `start + duration`.
     ///
@@ -61,10 +85,17 @@ public struct Activity: Identifiable, Sendable, Codable, Hashable {
     ///   - geographicBounds: The geographic area covered, if known.
     ///   - perceivedExertion: Borg CR10 rating (1...10), if entered.
     ///   - linkedPlanID: The matched ``PlannedActivity``'s id, if already reconciled.
+    ///   - scheduledPlanID: The id of the plan the workout was started from, if the source knows it.
+    ///   - venue: Where the activity took place, if known.
+    ///   - steps: The steps the Watch recorded for a plan-started workout; defaults to none.
+    ///   - importedLoad: A load (TRIMP) carried in from a calendar export file; defaults to none.
+    ///   - isCalendarImport: Whether the activity was made from a calendar export file; defaults to `false`.
+    ///   - isSportEdited: Whether the athlete chose the sport and venue themselves; defaults to `false`.
     public init(
         id: UUID = UUID(),
         source: ActivitySource,
         sport: Sport,
+        venue: Venue? = nil,
         start: Date,
         duration: TimeInterval,
         distanceMeters: Double? = nil,
@@ -74,11 +105,17 @@ public struct Activity: Identifiable, Sendable, Codable, Hashable {
         cadence: CadenceStats? = nil,
         geographicBounds: GeographicBounds? = nil,
         perceivedExertion: Int? = nil,
-        linkedPlanID: UUID? = nil
+        linkedPlanID: UUID? = nil,
+        scheduledPlanID: UUID? = nil,
+        steps: [ActivityStep] = [],
+        importedLoad: Double? = nil,
+        isCalendarImport: Bool = false,
+        isSportEdited: Bool = false
     ) {
         self.id = id
         self.source = source
         self.sport = sport
+        self.venue = venue
         self.start = start
         self.duration = duration
         self.distanceMeters = distanceMeters
@@ -89,5 +126,44 @@ public struct Activity: Identifiable, Sendable, Codable, Hashable {
         self.geographicBounds = geographicBounds
         self.perceivedExertion = perceivedExertion
         self.linkedPlanID = linkedPlanID
+        self.scheduledPlanID = scheduledPlanID
+        self.steps = steps
+        self.importedLoad = importedLoad
+        self.isCalendarImport = isCalendarImport
+        self.isSportEdited = isSportEdited
+    }
+}
+
+extension Activity {
+    private enum CodingKeys: String, CodingKey {
+        case id, source, sport, venue, start, duration, distanceMeters, heartRate, speed, elevation, cadence
+        case geographicBounds, perceivedExertion, linkedPlanID, scheduledPlanID, steps, importedLoad, isCalendarImport, isSportEdited
+    }
+
+    /// Decodes an activity, reading a missing `steps` as empty, and a missing imported load as none, so
+    /// activities saved before those fields (MVP2-146, MVP2-107) still load. A missing `venue` reads the
+    /// one an older version stored inside the sport (`indoorRunning`/`outdoorRunning`).
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        source = try container.decode(ActivitySource.self, forKey: .source)
+        let storedSport = try container.decode(StoredSport.self, forKey: .sport)
+        sport = storedSport.sport
+        venue = try container.decodeIfPresent(Venue.self, forKey: .venue) ?? storedSport.legacyVenue
+        start = try container.decode(Date.self, forKey: .start)
+        duration = try container.decode(TimeInterval.self, forKey: .duration)
+        distanceMeters = try container.decodeIfPresent(Double.self, forKey: .distanceMeters)
+        heartRate = try container.decode([HeartRateSample].self, forKey: .heartRate)
+        speed = try container.decode([SpeedSample].self, forKey: .speed)
+        elevation = try container.decodeIfPresent(ElevationStats.self, forKey: .elevation)
+        cadence = try container.decodeIfPresent(CadenceStats.self, forKey: .cadence)
+        geographicBounds = try container.decodeIfPresent(GeographicBounds.self, forKey: .geographicBounds)
+        perceivedExertion = try container.decodeIfPresent(Int.self, forKey: .perceivedExertion)
+        linkedPlanID = try container.decodeIfPresent(UUID.self, forKey: .linkedPlanID)
+        scheduledPlanID = try container.decodeIfPresent(UUID.self, forKey: .scheduledPlanID)
+        steps = try container.decodeIfPresent([ActivityStep].self, forKey: .steps) ?? []
+        importedLoad = try container.decodeIfPresent(Double.self, forKey: .importedLoad)
+        isCalendarImport = try container.decodeIfPresent(Bool.self, forKey: .isCalendarImport) ?? false
+        isSportEdited = try container.decodeIfPresent(Bool.self, forKey: .isSportEdited) ?? false
     }
 }

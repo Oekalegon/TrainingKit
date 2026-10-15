@@ -2,9 +2,9 @@ import TrainingCore
 import Foundation
 import SwiftData
 
-/// SwiftData-backed implementation of all five Core store protocols, sharing one `ModelContainer`.
+/// SwiftData-backed implementation of the Core store protocols, sharing one `ModelContainer`.
 ///
-/// A single actor conforming to all five protocols at once, for the same reason as `InMemoryStore`:
+/// A single actor conforming to all of them at once, for the same reason as `InMemoryStore`:
 /// Swift can't satisfy identically-shaped requirements from different protocols with different
 /// implementations on one conforming type, hence the distinct `deletePlan`/`deleteWorkout`/
 /// `deleteCycle` names rather than one shared `delete(id:)`.
@@ -21,8 +21,8 @@ import SwiftData
 /// indexed date fields if profiling ever shows otherwise. `activities(in:)` is the one query that
 /// already needed this: see its doc comment below.
 @ModelActor
-public actor SwiftDataStore: ActivityStore, PlanStore, WorkoutLibraryStore, CycleStore, AthleteStore,
-    FitnessMetricsCacheStore {
+public actor SwiftDataStore: ActivityStore, PlanStore, WorkoutLibraryStore, CycleStore, RaceStore, GoalStore,
+    WorkoutTemplateStore, AthleteStore, FitnessMetricsCacheStore {
     // MARK: ActivityStore
 
     /// See `ActivityStore/activities(in:)`.
@@ -32,12 +32,44 @@ public actor SwiftDataStore: ActivityStore, PlanStore, WorkoutLibraryStore, Cycl
     /// activity table is large enough (years of imported history) that decoding every `payload` on
     /// every call is a measurable cost the other, smaller tables don't have.
     public func activities(in range: ClosedRange<Date>) async throws -> [Activity] {
+        try activityRecords(in: range).map { try $0.toActivity() }
+    }
+
+    /// See `ActivityStore/activityListItems(in:)`.
+    ///
+    /// Decodes only the summary fields of each record's payload, so the heart-rate and speed
+    /// samples are never built.
+    public func activityListItems(in range: ClosedRange<Date>) async throws -> [ActivityListItem] {
+        try activityRecords(in: range).map { try $0.toListItem() }
+    }
+
+    /// The records `activities(in:)` shows for `range`: those starting in it, minus pieces hidden by
+    /// a join, plus each join with a piece in it.
+    private func activityRecords(in range: ClosedRange<Date>) throws -> [ActivityRecord] {
         let lowerBound = range.lowerBound
         let upperBound = range.upperBound
         let descriptor = FetchDescriptor<ActivityRecord>(
             predicate: #Predicate { $0.start >= lowerBound && $0.start <= upperBound }
         )
-        return try modelContext.fetch(descriptor).map { try $0.toActivity() }
+        let inRange = try modelContext.fetch(descriptor)
+
+        // The join table is tiny (one row per joined session), so it's read whole rather than
+        // predicated — same reasoning as the tombstone table in `upsert(_:)`.
+        let joins = try joinComponentIDs()
+        guard !joins.isEmpty else { return inRange }
+
+        let hidden = Set(joins.values.joined())
+        let inRangeIDs = Set(inRange.map(\.id))
+        var records = inRange.filter { !hidden.contains($0.id) }
+        // A joined activity starts at its earliest component, so a range starting between two
+        // components would otherwise show the later piece alone: include the join whenever any
+        // component is in range, even though the join's own `start` isn't.
+        for (joinID, componentIDs) in joins where !inRangeIDs.contains(joinID) {
+            guard componentIDs.contains(where: inRangeIDs.contains), let record = try fetchActivityRecord(id: joinID)
+            else { continue }
+            records.append(record)
+        }
+        return records
     }
 
     /// See `ActivityStore/upsert(_:)`.
@@ -111,9 +143,27 @@ public actor SwiftDataStore: ActivityStore, PlanStore, WorkoutLibraryStore, Cycl
         try fetchActivityRecord(id: id)?.toActivity()
     }
 
+    /// See `ActivityStore/activities(ids:)`.
+    public func activities(ids: [UUID]) async throws -> [UUID: Activity] {
+        guard !ids.isEmpty else { return [:] }
+        let descriptor = FetchDescriptor<ActivityRecord>(predicate: #Predicate { ids.contains($0.id) })
+        var result: [UUID: Activity] = [:]
+        for record in try modelContext.fetch(descriptor) {
+            result[record.id] = try record.toActivity()
+        }
+        return result
+    }
+
     /// See `ActivityStore/deleteActivity(source:)`.
     public func deleteActivity(source: ActivitySource) async throws {
         guard let record = try fetchActivityRecord(source: source) else { return }
+        // A piece removed at its origin dissolves any join it belongs to, so the surviving pieces
+        // reappear rather than staying folded into a session that no longer exists as recorded.
+        let removedID = record.id
+        for (joinID, componentIDs) in try joinComponentIDs() where componentIDs.contains(removedID) {
+            try deleteJoinRecords(joinID: joinID)
+            if let joined = try fetchActivityRecord(id: joinID) { modelContext.delete(joined) }
+        }
         modelContext.delete(record)
         try modelContext.save()
     }
@@ -121,6 +171,20 @@ public actor SwiftDataStore: ActivityStore, PlanStore, WorkoutLibraryStore, Cycl
     /// See `ActivityStore/deleteActivity(id:)`.
     public func deleteActivity(id: UUID) async throws {
         guard let record = try fetchActivityRecord(id: id) else { return }
+        // Deleting a joined activity deletes its components too (each tombstoned below).
+        if let componentIDs = try joinComponentIDs()[id] {
+            try deleteJoinRecords(joinID: id)
+            // Pieces another join still uses stay, so deleting one of two overlapping joins (e.g.
+            // the same session joined independently on two devices) can't take the other's data.
+            let stillJoined = Set(try joinComponentIDs().values.joined())
+            for componentID in componentIDs where !stillJoined.contains(componentID) {
+                guard let component = try fetchActivityRecord(id: componentID) else { continue }
+                if !ActivitySource.keysWithoutNaturalKey.contains(component.sourceKey) {
+                    try tombstone(sourceKey: component.sourceKey)
+                }
+                modelContext.delete(component)
+            }
+        }
         if !ActivitySource.keysWithoutNaturalKey.contains(record.sourceKey) {
             try tombstone(sourceKey: record.sourceKey)
         }
@@ -158,8 +222,7 @@ public actor SwiftDataStore: ActivityStore, PlanStore, WorkoutLibraryStore, Cycl
     /// app should either. Exists only for `TestApps/HealthKitHarness`/`PersistenceHarness` to reset
     /// between manual test runs (via `@testable import TrainingPersistence`), and for tests here —
     /// deliberately `internal`, not `public`, so it can't become a real button in a real app by
-    /// accident. Deletes are tracked individually by SwiftData's CloudKit mirroring exactly like
-    /// `deleteActivity(source:)`, so they propagate to every other device syncing this store.
+    /// accident. Activities live in the local-only store (MVP2-131), so nothing here reaches iCloud.
     @discardableResult
     func deleteAllActivities() async throws -> Int {
         let records = try modelContext.fetch(FetchDescriptor<ActivityRecord>())
@@ -198,7 +261,7 @@ public actor SwiftDataStore: ActivityStore, PlanStore, WorkoutLibraryStore, Cycl
         return removed.sorted { $0.start < $1.start }
     }
 
-    private func fetchActivityRecord(id: UUID) throws -> ActivityRecord? {
+    func fetchActivityRecord(id: UUID) throws -> ActivityRecord? {
         let descriptor = FetchDescriptor<ActivityRecord>(predicate: #Predicate { $0.id == id })
         return try modelContext.fetch(descriptor).first
     }
@@ -358,17 +421,193 @@ public actor SwiftDataStore: ActivityStore, PlanStore, WorkoutLibraryStore, Cycl
         return try modelContext.fetch(descriptor).first
     }
 
+    // MARK: RaceStore
+
+    /// See `RaceStore/races(in:)`.
+    public func races(in range: ClosedRange<Date>) async throws -> [Race] {
+        try modelContext.fetch(FetchDescriptor<RaceRecord>())
+            .map { try $0.toRace() }
+            .filter { range.contains($0.date) }
+    }
+
+    /// See `RaceStore/race(id:)`.
+    public func race(id: UUID) async throws -> Race? {
+        try fetchRaceRecord(id: id)?.toRace()
+    }
+
+    /// See `RaceStore/upsert(_:)`.
+    public func upsert(_ races: [Race]) async throws {
+        var existingRecordsByID: [UUID: RaceRecord] = [:]
+        for record in try modelContext.fetch(FetchDescriptor<RaceRecord>()) {
+            existingRecordsByID[record.id] = record
+        }
+        for race in races {
+            if let existing = existingRecordsByID[race.id] {
+                try existing.update(from: race)
+            } else {
+                modelContext.insert(try RaceRecord(race: race))
+            }
+        }
+        try modelContext.save()
+    }
+
+    /// See `RaceStore/deleteRace(id:)`.
+    public func deleteRace(id: UUID) async throws {
+        guard let record = try fetchRaceRecord(id: id) else { return }
+        modelContext.delete(record)
+        try modelContext.save()
+    }
+
+    private func fetchRaceRecord(id: UUID) throws -> RaceRecord? {
+        let descriptor = FetchDescriptor<RaceRecord>(predicate: #Predicate { $0.id == id })
+        return try modelContext.fetch(descriptor).first
+    }
+
+    // MARK: GoalStore
+
+    /// See `GoalStore/goals()`.
+    ///
+    /// A record that can't be decoded is skipped and logged rather than thrown (MVP2-139): goals sync,
+    /// so another device running a newer version can write a target kind this one doesn't know, and
+    /// one such goal mustn't make `TrainingModel.load(in:asOf:)` fail for everything else. It stays
+    /// in the store untouched.
+    public func goals() async throws -> [Goal] {
+        try modelContext.fetch(FetchDescriptor<GoalRecord>()).compactMap { record in
+            do {
+                return try record.toGoal()
+            } catch {
+                Logging.persistence.error(
+                    "Skipping goal \(record.id, privacy: .public) that can't be decoded: \(String(describing: error), privacy: .public)"
+                )
+                return nil
+            }
+        }
+    }
+
+    /// See `GoalStore/goal(id:)`.
+    public func goal(id: UUID) async throws -> Goal? {
+        try fetchGoalRecord(id: id)?.toGoal()
+    }
+
+    /// See `GoalStore/upsert(_:)`.
+    public func upsert(_ goals: [Goal]) async throws {
+        var existingRecordsByID: [UUID: GoalRecord] = [:]
+        for record in try modelContext.fetch(FetchDescriptor<GoalRecord>()) {
+            existingRecordsByID[record.id] = record
+        }
+        for goal in goals {
+            if let existing = existingRecordsByID[goal.id] {
+                try existing.update(from: goal)
+            } else {
+                modelContext.insert(try GoalRecord(goal: goal))
+            }
+        }
+        try modelContext.save()
+    }
+
+    /// See `GoalStore/deleteGoal(id:)`.
+    public func deleteGoal(id: UUID) async throws {
+        guard let record = try fetchGoalRecord(id: id) else { return }
+        modelContext.delete(record)
+        try modelContext.save()
+    }
+
+    private func fetchGoalRecord(id: UUID) throws -> GoalRecord? {
+        let descriptor = FetchDescriptor<GoalRecord>(predicate: #Predicate { $0.id == id })
+        return try modelContext.fetch(descriptor).first
+    }
+
+    // MARK: WorkoutTemplateStore
+
+    /// See `WorkoutTemplateStore/templates()`.
+    ///
+    /// A record that can't be decoded is skipped and logged rather than thrown, as for goals: templates
+    /// sync, so another device on a newer version can write a step kind or goal this one doesn't know,
+    /// and one such template mustn't make `TrainingModel.load(in:asOf:)` fail for everything else. It
+    /// stays in the store untouched.
+    public func templates() async throws -> [WorkoutTemplate] {
+        try modelContext.fetch(FetchDescriptor<WorkoutTemplateRecord>()).compactMap { record in
+            do {
+                return try record.toTemplate()
+            } catch {
+                Logging.persistence.error(
+                    "Skipping template \(record.id, privacy: .public) that can't be decoded: \(String(describing: error), privacy: .public)"
+                )
+                return nil
+            }
+        }
+    }
+
+    /// See `WorkoutTemplateStore/template(id:)`.
+    ///
+    /// Returns `nil` and logs for a record that can't be decoded, as ``templates()`` skips it, so the
+    /// two never disagree about whether a template exists.
+    public func template(id: UUID) async throws -> WorkoutTemplate? {
+        guard let record = try fetchTemplateRecord(id: id) else { return nil }
+        do {
+            return try record.toTemplate()
+        } catch {
+            Logging.persistence.error(
+                "Template \(id, privacy: .public) can't be decoded: \(String(describing: error), privacy: .public)"
+            )
+            return nil
+        }
+    }
+
+    /// See `WorkoutTemplateStore/upsert(_:)`.
+    public func upsert(_ templates: [WorkoutTemplate]) async throws {
+        var existingRecordsByID: [UUID: WorkoutTemplateRecord] = [:]
+        for record in try modelContext.fetch(FetchDescriptor<WorkoutTemplateRecord>()) {
+            existingRecordsByID[record.id] = record
+        }
+        for template in templates {
+            if let existing = existingRecordsByID[template.id] {
+                try existing.update(from: template)
+            } else {
+                modelContext.insert(try WorkoutTemplateRecord(template: template))
+            }
+        }
+        try modelContext.save()
+    }
+
+    /// See `WorkoutTemplateStore/deleteTemplate(id:)`.
+    public func deleteTemplate(id: UUID) async throws {
+        guard let record = try fetchTemplateRecord(id: id) else { return }
+        modelContext.delete(record)
+        try modelContext.save()
+    }
+
+    private func fetchTemplateRecord(id: UUID) throws -> WorkoutTemplateRecord? {
+        let descriptor = FetchDescriptor<WorkoutTemplateRecord>(predicate: #Predicate { $0.id == id })
+        return try modelContext.fetch(descriptor).first
+    }
+
     // MARK: AthleteStore
 
     /// See `AthleteStore/athleteProfile()`.
+    ///
+    /// The profile is kept in two places (MVP2-131): the whole of it in the local-only
+    /// ``AthleteProfileRecord``, and just the athlete's own preferences in the CloudKit-synced
+    /// ``AthletePreferencesRecord``. When the synced record exists its preferences replace the local
+    /// ones, so a change made on another device shows up here; the health-derived fields (sex, date of
+    /// birth, heart-rate settings) only ever come from the local record.
     public func athleteProfile() async throws -> AthleteProfile? {
-        try singletonRecordIfExists()?.toProfile()
+        guard let local = try singletonRecordIfExists()?.toProfile() else { return nil }
+        guard let preferences = try preferencesRecordIfExists()?.toPreferences() else { return local }
+        return preferences.apply(to: local)
     }
 
-    /// See `AthleteStore/save(_:)`.
+    /// See `AthleteStore/save(_:)`. Writes the whole profile locally and its preferences to the
+    /// synced record, in one save.
     public func save(_ profile: AthleteProfile) async throws {
         let record = try singletonRecord()
         try record.update(from: profile)
+        let preferences = AthletePreferences(of: profile)
+        if let existing = try preferencesRecordIfExists() {
+            try existing.update(from: preferences)
+        } else {
+            modelContext.insert(try AthletePreferencesRecord(preferences: preferences))
+        }
         try modelContext.save()
     }
 
@@ -383,6 +622,10 @@ public actor SwiftDataStore: ActivityStore, PlanStore, WorkoutLibraryStore, Cycl
         let record = try singletonRecord()
         record.importAnchorData = anchor?.data
         try modelContext.save()
+    }
+
+    private func preferencesRecordIfExists() throws -> AthletePreferencesRecord? {
+        try modelContext.fetch(FetchDescriptor<AthletePreferencesRecord>()).first
     }
 
     private func singletonRecordIfExists() throws -> AthleteProfileRecord? {

@@ -18,6 +18,10 @@ extension TrainingModel {
     ///   skipped, so a failed anchor save simply makes the next import re-fetch what this one
     ///   already wrote, which `upsert`'s id-matched replace makes harmless.
     ///
+    /// Also reloads ``plans`` alongside ``activities`` (best-effort — a failure refreshing plans
+    /// doesn't fail the import) so a newly imported activity auto-matched to a plan by this run
+    /// shows as completed on the plan side immediately, not just in the store.
+    ///
     /// Serialized against any other in-flight ``importActivities(from:asOf:)``/
     /// ``resyncActivities(from:asOf:)`` call via ``pendingImport``: this run waits for whatever's
     /// already queued to finish before doing its own anchor-read-then-upsert. Without this, two
@@ -70,6 +74,10 @@ extension TrainingModel {
     /// Not `private`: also used by ``TrainingModel/deduplicateActivities(asOf:)`` (a plain store
     /// operation with no `ActivityImporting` dependency, hence its own file) to serialize against
     /// imports the same way two imports serialize against each other.
+    ///
+    /// Never call a queued public method (``importActivities(from:asOf:)``,
+    /// ``updateAthlete(asOf:_:)``, ``linkActivity(id:toPlan:asOf:)`` and the like) from inside
+    /// `operation`: it would wait for `operation` itself to finish, which never happens.
     func runQueued(_ operation: @escaping () async throws -> Void) async throws {
         let previous = pendingImport
         let task = Task {
@@ -83,7 +91,24 @@ extension TrainingModel {
     private func performImport(from importer: any ActivityImporting, asOf today: Date) async throws {
         let anchor = try await stores.athleteStore.importAnchor()
         let result = try await importer.importActivities(since: anchor)
+        try await applyImport(result, savingAnchor: true, asOf: today)
+    }
 
+    /// Persists `result` and brings the model up to date: the part of an import after the importer has
+    /// run. Also how a calendar file's completed activities are added (MVP2-107), with
+    /// `savingAnchor` off, so the file doesn't move HealthKit's cursor.
+    ///
+    /// A new activity that is the same workout as a placeholder made from a calendar file (see
+    /// `PlaceholderActivityMatching`) replaces it: the placeholder is removed without a tombstone,
+    /// its plan is released, and the plan is matched again to the real workout.
+    ///
+    /// Call from inside ``runQueued(_:)``, like ``performImport(from:asOf:)``.
+    func applyImport(_ result: ImportResult, savingAnchor: Bool, asOf today: Date) async throws {
+        // An import that throws after it has written to the stores never reaches `recompute`, so the
+        // kept refined estimator would outlive a change it was built before, and a later import that
+        // finds nothing new would keep it. Any early exit therefore forgets it (MVP2-161).
+        var finished = false
+        defer { if !finished { invalidateRefinedEstimator() } }
         // Captured before deleting: once an activity is gone, the store can no longer answer what
         // day it occupied, and a persisted fitness-metrics cache needs that date to know how far
         // back to invalidate.
@@ -91,6 +116,15 @@ extension TrainingModel {
         for source in result.deletedSources {
             if let existing = try await stores.activityStore.activity(source: source) {
                 deletedStarts.append(existing.start)
+                // Removing a piece dissolves the join it belongs to, which is attributed to the
+                // *earliest* piece's day — possibly the day before this piece's, e.g. a session
+                // split across midnight — so that day's cached load has to be rebuilt too.
+                var removedIDs = [existing.id]
+                if let join = try await stores.activityStore.joinedActivity(containing: existing.id) {
+                    deletedStarts.append(join.start)
+                    removedIDs.append(join.id)
+                }
+                try await releasePlans(heldBy: removedIDs)
             }
         }
 
@@ -99,28 +133,141 @@ extension TrainingModel {
         // full resync) would silently re-insert every duplicate/conflict the athlete had already
         // cleaned up, since the external source has no notion of TrainingKit's own deletes.
         let tombstoned = try await stores.activityStore.tombstonedSources(among: result.upserted.map(\.source))
-        let toUpsert = tombstoned.isEmpty ? result.upserted : result.upserted.filter { !tombstoned.contains($0.source) }
+        let untombstoned = tombstoned.isEmpty ? result.upserted : result.upserted.filter { !tombstoned.contains($0.source) }
 
+        // An importer builds each activity fresh, without the athlete's or reconciler's plan link
+        // (see ``Activity/linkedPlanID``); carry an existing link over so a re-import of a changed
+        // workout doesn't silently drop a match, including a manual one.
+        var toUpsert: [Activity] = untombstoned
+        var newActivities: [Activity] = []
+        let existingByID = try await stores.activityStore.activities(ids: toUpsert.map(\.id))
+        // Plan → workout, read once per plan however many linked activities share a re-import.
+        var plannedWorkouts: [UUID: StructuredWorkout?] = [:]
+        for index in toUpsert.indices {
+            if let existing = existingByID[toUpsert[index].id] {
+                if toUpsert[index].linkedPlanID == nil { toUpsert[index].linkedPlanID = existing.linkedPlanID }
+                // Likewise the hint, in case this run's WorkoutKit lookup failed.
+                if toUpsert[index].scheduledPlanID == nil { toUpsert[index].scheduledPlanID = existing.scheduledPlanID }
+                // And the streams (MVP2-146): a query that failed this run, or one the athlete has since
+                // refused access to, comes back empty, and replacing a recording with nothing would
+                // lose the pace chart, the forecasts' data and the heart-rate zones for good.
+                // The sport and venue the athlete chose win over the source's.
+                if existing.isSportEdited {
+                    toUpsert[index].sport = existing.sport
+                    toUpsert[index].venue = existing.venue
+                    toUpsert[index].isSportEdited = true
+                }
+                // A re-import brings the source's sport back, so a linked activity takes its plan's again.
+                if let planID = toUpsert[index].linkedPlanID, !toUpsert[index].isSportEdited {
+                    if plannedWorkouts[planID] == nil { plannedWorkouts[planID] = .some(try await plannedWorkout(planID: planID)) }
+                    toUpsert[index] = toUpsert[index].adoptingSportAndVenue(of: plannedWorkouts[planID] ?? nil, athlete: athlete)
+                }
+                if toUpsert[index].speed.isEmpty { toUpsert[index].speed = existing.speed }
+                if toUpsert[index].heartRate.isEmpty { toUpsert[index].heartRate = existing.heartRate }
+            } else {
+                newActivities.append(toUpsert[index])
+            }
+        }
+
+        // Placeholders the real workouts replace. One read for the whole batch, not one per activity:
+        // a full resync brings in every workout.
+        let real = newActivities.filter { !$0.isCalendarImport }
+        if let first = real.map(\.start).min(), let last = real.map(\.start).max() {
+            let slack = PlaceholderActivityMatching.startTolerance
+            let placeholders = try await stores.activityStore
+                .activityListItems(in: first.addingTimeInterval(-slack)...last.addingTimeInterval(slack))
+                .filter(\.isCalendarImport)
+            var removed: Set<UUID> = []
+            for activity in real {
+                for placeholder in placeholders where !removed.contains(placeholder.id) && placeholder.id != activity.id
+                    && PlaceholderActivityMatching.isSameWorkout(
+                        sport: activity.sport, venue: activity.venue, start: activity.start, duration: activity.duration, as: placeholder
+                    ) {
+                    removed.insert(placeholder.id)
+                    deletedStarts.append(placeholder.start)
+                    try await releasePlans(heldBy: [placeholder.id])
+                    // A placeholder from a HealthKit workout id is removed by source, which leaves no
+                    // tombstone, so that workout still imports if HealthKit reports it.
+                    if let source = try await stores.activityStore.activity(id: placeholder.id)?.source, source.hasNaturalKey {
+                        try await stores.activityStore.deleteActivity(source: source)
+                    } else {
+                        try await stores.activityStore.deleteActivity(id: placeholder.id)
+                    }
+                }
+            }
+        }
+
+        var refreshedJoinDays: [Date] = []
         if !toUpsert.isEmpty {
             try await stores.activityStore.upsert(toUpsert)
+            // A re-imported piece of a joined session changes what that join should show.
+            refreshedJoinDays = try await refreshJoins(containing: toUpsert.map(\.id))
         }
         for source in result.deletedSources {
             try await stores.activityStore.deleteActivity(source: source)
         }
-        try await stores.athleteStore.saveImportAnchor(result.anchor)
+        if savingAnchor { try await stores.athleteStore.saveImportAnchor(result.anchor) }
 
-        let affectedDates = toUpsert.map(\.start) + deletedStarts
-        if let cache = stores.fitnessMetricsCacheStore, let earliest = affectedDates.min() {
-            try? await cache.markDirty(from: earliest)
+        // Only brand-new activities are auto-matched, so an activity the athlete unlinked stays
+        // unlinked when it's re-imported.
+        // Best-effort: the import itself has already landed (and its anchor is saved), so a failure
+        // matching plans must not skip the cache invalidation and reload below.
+        do {
+            try await reconcile(newActivities)
+        } catch {
+            Logging.dataImport.error("Matching imported activities to plans failed: \(error.localizedDescription)")
+        }
+
+        let affectedDates = toUpsert.map(\.start) + deletedStarts + refreshedJoinDays
+        if let earliest = affectedDates.min() {
+            await markCacheDirty(from: earliest)
         }
         // `||=`, not an overwrite: a conformer without incremental-import support is allowed to
         // return a `nil` anchor even on a successful run, and a completed import shouldn't read
         // back as "never imported" just because this particular run didn't produce one.
-        hasEverImportedActivities = hasEverImportedActivities || result.anchor != nil
+        hasEverImportedActivities = hasEverImportedActivities || (savingAnchor && result.anchor != nil)
 
-        let range = loadedRange ?? Self.union(of: toUpsert.map { $0.start...$0.start }, fallback: today)
-        activities = try await stores.activityStore.activities(in: range)
+        // A day either side of each activity's own timestamp: a plan the reconciler just matched to
+        // it can land up to a day away in absolute time (the reconciler itself widens its own plan
+        // fetch the same way, for the athlete-timezone-aware same-day check — see `reconcile(_:)`).
+        // Without this margin, a single newly-imported activity collapses the fallback to a
+        // zero-width `start...start` instant, and `plans(in:)`'s exact-instant containment check
+        // would then almost never match the plan's own `date`, silently leaving `plans` empty.
+        let day: TimeInterval = 86_400
+        let range = loadedRange ?? Self.union(
+            of: toUpsert.map { $0.start.addingTimeInterval(-day)...$0.start.addingTimeInterval(day) },
+            fallback: today
+        )
+        try await reloadActivitiesAndPlans(in: range, bestEffortPlans: true)
         loadedRange = range
-        await recompute(asOf: today)
+        finished = true
+        // A pull-to-refresh that finds nothing new changes nothing the refined estimator is built from
+        // (MVP2-161), so it keeps the one it has instead of reading every plan and activity again.
+        // Edits made to the stores without going through this model (an iCloud sync) are therefore
+        // picked up by the estimator at the next change that does, not by an empty refresh.
+        // A deleted source counts as a change even when the store no longer has it (`deletedStarts`
+        // is empty then): rebuilding is cheap next to keeping a stale estimator.
+        let changedAnything = !affectedDates.isEmpty || !result.deletedSources.isEmpty
+        await recompute(asOf: today, refinedEstimatorIsCurrent: !changedAnything)
+    }
+
+    /// Reloads ``activities`` and ``plans`` from their stores for `range`.
+    ///
+    /// - Parameter bestEffortPlans: When `true`, a failure reloading `plans` is logged and
+    ///   swallowed rather than thrown, for a caller (import) that has already persisted its own
+    ///   changes and must not undo them over an unrelated plan-store hiccup. When `false` (a
+    ///   manual link/unlink, which hasn't persisted anything the caller can't also just retry), the
+    ///   failure propagates as usual.
+    func reloadActivitiesAndPlans(in range: ClosedRange<Date>, bestEffortPlans: Bool) async throws {
+        activities = try await stores.activityStore.activities(in: range)
+        if bestEffortPlans {
+            do {
+                plans = try await stores.planStore.plans(in: range)
+            } catch {
+                Logging.dataImport.error("Refreshing plans failed: \(error.localizedDescription)")
+            }
+        } else {
+            plans = try await stores.planStore.plans(in: range)
+        }
     }
 }

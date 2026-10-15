@@ -41,6 +41,7 @@ public struct StatisticsCalculator: Sendable {
     ) {
         self.calculators = calculators ?? [
             ExponentialTRIMPCalculator(gapThresholdSeconds: gapThresholdSeconds),
+            ImportedLoadCalculator(),
             DurationRPECalculator(),
         ]
         self.estimator = estimator
@@ -147,6 +148,8 @@ public struct StatisticsCalculator: Sendable {
     ///   - today: The boundary between "actual" and "estimated" days, matching ``DailyLoadSeries``.
     ///   - previous: The immediately preceding period of the same length, to compute `delta`
     ///     against; `nil` if there isn't one (e.g. the first week in a series).
+    ///   - paceHistory: Earlier activities to forecast the plans' distance and duration from (see
+    ///     ``projection(for:athlete:paceHistory:before:excluding:)``); empty for the pace model alone.
     public func periodStats(
         activities: [Activity],
         plans: [PlannedActivity],
@@ -154,7 +157,8 @@ public struct StatisticsCalculator: Sendable {
         athlete: AthleteProfile,
         range: ClosedRange<Date>,
         asOf today: Date,
-        previous: PeriodStats?
+        previous: PeriodStats?,
+        paceHistory: PaceHistory = .empty
     ) -> PeriodStats {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = athlete.timeZone
@@ -185,42 +189,16 @@ public struct StatisticsCalculator: Sendable {
         }
 
         var itemsBySport: [Sport: [StatItem]] = [:]
-        for activity in activitiesInRange {
-            let summary = summary(for: activity, athlete: athlete)
-            let item = StatItem(
-                distanceMeters: summary.distanceMeters,
-                time: summary.movingTime,
-                load: summary.load.value,
-                timeInZone: summary.timeInZone
-            )
-            itemsBySport[activity.sport, default: []].append(item)
+        for (sport, item) in activityItems(activitiesInRange, athlete: athlete) {
+            itemsBySport[sport, default: []].append(item)
         }
-        for plan in plansInRange {
-            guard let workout = workoutsByID[plan.workoutID] else { continue }
-            let projection = project(workout: workout, athlete: athlete)
-            let load = plan.expectedLoadOverride ?? estimator.estimatedLoad(for: workout, athlete: athlete).value
-            let item = StatItem(
-                distanceMeters: projection.distanceMeters,
-                time: projection.duration,
-                load: load,
-                timeInZone: projection.timeInZone
-            )
-            itemsBySport[workout.sport, default: []].append(item)
+        for (sport, item) in plannedItems(plansInRange, workoutsByID: workoutsByID, athlete: athlete, paceHistory: paceHistory) {
+            itemsBySport[sport, default: []].append(item)
         }
 
         let isProjected = rangeEnd > todayStart || (rangeEnd == todayStart && !plansInRange.isEmpty)
 
-        var bySport: [Sport: SportPeriodStats] = [:]
-        for (sport, items) in itemsBySport {
-            bySport[sport] = SportPeriodStats(
-                sport: sport,
-                distanceMeters: items.reduce(0) { $0 + ($1.distanceMeters ?? 0) },
-                time: items.reduce(0) { $0 + $1.time },
-                load: items.reduce(0) { $0 + $1.load },
-                timeInZone: items.reduce(TimeInZone()) { $0 + $1.timeInZone },
-                activityCount: items.count
-            )
-        }
+        let bySport = bySport(itemsBySport)
 
         let allItems = itemsBySport.values.flatMap { $0 }
         let longest = allItems.max { $0.time < $1.time }
@@ -255,6 +233,75 @@ public struct StatisticsCalculator: Sendable {
         )
     }
 
+    /// Computes `range`'s performed and planned totals independently, per sport, rather than
+    /// ``periodStats(activities:plans:workouts:athlete:range:asOf:previous:paceHistory:)``'s single merged
+    /// figure.
+    ///
+    /// `periodStats` follows the same either/or rule ``DailyLoadSeries`` uses for CTL/ATL: a plan
+    /// only contributes on a day that has no completed activity of its own. That's right for a
+    /// single running total, but leaves no way to show "here's what was planned, and here's what
+    /// actually happened" side by side for a day where both exist, or a still-open plan for today
+    /// that hasn't been performed yet — the whole point of this method. `actual` sums every
+    /// completed activity in `range` unconditionally; `planned` sums every ``PlannedActivity`` in
+    /// `range` dated `today` or later that has not yet been matched to a completed activity
+    /// (`completedActivityID == nil`) — a matched plan is already counted in `actual`. Neither side
+    /// excludes a day just because the other has something for it. Beyond the stored link nothing
+    /// here matches plans to activities, so an unmatched plan on a day that also has an activity
+    /// still counts as planned. Callers should pass the activities for the whole `range`: a matched
+    /// plan whose activity is not in `activities` appears on neither side.
+    ///
+    /// - Parameters:
+    ///   - activities: Completed activities to summarize with `calculators`.
+    ///   - plans: Planned activities to project with `estimator`/`durationEstimator`, restricted to
+    ///     `today` or later and to those not yet matched to a completed activity
+    ///     (`completedActivityID == nil`) — a matched plan is already counted as that activity.
+    ///   - workouts: The library workouts `plans` reference, looked up by id.
+    ///   - athlete: Supplies the timezone and zone settings used throughout.
+    ///   - range: The calendar-day range to summarize, in the athlete's timezone. Both bounds are
+    ///     inclusive whole days.
+    ///   - today: The boundary before which a plan is excluded (it's already past and unperformed,
+    ///     so it reads as missed rather than as a bar this keeps showing indefinitely) — activities
+    ///     dated after `today` are likewise excluded, matching `periodStats`'s own replay semantics.
+    ///   - paceHistory: Earlier activities to forecast the plans' distance and duration from (see
+    ///     ``projection(for:athlete:paceHistory:before:excluding:)``); empty for the pace model alone.
+    public func periodStatsSplit(
+        activities: [Activity],
+        plans: [PlannedActivity],
+        workouts: [StructuredWorkout],
+        athlete: AthleteProfile,
+        range: ClosedRange<Date>,
+        asOf today: Date,
+        paceHistory: PaceHistory = .empty
+    ) -> PeriodStatsSplit {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = athlete.timeZone
+        let todayStart = calendar.startOfDay(for: today)
+        let rangeStart = calendar.startOfDay(for: range.lowerBound)
+        let rangeEnd = calendar.startOfDay(for: range.upperBound)
+        let workoutsByID = Dictionary(uniqueKeysWithValues: workouts.map { ($0.id, $0) })
+
+        let activitiesInRange = activities.filter { activity in
+            let day = calendar.startOfDay(for: activity.start)
+            return day >= rangeStart && day <= rangeEnd && day <= todayStart
+        }
+        let plansInRange = plans.filter { plan in
+            guard plan.completedActivityID == nil else { return false }
+            let day = calendar.startOfDay(for: plan.date)
+            return day >= rangeStart && day <= rangeEnd && day >= todayStart
+        }
+
+        var actualBySport: [Sport: [StatItem]] = [:]
+        for (sport, item) in activityItems(activitiesInRange, athlete: athlete) {
+            actualBySport[sport, default: []].append(item)
+        }
+        var plannedBySport: [Sport: [StatItem]] = [:]
+        for (sport, item) in plannedItems(plansInRange, workoutsByID: workoutsByID, athlete: athlete, paceHistory: paceHistory) {
+            plannedBySport[sport, default: []].append(item)
+        }
+
+        return PeriodStatsSplit(actual: bySport(actualBySport), planned: bySport(plannedBySport))
+    }
+
     // MARK: - Support
 
     /// One contributing activity or planned activity's totals, before grouping by sport.
@@ -263,6 +310,60 @@ public struct StatisticsCalculator: Sendable {
         let time: TimeInterval
         let load: Double
         let timeInZone: TimeInZone
+    }
+
+    /// `activities`, each turned into its own per-sport `StatItem` via `summary(for:athlete:)` —
+    /// shared by `periodStats` and `periodStatsSplit`.
+    private func activityItems(_ activities: [Activity], athlete: AthleteProfile) -> [(Sport, StatItem)] {
+        activities.map { activity in
+            let summary = summary(for: activity, athlete: athlete)
+            let item = StatItem(
+                distanceMeters: summary.distanceMeters,
+                time: summary.movingTime,
+                load: summary.load.value,
+                timeInZone: summary.timeInZone
+            )
+            return (activity.sport, item)
+        }
+    }
+
+    /// `plans`, each turned into its own per-sport `StatItem` via `project(workout:athlete:…)` /
+    /// `estimator` — shared by `periodStats` and `periodStatsSplit`. A plan whose workout is no
+    /// longer in `workoutsByID` (deleted from the library) is silently skipped, same as
+    /// `periodStats` always has.
+    private func plannedItems(
+        _ plans: [PlannedActivity], workoutsByID: [UUID: StructuredWorkout], athlete: AthleteProfile,
+        paceHistory: PaceHistory
+    ) -> [(Sport, StatItem)] {
+        plans.compactMap { plan in
+            guard let workout = workoutsByID[plan.workoutID] else { return nil }
+            let projection = project(workout: workout, athlete: athlete, paceHistory: paceHistory, before: plan.date, excluding: nil)
+            let load = plan.expectedLoadOverride ?? estimator.estimatedLoad(for: workout, athlete: athlete).value
+            let item = StatItem(
+                distanceMeters: projection.distanceMeters,
+                time: projection.duration,
+                load: load,
+                timeInZone: projection.timeInZone
+            )
+            return (workout.sport, item)
+        }
+    }
+
+    /// Sums each sport's own `StatItem`s into its `SportPeriodStats` — shared by `periodStats` and
+    /// `periodStatsSplit`.
+    private func bySport(_ itemsBySport: [Sport: [StatItem]]) -> [Sport: SportPeriodStats] {
+        var result: [Sport: SportPeriodStats] = [:]
+        for (sport, items) in itemsBySport {
+            result[sport] = SportPeriodStats(
+                sport: sport,
+                distanceMeters: items.reduce(0) { $0 + ($1.distanceMeters ?? 0) },
+                time: items.reduce(0) { $0 + $1.time },
+                load: items.reduce(0) { $0 + $1.load },
+                timeInZone: items.reduce(TimeInZone()) { $0 + $1.timeInZone },
+                activityCount: items.count
+            )
+        }
+        return result
     }
 
     /// An unweighted mean of every sample's bpm. This skews toward whichever effort level happens
@@ -298,10 +399,82 @@ public struct StatisticsCalculator: Sendable {
         TimeInZoneBuilder(gapThresholdSeconds: gapThresholdSeconds).timeInZone(for: activity, athlete: athlete)
     }
 
+    /// The distance and duration a planned `workout` is expected to produce at `athlete`'s pace
+    /// model alone — the same projection the weekly/period statistics use for a day that isn't done
+    /// yet when they're given no ``PaceHistory``, so a per-workout figure shown in an app agrees with
+    /// the totals it rolls into. With a history, use
+    /// ``projection(for:athlete:paceHistory:before:excluding:)``.
+    ///
+    /// `.time`/`.open` steps are converted to distance through `athlete`'s pace model at the step's
+    /// target zone (see ``PlannedWorkoutProjector``), so the distance of a duration-based workout is
+    /// an estimate, not something the workout itself defines.
+    ///
+    /// - Parameters:
+    ///   - workout: The planned workout.
+    ///   - athlete: Supplies the heart-rate zone settings and pace model the projection uses.
+    /// - Returns: The projected distance (`nil` when `athlete` has no current heart-rate zone
+    ///   settings to derive step intensities from) and duration.
+    public func projection(for workout: StructuredWorkout, athlete: AthleteProfile) -> WorkoutProjection {
+        projection(for: workout, athlete: athlete, paceHistory: .empty, before: .distantFuture)
+    }
+
+    /// The distance and duration a planned `workout` is expected to produce, forecast from the
+    /// athlete's earlier, similar workouts in `paceHistory` (MVP2-35, MVP2-111).
+    ///
+    /// Earlier workouts are matched on their time in each heart-rate zone, duration, recency and
+    /// whether they ran the same workout or template. Each step then takes the pace that kind of step
+    /// in that zone was run at, kept slower in lower zones than in higher ones, and an `.open` step
+    /// the time it took before; see ``PaceHistory``. Without a similar earlier workout this is
+    /// ``projection(for:athlete:)``.
+    ///
+    /// Pass the same `paceHistory` to ``periodStats(activities:plans:workouts:athlete:range:asOf:previous:paceHistory:)``
+    /// and ``periodStatsSplit(activities:plans:workouts:athlete:range:asOf:paceHistory:)``, with the
+    /// plan's date as `cutoff`, so a per-workout figure agrees with the totals it rolls into.
+    ///
+    /// - Parameters:
+    ///   - workout: The planned workout.
+    ///   - athlete: Supplies the heart-rate zone settings and the pace model the forecast starts from.
+    ///   - paceHistory: Earlier activities to learn paces from.
+    ///   - cutoff: Only activities that started before this are used, normally the plan's date, so
+    ///     a plan's own activity can't inform what it expected.
+    ///   - excludedActivityID: An activity to leave out, e.g. the one the plan is linked to.
+    /// - Returns: The forecast distance (`nil` when `athlete` has no current heart-rate zone
+    ///   settings) and duration, and how many earlier activities they came from.
+    public func projection(
+        for workout: StructuredWorkout, athlete: AthleteProfile, paceHistory: PaceHistory,
+        before cutoff: Date, excluding excludedActivityID: UUID? = nil
+    ) -> WorkoutProjection {
+        let projected = project(
+            workout: workout, athlete: athlete, paceHistory: paceHistory, before: cutoff, excluding: excludedActivityID
+        )
+        return WorkoutProjection(
+            distanceMeters: projected.distanceMeters, duration: projected.duration,
+            matchedActivityCount: projected.matchedActivityCount
+        )
+    }
+
+    /// The projected duration and distance of each step of a planned workout, with block
+    /// repetitions expanded.
+    /// With a non-empty `paceHistory`, forecast as in
+    /// ``projection(for:athlete:paceHistory:before:excluding:)``.
+    func stepProjections(
+        for workout: StructuredWorkout, athlete: AthleteProfile, paceHistory: PaceHistory = .empty,
+        before cutoff: Date = .distantFuture, excluding excludedActivityID: UUID? = nil
+    ) -> [PlannedWorkoutProjector.StepProjection] {
+        PlannedWorkoutProjector(durationEstimator: durationEstimator).stepProjections(
+            workout: workout, athlete: athlete, history: paceHistory, before: cutoff, excluding: excludedActivityID
+        )
+    }
+
     /// The projected distance/duration/time-in-zone for a planned workout, via
     /// ``PlannedWorkoutProjector``.
-    private func project(workout: StructuredWorkout, athlete: AthleteProfile) -> PlannedWorkoutProjector.Projection {
-        PlannedWorkoutProjector(durationEstimator: durationEstimator).project(workout: workout, athlete: athlete)
+    private func project(
+        workout: StructuredWorkout, athlete: AthleteProfile, paceHistory: PaceHistory = .empty,
+        before cutoff: Date = .distantFuture, excluding excludedActivityID: UUID? = nil
+    ) -> PlannedWorkoutProjector.Projection {
+        PlannedWorkoutProjector(durationEstimator: durationEstimator).project(
+            workout: workout, athlete: athlete, history: paceHistory, before: cutoff, excluding: excludedActivityID
+        )
     }
 
     private func weekStart(containing date: Date, calendar: Calendar) -> Date {

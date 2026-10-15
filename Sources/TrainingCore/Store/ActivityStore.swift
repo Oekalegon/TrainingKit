@@ -2,8 +2,29 @@ import Foundation
 
 /// Storage contract for completed activities.
 public protocol ActivityStore: Sendable {
-    /// All activities whose `start` falls within `range`.
+    /// All activities whose `start` falls within `range`, with any activity that has been joined
+    /// into another (see ``saveJoin(_:components:replacing:)``) hidden and the joined activity
+    /// shown in its place — so callers (fitness recompute, overlap checks, the UI) see one
+    /// activity for a joined session without having to know it was ever split.
+    ///
+    /// A joined activity is included when *any* of its components starts in `range`, even if its
+    /// own `start` (the earliest component's) falls before it, so a range boundary never shows one
+    /// piece on its own. Lookups by id/source (``activity(id:)``, ``activity(source:)``) still
+    /// find hidden components.
     func activities(in range: ClosedRange<Date>) async throws -> [Activity]
+
+    /// The same activities as ``activities(in:)`` (joins hiding their pieces the same way), as
+    /// ``ActivityListItem``s: no samples, so a list over years of history doesn't have to build
+    /// them. The order is unspecified.
+    ///
+    /// The default implementation summarizes ``activities(in:)``; a store that can skip the
+    /// samples when reading overrides it.
+    ///
+    /// - Parameter range: The closed range of start dates to read, with the same join semantics as
+    ///   ``activities(in:)``.
+    /// - Returns: One item per activity shown, in no particular order.
+    /// - Throws: If any stored activity can't be read; no partial result is returned.
+    func activityListItems(in range: ClosedRange<Date>) async throws -> [ActivityListItem]
 
     /// Inserts new activities or replaces existing ones matched by `id`.
     ///
@@ -25,6 +46,12 @@ public protocol ActivityStore: Sendable {
     /// The activity with this id, if any.
     func activity(id: UUID) async throws -> Activity?
 
+    /// The activities with these ids (hidden join pieces included, like ``activity(id:)``), keyed by
+    /// id; ids that aren't in the store are simply absent. One store round trip where a backing
+    /// store can do it — an import checks every upserted activity for an existing record, and doing
+    /// that one `await` at a time is needlessly slow on a full resync.
+    func activities(ids: [UUID]) async throws -> [UUID: Activity]
+
     /// Removes the activity from this source, if any — the delete half of an ``ActivityImporting``
     /// run that reports a source as removed at the origin.
     func deleteActivity(source: ActivitySource) async throws
@@ -32,6 +59,11 @@ public protocol ActivityStore: Sendable {
     /// Removes the activity with this id, if any — the resolution action for a specific
     /// ``ActivityOverlapChecker`` pair (MVP1-63), as distinct from ``deleteActivity(source:)``
     /// (which removes whatever's currently on a given source, regardless of id).
+    ///
+    /// Deleting a joined activity removes its components too (each tombstoned like any other
+    /// deleted activity) — "delete this activity" means the whole session — except any component
+    /// that another join still uses, which stays. Use
+    /// ``unjoinActivity(id:)`` to split it back into its pieces instead.
     func deleteActivity(id: UUID) async throws
 
     /// The subset of `sources` that were deleted via ``deleteActivity(id:)`` and haven't been
@@ -57,4 +89,55 @@ public protocol ActivityStore: Sendable {
     ///   anything keyed on their dates (e.g. a fitness-metrics cache).
     @discardableResult
     func deduplicateActivities() async throws -> [Activity]
+
+    /// Stores `merged` — one activity standing in for a session that was recorded in pieces — and
+    /// records that `components` are its pieces, in a single atomic step.
+    ///
+    /// The components stay in the store untouched (still keyed by their own `source`, so a
+    /// re-import keeps updating them in place and never resurrects them as separate activities),
+    /// but ``activities(in:)`` hides them from now on. ``unjoinActivity(id:)`` reverses this.
+    ///
+    /// Storing a join under an existing joined activity's own id (with `replacing` empty) rebuilds it
+    /// in place.
+    ///
+    /// - Throws: ``ActivityJoinError/componentAlreadyJoined(_:)`` if any of `components` already
+    ///   belongs to a different join that isn't in `replacedJoinIDs`; nothing is stored then.
+    ///
+    /// - Parameters:
+    ///   - merged: The combined activity to store.
+    ///   - components: The ids of the underlying, non-joined activities it was built from.
+    ///   - replacedJoinIDs: Ids of existing joined activities that `merged` supersedes (because
+    ///     one of them was itself joined further); each one's activity and link is removed. Their
+    ///     components must be included in `components`.
+    func saveJoin(_ merged: Activity, components: [UUID], replacing replacedJoinIDs: [UUID]) async throws
+
+    /// The joined activity that `componentID` is a piece of, if any — how an import finds the join a
+    /// changed or removed piece belongs to.
+    func joinedActivity(containing componentID: UUID) async throws -> Activity?
+
+    /// The component activities `id`'s joined activity was built from, earliest first, or an empty
+    /// array if `id` isn't a joined activity.
+    func components(ofJoinedActivity id: UUID) async throws -> [Activity]
+
+    /// Undoes a join: removes the joined activity `id` and its link, so its components show up
+    /// individually again. A no-op if `id` isn't a joined activity.
+    func unjoinActivity(id: UUID) async throws
+}
+
+extension ActivityStore {
+    /// Default ``activities(ids:)``: one ``activity(id:)`` lookup per id. Stores that can fetch
+    /// several records at once should override it.
+    public func activities(ids: [UUID]) async throws -> [UUID: Activity] {
+        var result: [UUID: Activity] = [:]
+        for id in ids {
+            if let activity = try await activity(id: id) { result[id] = activity }
+        }
+        return result
+    }
+}
+
+extension ActivityStore {
+    public func activityListItems(in range: ClosedRange<Date>) async throws -> [ActivityListItem] {
+        try await activities(in: range).map(ActivityListItem.init)
+    }
 }

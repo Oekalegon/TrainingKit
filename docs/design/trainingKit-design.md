@@ -72,19 +72,135 @@ struct AthleteProfile: Sendable, Codable {
     let id: UUID                                    // stable identity; see "Multiple athletes" below
     var name: String                                // human-readable label, e.g. for a roster picker
     var sex: BiologicalSex                          // .male, .female, .unspecified (uses male coefficients)
-    var paceModel: PaceModel                        // used to turn distance steps into time
+    var paceHistory: [PaceSettings]                 // dated pace models (MVP2-132); `paceModel` is the
+                                                       // latest, `paceModel(asOf:)` the one in effect then
+    var paceModel: PaceModel                        // computed: used to turn distance steps into time
     var timeZone: TimeZone                          // daily bucketing boundary
     var weekStartsOn: Weekday                       // weekly stats boundary, default .monday
     var mainSport: Sport                            // primary sport, e.g. for a weekly overview
                                                        // highlighting one sport's duration/distance/
                                                        // TRIMP change above the rest; default .running
+    var mainVenue: Venue?                           // where the athlete usually does mainSport; nil = none.
+                                                       // Preselects a plan's venue (only for mainSport)
     var heartRateZoneHistory: [HeartRateZoneSettings] // resting/max HR + zone method, dated so
                                                        // recomputing an old activity's load uses the
                                                        // settings effective on its date, not today's
+    var dateOfBirth: Date?                          // from HealthKit when known (MVP2-124); `age(asOf:)`
+                                                       // counts whole years in the athlete's time zone
+    var usesHealthKitRestingHeartRate: Bool         // MVP2-132: whether the host app merges HealthKit's
+                                                       // resting HR into the history (default true)
+    var avatarImageData: Data?                      // MVP2-132: the athlete's chosen picture, kept small
 }
 ```
 
+#### Editing the profile (MVP2-132)
+
+`AthleteProfile+Editing` has the changes the athlete makes by hand, as pure functions applied through
+`TrainingModel.updateAthlete(asOf:_:)`: `recordingHeartRateSettings(_:)` / `removingHeartRateSettings(on:)`
+and `recordingPaceModel(_:from:)` / `removingPaceSettings(on:)`. Each entry takes effect from the start
+of its day in the athlete's time zone, recording on a day that already has one replaces it, and the last
+entry can't be removed. `paceHistory` mirrors `heartRateZoneHistory`: a profile stored with one
+`paceModel` decodes it as an entry effective since the beginning of time, and the current pace model is
+also written under its old key. Planning uses the latest entry (`paceModel`), like
+`currentHeartRateZoneSettings`; `paceModel(asOf:)` gives the one in effect on a date. Changing the
+time zone or week start rebuilds the whole fitness-metrics cache (`TrainingModel.athlete`'s `didSet`).
+
 `HeartRateZoneModel` derives `deltaHRRatio(for bpm:)` from the profile and maps HR zones ↔ ratios so a workout step targeting "Zone 3" can be turned into a TRIMP intensity.
+
+#### Max heart rate from workouts (MVP2-56)
+
+Each `HeartRateZoneSettings` entry records where its max heart rate came from in
+`maxHeartRateSource`:
+- `.formula`: estimated from age (Tanaka); the default, and what older saved settings decode to;
+- `.workout(activityID:)`: reached in an ordinary workout;
+- `.fieldTest(activityID:)`: measured by the max HR field test (MVP2-154, below);
+- `.labTest(measuredOn:)`: measured in a laboratory and entered by the athlete; the date is kept in the source because a later settings entry (a resting-HR update) copies the source forward and would make an old test look new;
+- `.manual`: entered by the athlete (MVP2-132) without saying how it was found; an age formula never replaces it.
+
+The sources are ranked by reliability (`reliabilityRank(asOf:)`): formula 0 < manual 1 < workout 2 < field test 3 < lab test 4 (LTHR: manual 0 < field test 1 < lab test 2). A lab test ages: after 2 years for max HR (it falls by roughly a beat a year) and 90 days for LTHR (it follows fitness) it ranks one step below a field test (max HR: with a workout, still above a formula or a typed-in figure; LTHR: with a typed-in figure). Both windows are our own choices. `isReplaceable(by:asOf:)` says whether a value from another source, dated `asOf`, may take a source's place *without the athlete deciding*, which is the guard for automatic updates: a host app's HealthKit merge must check `current.isReplaceable(by: .formula, asOf: today)` before writing an age estimate. The ranking doesn't stop a confirmed update: a workout peak above the recorded max proves the record too low whatever its source, and `FieldTestResult.replacesMoreReliableSource` (judged on the test's date) tells the app when a test would replace a fresh lab test, so it can warn or default to keeping it.
+
+Max heart rate drives the Karvonen zones and the heart-rate-reserve ratio TRIMP is built on. An age
+estimate is commonly about 10 bpm off for an individual, and the ratio isn't clamped above 1, so a
+max set too low inflates every session's load and shifts every zone down.
+
+The update is athlete-confirmed:
+1. `PeakHeartRateDetector` finds the highest heart rate an activity *held*, guarding against
+   three kinds of false highs:
+   - **Short spikes** (strap static, poor contact): the peak is the highest value held for at
+     least 10 s. For each sample take the minimum over the 10 s window starting there, then the
+     largest of those minimums. A lone spike never raises a window's minimum.
+   - **Cadence lock** (an optical sensor reporting running cadence as heart rate): a jump faster
+     than 5 bpm/s, measured over at least 5 s on a 3-sample running median, followed later by an
+     equally fast drop. The stretch between the two is discarded. The median keeps a lock's sharp
+     edge but removes spikes and most noise; a real heart rises at about 1–3 bpm/s. A jump with
+     no matching drop is kept rather than discarding the rest of the workout on a misfire, so a
+     lock that lasts to the end of the recording can still reach the athlete.
+   - **Stuck readings**: windows holding more than 230 bpm are skipped, and the best plausible
+     window elsewhere still counts.
+
+   Gaps over 15 s split the samples into separate runs, and invalid samples are dropped. Across
+   500 seeds of simulated 3 bpm sensor noise on 1 km-style intervals, the detected peak stayed
+   within 6 bpm of the true effort.
+2. `TrainingModel.maxHeartRateSuggestion(among:)` returns the activity with the highest held peak
+   above the *current* max. `scanForMaxHeartRateSuggestion(in:excluding:)` does the same over the store (skipping declined activities), for
+   a one-time look back (about 12 months; max heart rate falls with age).
+3. After the athlete confirms, `applyMaxHeartRate(_:asOf:)` calls
+   `AthleteProfile.raisingMaxHeartRate(to:from:source:)`, saves the profile and recomputes, through
+   `TrainingModel.updateAthlete(asOf:_:)` (below).
+
+Raising is **raise-only** and **date-effective**:
+- A workout below the max says nothing about the true maximum, so this flow never lowers it. A
+  linked max-HR field test may (see Field tests below).
+- The new value applies from the activity's start. Earlier entries keep their max, so past load is
+  unchanged; that activity and everything after it are rescored. Later entries below the new value
+  are raised too, so a later resting-HR update can't bring the old max back.
+
+A host app that merges in fresh formula estimates (TrainingApp's HealthKit merge) must check
+`current.maxHeartRateSource.isReplaceable(by: .formula, asOf: today)` before writing one, so an age
+estimate never replaces a manual, workout, field-test or lab-test max (see the ranking above). Only a
+lab test ages today; a field test's LTHR drifts too and doesn't yet. `MaxHeartRateSuggestion.replacesMoreReliableSource`
+flags a workout peak that would replace a fresh lab-tested max, like the field test result's flag.
+
+#### Field tests (MVP2-154)
+
+A workout whose `purpose` is `.maxHRTest` or `.lthrTest` (MVP2-153) is a field test. When its activity
+is linked to the plan, `TrainingModel.fieldTestResult(forActivity:)` measures it (`FieldTestMeasurer`):
+- **Max HR test:** the highest heart rate *held* anywhere in the activity, by the same
+  `PeakHeartRateDetector` as above, rounded to a whole bpm.
+- **LTHR test (Friel):** the average heart rate over the last 20 minutes of the 30-minute effort; the
+  first 10 are left out because the heart rate is still rising. The effort is the workout's longest
+  timed step. Its window comes from the steps the Watch recorded (`ActivityStepAligner`); an
+  activity not started from the scheduled workout falls back to the plan's own timing when its length is
+  within 5% of the plan's total and the end of the window doesn't look like a cooldown (its last two minutes at least 90% of the window's average), and the result says so (`isEstimatedFromPlan`). Recorded steps that fit the plan but lack the effort mean the test wasn't done, so there is no fallback then. The tolerances (90% of the effort, 80% coverage, 5%) are our own choices, picked to refuse rather than mislead. The average is
+  weighted by time, not by sample, and an interval longer than 15 s or with a value above 230 bpm
+  counts as uncovered. A recorded effort under 90% of the planned length, or heart rate covering
+  under 80% of the 20 minutes, is refused with a `FieldTestError` rather than guessed. A result at
+  or below resting heart rate is refused too.
+
+Like the max HR suggestion, the result is offered and applied only when the athlete confirms
+(`applyFieldTestResult(_:asOf:)`, through `updateAthlete`; a no-op if the activity has since been deleted or unlinked from a test of that kind). Unlike it, a test result may **lower** the
+max, because a test is a deliberate attempt at the maximum; an ordinary workout still only raises it.
+It is date-effective from the test activity's start
+(`AthleteProfile.settingMaxHeartRate(to:from:source:)`,
+`settingLactateThresholdHeartRate(to:from:source:)`). The settings in effect on that date are the
+baseline; later entries that still carry the baseline's value and source (a resting-HR update copies
+them) follow, and a later entry with a different value or source is a later measurement and is kept.
+`HeartRateZoneSettings.lactateThresholdSource` (`.manual`, the default and what older data decodes
+to, `.fieldTest(activityID:)` or `.labTest(measuredOn:)`) records how the LTHR was obtained.
+
+An activity can show up in both flows: its peak may beat the max, so `maxHeartRateSuggestion` would also
+offer it as a raise. A host app should ask `fieldTestResult` first and not offer the raise for an
+activity that is a test.
+
+#### Updating the athlete (MVP2-101)
+
+Every change to `TrainingModel.athlete` goes through `updateAthlete(asOf:_:)`. It takes a
+`(AthleteProfile) -> AthleteProfile` transform and runs it in the same queue as imports, then saves,
+assigns and recomputes. Reading `athlete`, saving and assigning separately leaves a gap across the
+save's `await`: two updates started together both start from the same old profile, so the model
+keeps whichever assigns last and the store keeps whichever saves last. A max-HR update and a
+HealthKit resting-HR refresh racing like this used to lose the raised max. With the queue, each
+transform sees the profile the update before it left, so both changes survive.
 
 #### Multiple athletes
 
@@ -107,11 +223,19 @@ struct Activity: Identifiable, Sendable, Codable {
     let id: UUID
     var source: ActivitySource        // .healthKit(uuid), .fitFile(url), .manual, .testing
     var sport: Sport
+    var venue: Venue?                 // where it happened, if known; see Venue below
+    var isSportEdited: Bool           // athlete chose sport/venue (TrainingModel.setSport); re-imports and
+                                       // join rebuilds then keep them. Call refreshPaceHistory afterwards.
+                                       // Unedited, a linked activity takes its plan's sport and venue
+                                       // (workout venue, else athlete default, else recorded), on auto-match,
+                                       // manual link, re-import and join rebuild; unlinking leaves them
     var start: Date
     var duration: TimeInterval
     var distanceMeters: Double?
     var heartRate: [HeartRateSample]  // may be empty
     var linkedPlanID: UUID?           // reconciliation with a PlannedActivity
+    var scheduledPlanID: UUID?        // the plan the Watch workout was started from (hint; MVP2-120)
+    var steps: [ActivityStep]         // the steps the Watch recorded for a plan-started workout (MVP2-146)
 }
 
 struct HeartRateSample: Sendable, Codable {
@@ -150,15 +274,44 @@ struct StructuredWorkout: Identifiable, Sendable, Codable {
     let id: UUID
     var name: String
     var sport: Sport
+    var venue: Venue?                 // mapped to CustomWorkout.location, so the Watch doesn't ask
+                                       // "Indoor or Outdoor?"; nil = unspecified (the Watch asks)
     var sessionType: SessionType?     // e.g. .long, .interval, .hillRepeats; nil = unclassified.
                                        // Used by PlanGenerator (§8.1) to match day preferences —
                                        // doesn't affect load calculation or WorkoutKit/FIT export.
     var blocks: [WorkoutBlock]
     var workoutKitID: UUID?           // identity of the synced WorkoutKit plan, nil if unsynced
+    var purpose: WorkoutPurpose       // .general, .maxHRTest or .lthrTest (MVP2-153); copied from the
+                                       // template on instantiate; old data decodes as .general. Doesn't
+                                       // affect load; marks a field test whose result is read from the
+                                       // activity linked to its plan (MVP2-154)
 }
 
+// The built-in field tests (MVP2-153): the max HR test (our own protocol, not a published one) is a warmup, three 3-minute RPE 9 efforts with
+// 1-minute recoveries and a 3-minute all-out effort (result: highest heart rate held); Friel's LTHR test
+// (TrainingPeaks, "Joe Friel's Quick Guide to Setting Zones") is a warmup and one 30-minute RPE 9 effort
+// (result: average heart rate over its last 20 minutes). A workout's purpose is fixed when it is instantiated. Both
+// target RPE, not heart-rate zones, since the zones are what they set; WorkoutKit can't send RPE alerts,
+// so the Watch just shows the steps' times.
+
+// Deliberately a small set of broad categories, used to match day preferences (§8.1).
+// Template specifics (fartlek, fast finish, the interval variants) belong to the
+// StructuredWorkout, not to a new case.
 enum SessionType: String, Sendable, Codable {
     case easy, long, interval, tempo, hillRepeats, recovery, race
+}
+
+// Sport says what is done; Venue says where, and is separate so every sport doesn't need an
+// indoor/outdoor/trail/track case (MVP2-151). Stats group by Sport alone, so all runs count as running.
+// A nil venue is compatible with any venue; two venues must agree on indoor vs outdoor (surfaces
+// don't count) for activities to be "the same kind" (joins, overlaps, plan matching, pace history).
+// WorkoutKit only carries indoor/outdoor (CustomWorkout.location), so the surface is dropped there.
+// A WorkoutTemplate.venue is a constraint: nil lets the plan choose, .outdoor(nil) allows only outdoor
+// surfaces, and a venue with a surface fixes it. Data written before Venue (Sport cases indoorRunning /
+// outdoorRunning) decodes as .running plus .indoor(nil) / .outdoor(nil).
+enum Venue: Sendable, Codable, Hashable {
+    case indoor(IndoorSurface?)       // .treadmill, .track
+    case outdoor(OutdoorSurface?)     // .track, .road, .trail, .offtrail
 }
 
 struct WorkoutBlock: Sendable, Codable {
@@ -190,6 +343,10 @@ struct PlannedActivity: Identifiable, Sendable, Codable {
 
 A plan is just workout + date; everything else is derived. Keeping it minimal is what lets MVP 2 generate plans as plain data.
 
+#### Default titles (MVP2-110)
+
+`WorkoutTemplate.defaultTitle(values:distanceSystem:)` names a planned workout from its parameters: "50min Easy Run", "23 km Long Run", "10x8sec Hill Sprints". It reads the instantiated workout's structure rather than a per-template rule, so a new template needs no changes: a block repeated more than once is an interval set ("reps x first work step"), otherwise the longest `.work` distance if there is one (warmup and cooldown are timed and can't be added to a distance), otherwise the total time of every timed step, warmup and cooldown included, so a 30-minute easy run between two 5-minute steps is "40min Easy Run". Open-ended steps add nothing (their length is unknown; an interval set is named by its repetitions and effort anyway). The name is `titleName` when set (a shorter name, e.g. "Hill Sprints"), otherwise `name` with each word capitalized. Durations are written "8sec", "90sec", "2min", "1h30min"; distances as "400 m" / "23 km", or "440 yd" / "13.1 mi" for `DistanceSystem.imperial`. A workout with no usable work goal (open-ended, or a non-positive or non-finite value) is titled with the name alone. The strings are English and not localized.
+
 ### 2.6 Expected load estimation
 
 ```swift
@@ -199,6 +356,8 @@ protocol PlannedLoadEstimator: Sendable {
 ```
 
 `TRIMPPlanEstimator` walks the steps: each step's duration comes from its goal (`.time` direct, `.distance` via `PaceModel` at the step's target intensity, `.open` via default), each step's intensity comes from `IntensityTarget` → `deltaHRRatio` (zone midpoint), and the same Banister formula is applied per step. Result is a `TrainingLoad` with `method: .estimatedFromPlan` and `confidence < 1`. MVP 4 replaces this with a calibrated estimator that scales by observed residuals; the protocol boundary is the seam.
+
+`LinkedActivityRefinedEstimator` wraps any estimator and refines it from completed plans: the estimate of a workout is the base estimate times the **recency-weighted median** of `actual TRIMP ÷ base estimate of the workout that was done`, over completed plans of the same library workout or the same template (`templateID`). Comparing estimates rather than raw TRIMP scales the figure to the template's parameters and to the zones its steps target; a run with the same parameters simply gives its actual TRIMP. A run's weight halves for every 60 days it is older than the newest matching run (relative to the newest, so nothing reads `.now`). A run whose duration is outside 0.75–1.33× the workout's estimated duration (a session cut short, a join) is skipped, and confidence rises with each reference (0.7 → 0.85 → 0.925, capped at 0.95). A plan's own activity is among the references, so its estimate is its own load; use `excludingReferences(onOrAfter:)` to estimate it as it was before, which anything computing expected-versus-actual residuals must do. `TrainingModel.refinedEstimator()` builds it from every completed plan in the stores and feeds the fitness series, calendar export (metrics and entries) and calendar import; an app's own `StatisticsCalculator` should be given the same estimator to show matching figures. A plan's `expectedLoadOverride` still wins. `TrainingModel` wraps its estimator with it for the load series and the calendar export, and exposes it as `TrainingModel.refinedEstimator()` (async; built once from the plan history and kept until the next `recompute` that follows a change, which every mutation goes through, so a host app's call right after an import shares the build `recompute` just made; an import that upserted or deleted nothing keeps it (an unchanged re-import still rebuilds), so a no-op pull-to-refresh doesn't rebuild it, while an import that fails part-way always drops it, and edits made to the stores behind the model's back (iCloud sync) are seen at the next change that does go through it; MVP2-161; `loadRefinedEstimator()` is the throwing variant that reports an unreadable store instead of returning the base estimator; MVP2-160. A build reads every plan and each completed activity and scores them: about 0.4 s for 400 one-hour runs on an in-memory SwiftData store in a debug build, growing linearly with the history) so a host app's own planned-load figures agree with them.
 
 ---
 
@@ -286,13 +445,24 @@ Logging: `os.Logger` with subsystem `com.<you>.trainingKit`, categories `Import`
 
 ## 4. Store protocols
 
-Core defines the storage contract; `TrainingPersistence` implements it with SwiftData (+ CloudKit so the Mac and Watch see what the phone imported).
+Core defines the storage contract; `TrainingPersistence` implements it with SwiftData in two stores (MVP2-131): plans, workouts, cycles, races, goals and the athlete's own preferences sync through CloudKit; activities (with their heart-rate samples), joins, tombstones, the fitness-metrics cache and the HealthKit-derived parts of the profile stay on the device, because Apple's guideline 5.1.3(ii) forbids storing health information in iCloud. Each device imports its own activities from HealthKit. See `docs/design/icloud-healthkit-compliance-architecture.md` for which model lives where and how an old single store is migrated.
+
+A `Goal` (MVP2-139) is a non-event target with no date and no calendar presence, separate from `Race`: its `GoalTarget` is a time over a distance ("sub-20 5k"), a volume per week, month or year for a sport or all sports ("run 1500 km this year"), or free text. `GoalStore.goals()` has no range because a goal has no date, and `TrainingModel.goals` loads with the rest. Nothing reads goals yet; a management UI and plans that use them are MVP 5. `SwiftDataStore.goals()` skips and logs a record it can't decode, so a target kind written by a newer version on another device doesn't fail the whole load.
+
+The athlete's own `WorkoutTemplate`s (MVP2-140) are stored the same way: `WorkoutTemplateStore` (`templates()`, `template(id:)`, `upsert(_:)`, `deleteTemplate(id:)`), an optional `StoreSet.templateStore`, a synced `WorkoutTemplateRecord`, and `TrainingModel.templates` with `add(_:)` and `deleteTemplate(id:)`. Only custom templates are stored; the built-in ones stay in `BuiltInWorkoutTemplates`. Deleting or editing a template never touches plans already made from it, since each plan instantiated its own `StructuredWorkout`. `SwiftDataStore.templates()` skips and logs a record it can't decode, as for goals. Deleting a template that a plan's workout was made from archives it instead (MVP2-142: `WorkoutTemplate.archivedDate`, `TrainingModel.deleteTemplate(id:asOf:)` returning `TemplateRemoval`), so those plans keep their template for editing parameters and for exports; every plan counts, past or upcoming, and a template no plan uses is removed. `TrainingModel.templates` includes archived templates, so a caller offering templates filters on `isArchived`.
 
 ```swift
 protocol ActivityStore: Sendable {
     func activities(in range: ClosedRange<Date>) async throws -> [Activity]
+    func activityListItems(in range: ClosedRange<Date>) async throws -> [ActivityListItem]   // MVP2-129
     func upsert(_ activities: [Activity]) async throws
     func activity(sourceID: String) async throws -> Activity?   // dedupe on re-import
+
+    // Joined activities (MVP1-80): one session accidentally recorded in pieces.
+    func saveJoin(_ merged: Activity, components: [UUID], replacing: [UUID]) async throws
+    func components(ofJoinedActivity id: UUID) async throws -> [Activity]
+    func joinedActivity(containing componentID: UUID) async throws -> Activity?
+    func unjoinActivity(id: UUID) async throws
 }
 
 protocol PlanStore: Sendable { ... }
@@ -302,6 +472,19 @@ protocol AthleteStore: Sendable { ... }
 ```
 
 An `InMemoryStore` implementing all five ships in Core for tests and previews.
+
+**Joined activities.** When the overlap checker recommends `.join` (same sport family, pieces within `joinGapTolerance` of each other), `TrainingModel.joinActivities` stores a combined `Activity` plus a link to its pieces (`saveJoin`, atomic). Nothing is deleted:
+
+- The pieces keep their own `source`, so a re-import updates them in place and never resurrects them as separate activities.
+- `activities(in:)` **hides the pieces and returns the join** (a range that reaches only a later piece still returns the join), so the fitness recompute, overlap checks and the UI see one activity.
+- The link lives in its own table so a re-import rewriting a piece's record can't clear it.
+- `unjoinActivity` reverses a join. Deleting a join deletes its pieces (tombstoned) except any piece another join still uses.
+- A piece deleted at its origin dissolves the join; a re-import that changes a piece rebuilds the join in place, keeping its own plan link and perceived exertion.
+- A component can belong to one join at a time (`ActivityJoinError.componentAlreadyJoined`); joining a joined activity flattens into one join of N.
+
+**List items (MVP2-129).** `activityListItems(in:)` returns what `activities(in:)` shows, joins included, as `ActivityListItem`s (id, sport, start, duration, distance, linked plan) without the samples. The protocol default maps `activities(in:)`; `SwiftDataStore` overrides it to decode only those fields from each payload, so a list over years of history never builds heart-rate or speed samples. The order is unspecified.
+
+The join operations are part of `ActivityStore` (rather than a separate protocol) because the hiding has to happen inside `activities(in:)`; this costs every conformer three extra methods. Revisit if a second conformer family appears.
 
 ---
 
@@ -319,9 +502,11 @@ protocol ActivityImporting: Sendable {
 - `HKAnchoredObjectQuery` on `HKWorkoutType` → new/updated/deleted workouts since the last anchor. Anchor persisted via `AthleteStore`.
 - For each workout, a scoped `HKSampleQuery` on `heartRate` bounded to the workout's `startDate...endDate`, sorted, mapped to `[HeartRateSample]`.
 - `Activity.source = .healthKit(workout.uuid)`; the UUID is the dedupe key.
-- `HealthKitAthleteReader` supplies resting HR (median `restingHeartRate` sample over the trailing 1–2 weeks, via `RestingHeartRateSmoother`, to absorb day-to-day noise before it feeds zone settings) and `biologicalSex()` to pre-fill `AthleteProfile`. HRmax is never read from HealthKit; default to Tanaka (`208 − 0.7 × age`) from `dateOfBirth` and let the user override.
+- **Speed (MVP2-146):** a second scoped query reads the workout's running speed (cycling speed for a ride; none for sports that record neither), unpacking series like heart rate, and keeps it averaged over 5-second windows (`[SpeedSample].downsampled(everySeconds:)`) in `Activity.speed`: an hour is about 700 samples, not thousands, and a pause stays a gap. Speed is what the pace chart and `PaceHistory` (and with it the pace forecasts) read; before this the importer stored none, so `PaceHistory` was empty on a real device. An activity imported earlier has no speed until it is re-imported (Force Full Resync), and none until the athlete allows the speed types. A failed query is logged and the workout still imports, and a re-import that comes back with no speed (or no heart rate) keeps the stored one rather than replacing it with nothing. Each workout now makes about twice the HealthKit queries, so a full resync of a long history takes longer; not yet measured.
+- **Steps (MVP2-146):** a workout started from a scheduled plan is saved with one `HKWorkoutActivity` per step (a repeat is one per repetition and step), each ending where the next begins. The importer turns every workout activity whose metadata has `WOIntervalStepKeyPath` into an `ActivityStep` (`Activity.steps`): the key path `block.repetition.step` (all from 0; block 0 is the warm-up, the plan's blocks follow, the cool-down is last), exact start and end, the active duration, and from the activity's own statistics its distance (`distance…` types) and average heart rate, plus `HKElevationAscended` and `WOIntervalStepSuccessful` from the metadata. Pace is duration over distance. The `HKWorkoutEvent` segments are not steps (they are kilometre and mile splits across the whole workout) and are ignored. Seen on a real long run and a hill-sprint workout; a plan with no warm-up has not been seen, so `ActivityStepAligner` accepts either numbering, and refuses to align when a partial recording fits both differently. The active duration is HealthKit's `HKWorkoutActivity.duration`; no step inspected so far contained a pause, so it has only been seen equal to `end - start`. To check what the Watch recorded for a workout, use the app's Developer ▸ Inspect Recent Workouts (it prints each step's key path, metadata and statistics). Two limits: distance is only readable once the athlete has allowed the distance types (`HealthKitAuthorization.readTypes`), and an activity imported before this field has no steps until it is re-imported (Force Full Resync).
+- `HealthKitAthleteReader` supplies resting HR (median `restingHeartRate` sample over the trailing 1–2 weeks, via `RestingHeartRateSmoother`, to absorb day-to-day noise before it feeds zone settings) and `biologicalSex()` to pre-fill `AthleteProfile`; the snapshot also carries `dateOfBirth`, which the app merges onto the profile for showing an age (MVP2-124). HRmax is never read from HealthKit; default to Tanaka (`208 − 0.7 × age`) from `dateOfBirth`, raised later from workouts that exceed it (§2.1, MVP2-56).
 
-Requested authorisations: read `workoutType`, `heartRate`, `restingHeartRate`, `dateOfBirth`, `biologicalSex`. No write scopes in MVP 1.
+Requested authorisations: read `workoutType`, `heartRate`, `restingHeartRate`, the distance types (`distanceWalkingRunning`, `distanceCycling`, `distanceSwimming`, `distanceRowing`) and the speed types (`runningSpeed`, `cyclingSpeed`; MVP2-146), `dateOfBirth`, `biologicalSex`. No write scopes in MVP 1.
 
 ### 5.2 `TrainingWorkoutKit`
 
@@ -330,18 +515,25 @@ struct WorkoutKitBridge {
     func customWorkout(from workout: StructuredWorkout) throws -> CustomWorkout
     func structuredWorkout(from plan: WorkoutPlan) throws -> StructuredWorkout
     func sync(_ workout: StructuredWorkout) async throws -> UUID       // returns WorkoutKit plan id
-    func schedule(_ plan: PlannedActivity, workout: StructuredWorkout) async throws
+    func workoutPlan(for plan: PlannedActivity, workout: StructuredWorkout) throws -> WorkoutPlan  // id == plan.id
+    func schedule(_ plan: PlannedActivity, workout: StructuredWorkout) async throws  // replaces the plan's entry
+    func unschedule(_ plan: PlannedActivity) async   // removes the plan's entry, whatever its date
+    func unscheduleAll(except planIDs: Set<UUID>) async -> Int   // clears entries no plan names
 }
 ```
 
 - Mapping is mechanical: `WorkoutBlock` ↔ `IntervalBlock`, `WorkoutStep` ↔ `IntervalStep`, `StepGoal` ↔ `WorkoutGoal`, `IntensityTarget` ↔ `WorkoutAlert`.
-- Sync is one-directional in MVP 1: library → WorkoutKit. `StructuredWorkout.workoutKitID` records the link so re-syncs update rather than duplicate.
+- Sync is one-directional: library → WorkoutKit. A scheduled entry's `WorkoutPlan` id is its `PlannedActivity`'s id (MVP2-55), so each entry belongs to exactly one plan: a workout planned on several days, or twice on one day, gets a distinct entry each time, and a completed entry (or an `HKWorkout` started from one) names the plan it fulfilled. `StructuredWorkout.workoutKitID` isn't used for scheduling; it only records the plan a workout was recovered from.
 - Scheduling a `PlannedActivity` uses `WorkoutPlan`'s schedule API; WorkoutKit only shows ±7 days on the Watch, so scheduling is done lazily for plans within that window rather than for the whole season.
+- `schedule` first removes any entry with the plan's id, whatever its date, so moving a plan or editing its workout needs only another `schedule` call. An entry on the plan's own day is left alone when it's identical or already completed, so repeating the call is a no-op and never resets the Watch's completion flag. A completed entry is kept even if the workout was edited since: the athlete already did the version it holds.
+- `unscheduleAll(except:)` removes entries whose id isn't a plan id: entries scheduled before MVP2-55 (random or library-workout ids, which nothing can match any more) and any a failed `unschedule` left behind. The caller passes the ids of every plan in the store, not just the loaded window.
+- Calls go through `WorkoutScheduling`, an internal struct of closures over `WorkoutScheduler.shared` (which crashes outside an app bundle), so tests run the scheduling logic against an in-memory fake.
+- Deleting a plan calls `unschedule`, which finds the entry among `WorkoutScheduler`'s own scheduled workouts by the plan's id and removes that, rather than rebuilding a `WorkoutPlan` — so a workout edited since scheduling still matches.
 - Completed scheduled workouts can be queried back from WorkoutKit (date + completed flag, no health data). That's a cheap first signal for reconciliation before the HealthKit import lands.
 
 ### 5.3 Reconciliation (`TrainingCore`)
 
-`PlanReconciler` links a completed `Activity` to a `PlannedActivity` on the same day with the same sport; closest duration wins if there are several. Sets `PlannedActivity.completedActivityID` and `Activity.linkedPlanID`. In MVP 1 this only affects the merge rule (today's actual beats today's estimate); in MVP 4 the `(expected, actual)` pairs it produces are the training data for calibration.
+`PlanReconciler` links a completed `Activity` to a `PlannedActivity` on the same day with the same sport. An activity that names the plan it was started from (`scheduledPlanID`, read by the HealthKit importer from `HKWorkout.workoutPlan`, whose id is the plan's own) is matched to that plan first, exactly and without an ambiguity flag, when the plan is unmatched and on the activity's day (MVP2-120); earliest activity first. A hint for a missing plan or another day falls through to the heuristic; one whose plan is on the day but already taken (the second piece of a paused workout) leaves its activity unlinked rather than guessing another plan. With several candidates the best fit wins, judged on what the plan explicitly sets (total duration if every step has a time goal, distance if every step has a distance goal); an estimated duration is only a fallback. Assignment is best-pair-first across all activities of a day, and a close runner-up is flagged (`PlanMatchAmbiguity`) rather than silently resolved. Only newly imported activities are auto-matched, so a manual unlink sticks; a manual link (`TrainingModel.linkActivity`) is also same-day only. Sets `PlannedActivity.completedActivityID` and `Activity.linkedPlanID`. In MVP 1 this only affects the merge rule (today's actual beats today's estimate); in MVP 4 the `(expected, actual)` pairs it produces are the training data for calibration.
 
 ---
 
@@ -355,7 +547,7 @@ Sources/
     Load/             TrainingLoad, LoadCalculator, ExponentialTRIMPCalculator,
                       DurationRPECalculator, TRIMPCoefficients, LoadError
     Workouts/         StructuredWorkout, WorkoutBlock, WorkoutStep, StepGoal, IntensityTarget
-    Planning/         PlannedActivity, PlannedLoadEstimator, TRIMPPlanEstimator, PlanReconciler
+    Planning/         PlannedActivity, PlannedLoadEstimator, TRIMPPlanEstimator, LinkedActivityRefinedEstimator, PlanReconciler
     Series/           DayLoad, DailyLoadSeries, FitnessMetrics, FitnessMetricsCalculator,
                       LoadModelParameters
     Evaluation/       PlanEvaluator, PlanEvaluation, PlanFinding, PlanGuardrails
@@ -363,8 +555,10 @@ Sources/
                       CycleStats, CycleFitness, StatisticsCalculator, HeartRateSegmentIterator
     Cycles/           TrainingCycle, CycleLevel, CyclePhase, MesocycleTemplate,
                       MacroTemplate, CycleLayoutBuilder
-    Store/            ActivityStore, PlanStore, WorkoutLibraryStore, CycleStore, AthleteStore,
-                      InMemoryStore
+    Goals/            Goal, GoalTarget, GoalMeasure, GoalPeriod
+    Store/            ActivityStore, PlanStore, WorkoutLibraryStore, CycleStore, RaceStore,
+                      GoalStore, WorkoutTemplateStore, WorkoutTemplateStoreError, TemplateRemoval,
+                      AthleteStore, FitnessMetricsCacheStore, InMemoryStore
     TrainingModel.swift
   TrainingHealthKit/  HealthKitActivityImporter, HealthKitAthleteReader, ImportAnchor
   TrainingWorkoutKit/ WorkoutKitBridge, WorkoutKitMapping+Goals, WorkoutKitMapping+Alerts
@@ -412,7 +606,8 @@ struct PlanPreferences: Sendable, Codable {
 
 struct DayPreference: Sendable, Codable {
     var sport: Sport?              // defaults to the athlete's primary sport if nil
-    var surface: RunSurface?       // .road, .trail, .track, .indoor; nil = no preference
+    var surface: RunSurface?       // .road, .trail, .track, .indoor; nil = no preference.
+                                    // Overlaps Venue (MVP2-151): derive it from Venue, or replace it, when built
     var sessionType: SessionType?  // e.g. .long on Sunday, .interval on Tuesday, .hillRepeats on Thursday;
                                     // nil = generator picks freely (typically .easy)
 }
@@ -570,6 +765,15 @@ struct StatisticsCalculator: Sendable {
 
 - Week boundary and first weekday come from `AthleteProfile` (add `weekStartsOn: Weekday`, default Monday), same timezone rule as daily bucketing so a Sunday-night run doesn't land in next week.
 - Future weeks are projected from planned activities: distance/time from the workout steps via `PaceModel`, time in zone from the step targets. `isProjected` marks them, and a partial current week mixes actual and planned exactly like the daily series.
+- **Pace forecasts (MVP2-35, MVP2-111).** Given a `PaceHistory`, the projection forecasts paces from the athlete's own earlier workouts instead of `PaceModel` alone (`StatisticsCalculator.projection(for:athlete:paceHistory:before:excluding:)`, and a `paceHistory:` argument on `periodStats`/`periodStatsSplit` so the totals agree with the per-workout figures):
+  - `PaceHistory` holds, per activity with speed and heart-rate streams, the time and distance run in each heart-rate zone (zones as of the activity's date). For an activity linked to a plan it also lays the workout's steps over the recording (time steps by time, distance steps by the integrated speed, open steps share the remaining time) and records each step's kind, target zone, time and distance. `TrainingModel.refreshPaceHistory(in:)` builds it from the store, not just the loaded window.
+  - `HistoricalPaceEstimator` matches earlier activities of the same sport family whose time-in-zone mix overlaps the plan's by at least half, weighted by overlap², duration similarity, recency (60-day half-life) and ×2/×3 for the same template/workout; the best 12 count. Only activities before the cutoff (the plan's date) are used, so a plan's own activity never informs what it expected.
+  - Pace per zone: the matches' distance over time in the zone, shrunk towards the `PaceModel` pace (scaled by how much faster or slower the matches ran overall) by 300 s of pretend evidence, then made non-decreasing in speed with the zone (pool adjacent violators), so zone 1 is never forecast faster than zone 4.
+  - Pace per step: earlier steps of the same kind and target zone, weighted by match weight and length similarity, shrunk towards the zone's pace — a zone-2 recovery jog between intervals is not forecast at steady zone-2 pace.
+  - An `.open` step takes the **recency-weighted median** time (the weights `LinkedActivityRefinedEstimator` uses for TRIMP: a run's weight halves for every 60 days it is older than the newest run) the same step (same block/step position) took in earlier runs of the same workout, else of workouts from the same template; a run of the same workout that lasted less than 75% of the workout's fixed steps (everything but its open steps, whose length is what's being learned; a session cut short) is skipped, and when none of the workout's runs is usable the template's are, else `WorkoutDurationEstimator.defaultOpenStepDuration`.
+  - Paces are moving paces at both levels: stretches slower than 0.5 m/s (stops) count towards neither. An open step's learned duration is elapsed time, stops included. Ages for the recency weight count from the newest usable activity, not the plan date, so a workout planned weeks ahead isn't forecast less confidently.
+  - With no match and no open-step evidence the projection is exactly the `PaceModel` one. Each step keeps its target zone; only the duration of distance and open steps changes, and with it their time in that zone. Load estimates (`TRIMPPlanEstimator`) still use `WorkoutDurationEstimator`.
+  - The calendar export uses the same forecast (`CalendarExportBuilder.paceHistory`).
 - `WeeklyDelta.distanceFraction` is the "10 % rule" number; `PlanEvaluator` (§8.2) can add a `maxWeeklyDistanceIncrease` guardrail on it — it's a cruder signal than CTL ramp but runners recognise it.
 - Rolling views (4-week averages, monthly, year-to-date) are derived from `[WeeklyStats]` in the app rather than being separate calculators.
 
@@ -581,6 +785,164 @@ struct StatisticsCalculator: Sendable {
 - Delta is `nil` on the first week and `fraction` is `nil`/`.inf`-guarded when the previous week is zero.
 
 ---
+
+### 9.4 Calendar export (MVP2-100)
+
+`TrainingModel.calendarExport(from:through:templates:asOf:)` returns a `CalendarExport`, a
+day-by-day view of any period, past or future, for use outside the app (a season plan in a
+spreadsheet, another analysis tool). `CalendarExport.jsonData()` writes it as pretty-printed JSON
+with sorted keys, ISO 8601 timestamps and `yyyy-MM-dd` day strings in the athlete's time zone.
+Missing values are written as `null` rather than left out, so every day and entry has the same keys.
+
+```json
+{
+  "schemaVersion": 1, "generatedAt": "…", "timeZone": "Europe/Amsterdam",
+  "firstDay": "2026-10-01", "lastDay": "2027-04-30",
+  "days": [
+    { "date": "2026-10-01",
+      "metrics": { "load": 85, "ctl": 52.1, "atl": 61.3, "tsb": -7.4, "monotony": 1.2, "strain": 410,
+                   "isProjected": false, "isWarmingUp": false },
+      "activities": [
+        { "status": "completed", "start": "…", "name": "Tempo 3 × 8 min", "sport": "running",
+          "template": "Tempo Run", "intensity": "medium", "trimp": 85, "trimpSource": "heartRate",
+          "durationSeconds": 3120, "distanceMeters": 9800,
+          "plan": { "name": "Tempo 3 × 8 min", "template": "Tempo Run", "trimp": 90,
+                    "trimpSource": "estimated", "durationSeconds": 3000, "distanceMeters": 9500 },
+          "steps": [
+            { "kind": "warmup", "block": 0, "repetition": 1, "goal": "time", "durationSeconds": 600,
+              "distanceMeters": 1700,
+              "target": { "type": "heartRateZone", "zone": 2, "rpe": null, "min": null, "max": null } } ] } ] } ]
+}
+```
+
+`tsb` is the previous day's CTL minus the previous day's ATL (the form the athlete starts the day
+with), so it isn't `ctl − atl` of the same row.
+
+What's included (`CalendarExportBuilder`, a pure function):
+- **Every calendar day** in the period, including empty ones.
+- **Completed activities**, with their measured or exertion-based TRIMP, elapsed duration (pauses
+  included, not moving time), distance and intensity. A recorded activity has no name of its own, so `name` is the name of the plan it
+  fulfilled, or `null`.
+- **A fulfilled plan** appears once, as `plan` on its activity (expected TRIMP, duration and
+  distance next to the actual ones), not as a second entry.
+- **Unfulfilled plans for today or later**, with expected TRIMP (the override, or the estimator),
+  projected duration and distance, and intended intensity. A time-based workout's distance is
+  forecast from `TrainingModel.paceHistory` (see "Pace forecasts" in §9), the same figure the app's
+  detail sheet shows; the week view's planned cards show only the measure the workout defines.
+  `trimpSource` says where each TRIMP came from: `heartRate`, `perceivedExertion`, `manual`,
+  `estimated` or `override`. **Missed plans** (before today, never
+  performed) are left out, as on the week view: they never became load. Only activities inside the
+  period can fulfil a plan: a run just after the period's end that fulfilled the last day's plan
+  doesn't, so that plan is left out as missed (or listed as planned, if it's today or later).
+- **A completed activity with no usable load** (no calculator could score it, or a heart-rate
+  recording that gave exactly zero, from too few samples or no zone settings in effect on that
+  date) has `trimp` and `trimpSource` `null`, not a zero labelled `heartRate`.
+- **Steps** (MVP2-102): every entry has a `steps` array, always present. A planned workout lists
+  its steps with block repetitions expanded (6 × 400 m is twelve work and recovery steps), each
+  with `kind` (`warmup`, `work`, `recovery`, `cooldown`), `block` (from 0), `repetition` (from 1),
+  `goal` (`time`, `distance`, `open`), `durationSeconds`, `distanceMeters` (the goal, or projected
+  from the pace model; `null` for a non-distance step when the athlete has no heart-rate zone
+  settings) and its `target`. A completed activity carries the steps of the plan it
+  fulfilled, i.e. what was intended; without a plan it's empty, as activities record no laps.
+- **"Workout type"** is three fields: `sport`, the `template` a planned workout was built from, and
+  the `intensity` category.
+- **Templates** (MVP2-141): a planned entry built from a template also carries `templateID` and
+  `parameterValues` (the values it was instantiated with, by parameter key; both `null` otherwise).
+  The file's top-level `templates` array holds the full definition of each **custom** template a
+  planned entry uses, once each, archived ones included (MVP2-142), sorted by name then id. Built-in
+  templates are named by id only, since every app has them. A definition is written in the file's own
+  vocabulary (`CalendarExport.Template`: parameters with `unit` `minutes`/`meters`/`count`, blocks with
+  `repetitions` or `repetitionsParameter`, steps with `kind`, `goal` and a fixed value or a
+  `…Parameter` key, and the same `target` as a step). Fields that don't apply are left out. A file
+  without `templates` still reads, as empty (the schema version stays 1: adding fields doesn't bump it).
+- **Metrics** per day: load, CTL, ATL, TSB, monotony, strain (`null` when undefined, e.g. a flat
+  week), and the projected and warming-up flags.
+
+The export reads the stores directly, so the model's loaded `activities`, `plans` and `metrics`
+are untouched. It computes metrics fresh, starting `6 × ctlTimeConstantDays` (about eight months)
+before the period. That's enough warm-up for CTL and ATL to match the app's cache-seeded series
+to well within rounding, without reading the athlete's whole history. The cost is that about eight
+months of activities, with their heart-rate samples, are read and scored on every export however
+short the period. Not using the cache is deliberate: the export is then an independent
+recomputation, which is how a cache seeding bug was found. The work runs off the main actor and
+stops if the calling task is cancelled.
+
+### 9.5 Calendar import (MVP2-103)
+
+`CalendarExport.decode(from:)` reads an export file back, and `TrainingModel.importCalendar(_:asOf:)`
+adds its planned workouts as plans. `calendarImportPreview(_:)` reports what an import would do
+without changing anything. The pure `CalendarImportPlanner` decides, so it is tested without stores.
+
+What is imported:
+- **Planned entries only.** Each becomes a `PlannedActivity` on its day, read in the athlete's own
+  time zone so the day lands where it does in the app. The workout is rebuilt from the template the
+  entry names (MVP2-141) when the library has it (built-in, or custom) or the file defines it:
+  instantiated with the entry's `parameterValues`, so it keeps its template link and can be
+  re-opened with the template's parameters. Otherwise (an older file, a template that is neither in
+  the library nor the file, an unreadable definition) it is rebuilt from the entry's `steps`: steps
+  of one `block` form a block, repeated as often as the block's highest `repetition`, with no
+  template link. A step kind or goal this version doesn't know rejects such an entry.
+- **Templates in the file** are added to the library (`TrainingModel.templates`, saved to the
+  template store) only when a plan that is added uses them. A template equal to one the library has
+  (same sport, parameters and blocks; the name, id and archived state don't count) isn't added: the
+  workouts link to the existing one, a live one in preference to an archived one. One whose id the
+  library holds with a different definition is added as a copy with a new id, so neither changes.
+  Two equal templates in one file become one. Without a template store nothing is added, and the
+  entries fall back to their steps.
+- **The file isn't trusted.** A template definition is rejected (counted, its workouts keep their
+  steps) when a fixed repeat count isn't in 1...100, a fixed time or distance isn't positive, two
+  parameters share a key, a default lies outside its range, or it refers to an undeclared parameter.
+  An entry's parameter value that isn't declared, isn't a number or is outside the parameter's range
+  is dropped, so the parameter keeps its default; a workout that is still absurd (a parameter with
+  no range driving a huge repeat count) is rebuilt from the entry's steps instead.
+- **Entries before today are skipped and counted.** Such a plan would only show as missed and never
+  counts as load; the export leaves missed plans out for the same reason.
+- **Completed entries become placeholder activities (MVP2-107).** The file has no heart-rate data,
+  so a placeholder has a start, a duration, a distance and the file's TRIMP as
+  `Activity.importedLoad`, which `ImportedLoadCalculator` scores (method `.manual`, confidence 1)
+  between the heart-rate and the duration/RPE estimators. `Activity.isCalendarImport` marks it (and
+  `ActivityListItem.isCalendarImport`), so the app can say the activity has no heart rate. Both fields
+  are optional in the stored JSON, so no migration is needed. A completed entry with no start or
+  no positive duration is rejected (`.invalidActivity`).
+  - **Source id.** The export carries a HealthKit workout's id as `sourceID` (additive, within schema
+    version 1). A placeholder with one is stored under `.healthKit(id)` with that id, so
+    HealthKit's own import finds it by source and replaces it in place. Without one (a file from
+    another tool) it is `.manual`, with a new id.
+  - **Not repeated.** An entry is skipped (`activitiesSkippedDuplicates`) when its source is stored,
+    or when a stored activity is the same workout by `PlaceholderActivityMatching`: the same sport
+    family, a start within five minutes and a duration within a fifth (at least two minutes).
+  - **HealthKit replaces them.** When an import brings a new activity that matches a placeholder this
+    way, the placeholder is removed (without a tombstone, so a workout HealthKit reports still
+    imports), its plan is released and the plan is matched again to the real workout.
+  - **The import anchor isn't touched.** The placeholders are applied through the same path as an
+    import (`applyImport`, queued with it) without saving an anchor, so HealthKit still fetches
+    everything it hasn't seen.
+- **Daily metrics are never imported.** The model recomputes CTL, ATL, TSB, monotony and strain from
+  the plans and activities.
+- **Expected TRIMP** becomes the plan's load override when the entry's `trimpSource` is `override`,
+  or when the TRIMP differs from the estimator's value for the rebuilt steps by more than 0.5, so a
+  load edited outside the app survives. An untouched estimate is left to be recomputed.
+
+Duplicates: a plan is skipped when the app already has one on the same day for an equal workout
+(name, sport and blocks, whatever template it was built from), so importing a file twice adds
+nothing, and an older file imported over template-linked plans adds nothing either. The same workout
+twice on one day is allowed: only the occurrences beyond those already stored are added. A new workout
+equal to one in the library isn't repeated; the plan refers to the existing one. The exception is a
+file entry with a template link: it reuses an equal workout only if that has the same template and
+values, so a plan isn't tied to a workout without the link it should have.
+
+An entry without `steps` (a file written before MVP2-102) is rejected, since no workout can be
+rebuilt. A file with a newer `schemaVersion` than the app understands, or one that isn't an export,
+is refused with a `CalendarImportError`. The result is a `CalendarImportReport`: added, skipped as
+duplicates, skipped as past, completed skipped, and rejected entries with a reason, plus the
+templates added, linked to an existing one, added as copies and rejected (unreadable, or no store).
+
+Templates are saved first, then the new workouts, then the plans that use them, so a failure partway
+leaves at worst unused library entries. Afterwards the model reloads its loaded range and reconciles the plans with the activities
+loaded. The file's days are loaded only when nothing was loaded yet: widening the range for a long
+file would load and recompute a whole season of activities, and the week view loads other weeks
+when they are shown. The plans aren't scheduled in WorkoutKit: that stays
+with the app's scheduler (MVP2-55).
 
 ## 10. Periodisation — macro, meso, micro cycles (Core, MVP 1)
 
@@ -629,7 +991,7 @@ struct CycleLayoutBuilder: Sendable {
 
 `CycleLayoutBuilder` works backwards from the race: race micro, taper micro(s), then fills toward the start with repeating meso templates, trimming the first meso if the total doesn't divide. Output is just `[TrainingCycle]`; the user can edit the result. Built-in templates: `3:1`, `2:1`, and `linear` (no recovery micro, for short blocks).
 
-In MVP 1 the builder is driven by the user ("lay out a 3:1 block from today to this race"); in MVP 2 the generator calls it and then fills the micros. A `MacroTemplate` is the ordered list of meso phases (`[.base, .base, .build, .build, .peak, .taper]`) with meso lengths; `Race` in MVP 1 is just `id`, `name`, `date`, `priority` — enough to anchor a layout and the race-day TSB rule.
+In MVP 1 the builder is driven by the user ("lay out a 3:1 block from today to this race"); in MVP 2 the generator calls it and then fills the micros. A `MacroTemplate` is the ordered list of meso phases (`[.base, .base, .build, .build, .peak, .taper]`) with meso lengths; `Race` in MVP 1 is just `id`, `name`, `date`, `priority` (`RacePriority`: `.primary`/`.secondary`/`.tertiary`, model-only until MVP 5) — enough to anchor a layout and the race-day TSB rule.
 
 ### 10.3 Statistics over cycles
 

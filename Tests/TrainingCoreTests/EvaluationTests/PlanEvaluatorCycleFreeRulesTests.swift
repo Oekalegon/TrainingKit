@@ -112,6 +112,64 @@ struct PlanEvaluatorCycleFreeRulesTests {
         #expect(!evaluation.findings.contains { $0.rule == .atlToCTLRatio })
     }
 
+    @Test("a below-minCTLForRatioCheck day is skipped even with a genuinely mild TSB, but fires once CTL clears the threshold")
+    func atlToCTLRatioSkipsBelowMinCTL() {
+        // Real-world numbers from an athlete returning from surgery: CTL=9, ATL=14 gives ratio
+        // 1.56 (over the 1.4 risk default) from a low baseline alone -- TSB=-5 is unremarkable.
+        let metrics = [
+            metric(0, ctl: 9, atl: 14, tsb: -5),
+            metric(1, ctl: 19.99, atl: 40, tsb: -5), // just under the default 20 minCTLForRatioCheck
+            metric(2, ctl: 20, atl: 40, tsb: -5), // ratio 2.0 -- at the threshold, check now applies
+        ]
+
+        let evaluation = evaluator.evaluate(metrics, races: [])
+
+        let findings = evaluation.findings.filter { $0.rule == .atlToCTLRatio }
+        #expect(!findings.contains { $0.day == day(0) })
+        #expect(!findings.contains { $0.day == day(1) })
+        #expect(findings.first { $0.day == day(2) }?.severity == .risk)
+    }
+
+    // MARK: - TSB band
+
+    @Test("TSB below the min fires risk; above the max fires warning, not risk")
+    func tsbBandBounds() {
+        let metrics = [
+            metric(0, tsb: -31), // below the default -30 min -> risk
+            metric(1, tsb: 26), // above the default 25 max -> warning
+            metric(2, tsb: 0), // within band
+        ]
+
+        let evaluation = evaluator.evaluate(metrics, races: [])
+
+        let findings = evaluation.findings.filter { $0.rule == .tsbBand }
+        #expect(findings.count == 2)
+        #expect(findings.first { $0.day == day(0) }?.severity == .risk)
+        #expect(findings.first { $0.day == day(1) }?.severity == .warning)
+        #expect(!findings.contains { $0.day == day(2) })
+    }
+
+    @Test("TSB exactly at the min or max threshold doesn't fire — comparisons are strict")
+    func tsbBandExactlyAtThresholdDoesNotFire() {
+        let metrics = [
+            metric(0, tsb: -30), // exactly the default min
+            metric(1, tsb: 25), // exactly the default max
+        ]
+
+        let evaluation = evaluator.evaluate(metrics, races: [])
+
+        #expect(!evaluation.findings.contains { $0.rule == .tsbBand })
+    }
+
+    @Test("a TSB band breach during warmup doesn't fire, even though the raw TSB exceeds the bounds")
+    func tsbBandSkipsWarmingUpDays() {
+        let metrics = [metric(0, tsb: -50, isWarmingUp: true)] // would be risk if not warming up
+
+        let evaluation = evaluator.evaluate(metrics, races: [])
+
+        #expect(!evaluation.findings.contains { $0.rule == .tsbBand })
+    }
+
     // MARK: - Duplicate days
 
     @Test("two metrics entries sharing a day don't crash evaluate")
@@ -188,9 +246,9 @@ struct PlanEvaluatorCycleFreeRulesTests {
             metric(2, tsb: 15), // within range
         ]
         let races = [
-            Race(name: "Undertapered", date: day(0), priority: .a),
-            Race(name: "Overtapered", date: day(1), priority: .a),
-            Race(name: "Just right", date: day(2), priority: .a),
+            Race(name: "Undertapered", date: day(0), priority: .primary),
+            Race(name: "Overtapered", date: day(1), priority: .primary),
+            Race(name: "Just right", date: day(2), priority: .primary),
         ]
 
         let evaluation = evaluator.evaluate(metrics, races: races)
@@ -208,8 +266,8 @@ struct PlanEvaluatorCycleFreeRulesTests {
             metric(1, tsb: 25), // exactly the default max
         ]
         let races = [
-            Race(name: "Exactly at min", date: day(0), priority: .a),
-            Race(name: "Exactly at max", date: day(1), priority: .a),
+            Race(name: "Exactly at min", date: day(0), priority: .primary),
+            Race(name: "Exactly at max", date: day(1), priority: .primary),
         ]
 
         let evaluation = evaluator.evaluate(metrics, races: races)
@@ -220,7 +278,7 @@ struct PlanEvaluatorCycleFreeRulesTests {
     @Test("a race date with no matching metrics day is skipped")
     func raceDayTSBSkipsUnmatchedDate() {
         let metrics = [metric(0, tsb: 15)]
-        let races = [Race(name: "Far future race", date: day(100), priority: .a)]
+        let races = [Race(name: "Far future race", date: day(100), priority: .primary)]
 
         let evaluation = evaluator.evaluate(metrics, races: races)
 

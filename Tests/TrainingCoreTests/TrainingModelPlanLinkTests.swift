@@ -1,0 +1,450 @@
+import Foundation
+import Testing
+@testable import TrainingCore
+
+@MainActor
+@Suite("TrainingModel plan linking", .serialized)
+struct TrainingModelPlanLinkTests {
+    private func day(_ offset: Int) -> Date {
+        Date(timeIntervalSince1970: 1_700_000_000 + Double(offset) * 86400)
+    }
+
+    private struct StubImporter: ActivityImporting {
+        let activities: [Activity]
+        func importActivities(since anchor: ImportAnchor?) async throws -> ImportResult {
+            ImportResult(upserted: activities, deletedSources: [], anchor: nil)
+        }
+    }
+
+    private func makeModel() -> (InMemoryStore, TrainingModel) {
+        let store = InMemoryStore()
+        let stores = StoreSet(
+            activityStore: store, planStore: store, workoutStore: store,
+            cycleStore: store, raceStore: store, athleteStore: store
+        )
+        return (store, TrainingModel(stores: stores, athlete: AthleteProfile.fixture()))
+    }
+
+    private func workout(minutes: Double) -> StructuredWorkout {
+        StructuredWorkout(name: "W", sport: .running, blocks: [WorkoutBlock(steps: [WorkoutStep(kind: .work, goal: .time(minutes * 60))])])
+    }
+
+    @Test("a completed plan refines the estimate of a later workout from the same template")
+    func refinedEstimatorUsesCompletedPlans() async throws {
+        let (store, model) = makeModel()
+        let templateID = UUID()
+        func made(minutes: Double) -> StructuredWorkout {
+            StructuredWorkout(
+                name: "W", sport: .running,
+                blocks: [WorkoutBlock(steps: [WorkoutStep(kind: .work, goal: .time(minutes * 60), target: .heartRateZone(2))])],
+                templateID: templateID
+            )
+        }
+        let done = made(minutes: 30)
+        let later = made(minutes: 60)
+        try await model.add(done, asOf: day(0))
+        try await model.add(later, asOf: day(0))
+        let plan = PlannedActivity(workoutID: done.id, date: day(0))
+        try await model.add(plan, asOf: day(0))
+        try await model.load(in: day(0)...day(1), asOf: day(0))
+        let before = await model.refinedEstimator().estimatedLoad(for: later, athlete: model.athlete)
+
+        let activity = Activity(source: .healthKit(UUID()), sport: .running, start: day(0), duration: 1800, importedLoad: 50)
+        try await model.importActivities(from: StubImporter(activities: [activity]), asOf: day(0))
+        #expect(try await store.plan(id: plan.id)?.completedActivityID == activity.id)
+
+        let refined = await model.refinedEstimator().estimatedLoad(for: later, athlete: model.athlete)
+        let base = TRIMPPlanEstimator()
+        let expected = 50 * base.estimatedLoad(for: later, athlete: model.athlete).value
+            / base.estimatedLoad(for: done, athlete: model.athlete).value
+        #expect(before == base.estimatedLoad(for: later, athlete: model.athlete))
+        #expect(abs(refined.value - expected) < 1e-9)
+    }
+
+    @Test("import links a newly imported activity to its plan")
+    func importLinks() async throws {
+        let (store, model) = makeModel()
+        let w = workout(minutes: 30)
+        try await model.add(w, asOf: day(0))
+        let plan = PlannedActivity(workoutID: w.id, date: day(0))
+        try await model.add(plan, asOf: day(0))
+        try await model.load(in: day(0)...day(1), asOf: day(0))
+
+        let activity = Activity(source: .healthKit(UUID()), sport: .running, start: day(0), duration: 1800)
+        try await model.importActivities(from: StubImporter(activities: [activity]), asOf: day(0))
+
+        #expect(model.activities.first?.linkedPlanID == plan.id)
+        #expect(try await store.plan(id: plan.id)?.completedActivityID == activity.id)
+        // Not just the store: `plans` must reflect the auto-match too, or a UI reading straight off
+        // the model (like the week view) keeps showing the plan as unmatched until the next full load.
+        #expect(model.plans.first?.completedActivityID == activity.id)
+    }
+
+    @Test("import links an activity to the plan it was started from, not the closest one by duration (MVP2-120)")
+    func importLinksByScheduledPlanID() async throws {
+        let (store, model) = makeModel()
+        let short = workout(minutes: 20)
+        let long = workout(minutes: 50)
+        try await model.add(short, asOf: day(0))
+        try await model.add(long, asOf: day(0))
+        let shortPlan = PlannedActivity(workoutID: short.id, date: day(0))
+        let longPlan = PlannedActivity(workoutID: long.id, date: day(0))
+        try await model.add(shortPlan, asOf: day(0))
+        try await model.add(longPlan, asOf: day(0))
+        try await model.load(in: day(0)...day(1), asOf: day(0))
+
+        // 45 minutes fits the long plan best, but the Watch says it was the short one.
+        let activity = Activity(
+            source: .healthKit(UUID()), sport: .running, start: day(0), duration: 45 * 60,
+            scheduledPlanID: shortPlan.id
+        )
+        try await model.importActivities(from: StubImporter(activities: [activity]), asOf: day(0))
+
+        #expect(model.activities.first?.linkedPlanID == shortPlan.id)
+        #expect(try await store.plan(id: shortPlan.id)?.completedActivityID == activity.id)
+        #expect(try await store.plan(id: longPlan.id)?.completedActivityID == nil)
+        #expect(model.planMatchAmbiguities.isEmpty)
+    }
+
+    @Test("a plan completed on another device is freed for the exact match, but not for a same-day guess (MVP2-134)")
+    func planHeldByUnknownActivity() async throws {
+        let (store, model) = makeModel()
+        let w = workout(minutes: 30)
+        try await model.add(w, asOf: day(0))
+        let started = PlannedActivity(workoutID: w.id, date: day(0), completedActivityID: UUID())
+        let other = PlannedActivity(workoutID: w.id, date: day(0), completedActivityID: UUID())
+        try await model.add(started, asOf: day(0))
+        try await model.add(other, asOf: day(0))
+        try await model.load(in: day(0)...day(1), asOf: day(0))
+
+        let activity = Activity(
+            source: .healthKit(UUID()), sport: .running, start: day(0), duration: 1800, scheduledPlanID: started.id
+        )
+        try await model.importActivities(from: StubImporter(activities: [activity]), asOf: day(0))
+
+        #expect(try await store.plan(id: started.id)?.completedActivityID == activity.id)
+        // No hint names it, so a guess can't take it from the activity that isn't imported here yet.
+        #expect(try await store.plan(id: other.id)?.completedActivityID == other.completedActivityID)
+    }
+
+    @Test("a plan held by an activity that is stored here is not freed by a hint (MVP2-134)")
+    func planHeldByKnownActivityKept() async throws {
+        let (store, model) = makeModel()
+        let w = workout(minutes: 30)
+        try await model.add(w, asOf: day(0))
+        let plan = PlannedActivity(workoutID: w.id, date: day(0))
+        try await model.add(plan, asOf: day(0))
+        let holder = Activity(source: .healthKit(UUID()), sport: .running, start: day(0), duration: 1800, linkedPlanID: plan.id)
+        try await store.upsert([holder])
+        var held = plan
+        held.completedActivityID = holder.id
+        try await store.upsert([held])
+        try await model.load(in: day(0)...day(1), asOf: day(0))
+
+        let second = Activity(
+            source: .healthKit(UUID()), sport: .running, start: day(0), duration: 1800, scheduledPlanID: plan.id
+        )
+        try await model.importActivities(from: StubImporter(activities: [second]), asOf: day(0))
+
+        #expect(try await store.plan(id: plan.id)?.completedActivityID == holder.id)
+    }
+
+    @Test("a freed plan that isn't re-linked keeps its holder in the store (MVP2-134)")
+    func freedPlanNotWrittenWithoutLink() async throws {
+        let (store, model) = makeModel()
+        let w = workout(minutes: 30)
+        try await model.add(w, asOf: day(0))
+        // The hint names the plan, but it's on another day, so the exact match can't link it.
+        let plan = PlannedActivity(workoutID: w.id, date: day(0), completedActivityID: UUID())
+        try await model.add(plan, asOf: day(0))
+        try await model.load(in: day(0)...day(1), asOf: day(0))
+
+        let activity = Activity(
+            source: .healthKit(UUID()), sport: .running, start: day(1), duration: 1800, scheduledPlanID: plan.id
+        )
+        try await model.importActivities(from: StubImporter(activities: [activity]), asOf: day(1))
+
+        #expect(try await store.plan(id: plan.id)?.completedActivityID == plan.completedActivityID)
+    }
+
+    @Test("two pieces started from one plan held elsewhere: the earlier takes it, the other stays unlinked (MVP2-134)")
+    func twoPiecesOfOneHintedPlan() async throws {
+        let (store, model) = makeModel()
+        let w = workout(minutes: 30)
+        try await model.add(w, asOf: day(0))
+        let plan = PlannedActivity(workoutID: w.id, date: day(0), completedActivityID: UUID())
+        try await model.add(plan, asOf: day(0))
+        try await model.load(in: day(0)...day(1), asOf: day(0))
+
+        let early = Activity(
+            source: .healthKit(UUID()), sport: .running, start: day(0), duration: 900, scheduledPlanID: plan.id
+        )
+        let late = Activity(
+            source: .healthKit(UUID()), sport: .running, start: day(0).addingTimeInterval(3600), duration: 900,
+            scheduledPlanID: plan.id
+        )
+        try await model.importActivities(from: StubImporter(activities: [late, early]), asOf: day(0))
+
+        #expect(try await store.plan(id: plan.id)?.completedActivityID == early.id)
+        #expect(try await store.activity(id: early.id)?.linkedPlanID == plan.id)
+        #expect(try await store.activity(id: late.id)?.linkedPlanID == nil)
+    }
+
+    @Test("repair leaves a plan held by another device's activity alone (MVP2-134)")
+    func repairKeepsPlanHeldElsewhere() async throws {
+        let (store, model) = makeModel()
+        let w = workout(minutes: 30)
+        try await model.add(w, asOf: day(0))
+        let elsewhere = UUID()
+        let plan = PlannedActivity(workoutID: w.id, date: day(0), completedActivityID: elsewhere)
+        try await model.add(plan, asOf: day(0))
+        // A legacy activity here also names the plan; the plan is held by an id this device lacks.
+        let legacy = Activity(source: .healthKit(UUID()), sport: .running, start: day(0), duration: 1800, linkedPlanID: plan.id)
+        try await store.upsert([legacy])
+        try await model.load(in: day(0)...day(1), asOf: day(0))
+
+        try await model.reconcilePlans(asOf: day(0))
+
+        #expect(try await store.plan(id: plan.id)?.completedActivityID == elsewhere)
+        #expect(try await store.activity(id: legacy.id)?.linkedPlanID == plan.id)
+    }
+
+    @Test("re-importing an activity keeps its scheduled plan id when this run couldn't read it (MVP2-120)")
+    func reimportKeepsScheduledPlanID() async throws {
+        let (store, model) = makeModel()
+        let planID = UUID()
+        let first = Activity(
+            source: .healthKit(UUID()), sport: .running, start: day(0), duration: 1800, scheduledPlanID: planID
+        )
+        try await model.importActivities(from: StubImporter(activities: [first]), asOf: day(0))
+
+        var again = first
+        again.scheduledPlanID = nil
+        try await model.importActivities(from: StubImporter(activities: [again]), asOf: day(0))
+
+        #expect(try await store.activity(id: first.id)?.scheduledPlanID == planID)
+    }
+
+    @Test("import matches a plan even before any load(in:) has populated the model")
+    func importLinksBeforeAnyLoad() async throws {
+        let (store, model) = makeModel()
+        let w = workout(minutes: 30)
+        // Inserted straight into the store, bypassing `model.add`, which would itself set
+        // `loadedRange` (to `plan.date...plan.date`) and mask the fallback-range path this test
+        // exists to exercise: `performImport`'s own `loadedRange ?? Self.union(...)` computation
+        // when the model has never been loaded.
+        try await store.upsert([w])
+        let plan = PlannedActivity(workoutID: w.id, date: day(0))
+        try await store.upsert([plan])
+        #expect(model.loadedRange == nil)
+
+        // The activity's own timestamp is offset from the plan's `date` (same calendar day, not the
+        // same instant) — with a `loadedRange` of `nil`, a fallback range collapsed to a zero-width
+        // `activity.start...activity.start` instant would miss `plan.date` entirely and leave
+        // `model.plans` without the freshly-matched plan.
+        let activity = Activity(source: .healthKit(UUID()), sport: .running, start: day(0).addingTimeInterval(1800), duration: 1800)
+        try await model.importActivities(from: StubImporter(activities: [activity]), asOf: day(0))
+
+        #expect(model.activities.first?.linkedPlanID == plan.id)
+        #expect(model.plans.first?.completedActivityID == activity.id)
+    }
+
+    @Test("a re-import keeps an existing link, and an unlinked activity isn't re-matched")
+    func reimportKeepsLinkState() async throws {
+        let (_, model) = makeModel()
+        let w = workout(minutes: 30)
+        try await model.add(w, asOf: day(0))
+        let plan = PlannedActivity(workoutID: w.id, date: day(0))
+        try await model.add(plan, asOf: day(0))
+        try await model.load(in: day(0)...day(1), asOf: day(0))
+        let activity = Activity(source: .healthKit(UUID()), sport: .running, start: day(0), duration: 1800)
+        let importer = StubImporter(activities: [activity])
+        try await model.importActivities(from: importer, asOf: day(0))
+
+        try await model.importActivities(from: importer, asOf: day(0))
+        #expect(model.activities.first?.linkedPlanID == plan.id)
+
+        try await model.unlinkActivity(id: activity.id, asOf: day(0))
+        try await model.importActivities(from: importer, asOf: day(0))
+        #expect(model.activities.first?.linkedPlanID == nil)
+        #expect(model.plans.first?.completedActivityID == nil)
+    }
+
+    @Test("manual link moves the plan from its previous activity and clears the ambiguity flag")
+    func manualLinkReplacesPrevious() async throws {
+        let (store, model) = makeModel()
+        let w1 = workout(minutes: 30), w2 = workout(minutes: 31)
+        try await model.add(w1, asOf: day(0))
+        try await model.add(w2, asOf: day(0))
+        let p1 = PlannedActivity(workoutID: w1.id, date: day(0))
+        let p2 = PlannedActivity(workoutID: w2.id, date: day(0))
+        try await model.add(p1, asOf: day(0))
+        try await model.add(p2, asOf: day(0))
+        try await model.load(in: day(0)...day(1), asOf: day(0))
+        let a = Activity(source: .healthKit(UUID()), sport: .running, start: day(0), duration: 30 * 60)
+        try await model.importActivities(from: StubImporter(activities: [a]), asOf: day(0))
+        #expect(model.planMatchAmbiguities.map(\.activityID) == [a.id])
+        let linkedPlanID = try #require(model.activities.first?.linkedPlanID)
+        let otherPlanID = linkedPlanID == p1.id ? p2.id : p1.id
+
+        try await model.linkActivity(id: a.id, toPlan: otherPlanID, asOf: day(0))
+
+        #expect(model.activities.first?.linkedPlanID == otherPlanID)
+        #expect(try await store.plan(id: otherPlanID)?.completedActivityID == a.id)
+        #expect(try await store.plan(id: linkedPlanID)?.completedActivityID == nil)
+        #expect(model.planMatchAmbiguities.isEmpty)
+    }
+
+    // MARK: Same-day rule
+
+    @Test("a manual link across days is refused and changes nothing")
+    func manualLinkCrossDayRefused() async throws {
+        let (store, model) = makeModel()
+        let w = workout(minutes: 30)
+        try await model.add(w, asOf: day(0))
+        let plan = PlannedActivity(workoutID: w.id, date: day(1))
+        try await model.add(plan, asOf: day(0))
+        let activity = Activity(source: .healthKit(UUID()), sport: .running, start: day(0), duration: 1800)
+        try await store.upsert([activity])
+        try await model.load(in: day(0)...day(2), asOf: day(0))
+
+        await #expect(throws: PlanLinkError.differentDay) {
+            try await model.linkActivity(id: activity.id, toPlan: plan.id, asOf: day(0))
+        }
+        #expect(try await store.activity(id: activity.id)?.linkedPlanID == nil)
+        #expect(try await store.plan(id: plan.id)?.completedActivityID == nil)
+    }
+
+    // MARK: Consistency with joins, deletes and failures
+
+    /// A model with one plan and two back-to-back pieces on the same day, the first linked to the plan.
+    private func linkedPair() async throws -> (InMemoryStore, TrainingModel, PlannedActivity, Activity, Activity) {
+        let (store, model) = makeModel()
+        let w = workout(minutes: 30)
+        try await model.add(w, asOf: day(0))
+        let plan = PlannedActivity(workoutID: w.id, date: day(0))
+        try await model.add(plan, asOf: day(0))
+        try await model.load(in: day(0)...day(1), asOf: day(0))
+        let a = Activity(source: .healthKit(UUID()), sport: .running, start: day(0), duration: 1500)
+        try await model.importActivities(from: StubImporter(activities: [a]), asOf: day(0))
+        let b = Activity(source: .healthKit(UUID()), sport: .running, start: day(0).addingTimeInterval(1520), duration: 300)
+        try await store.upsert([b])
+        try await model.load(in: day(0)...day(1), asOf: day(0))
+        #expect(try await store.activity(id: a.id)?.linkedPlanID == plan.id)
+        return (store, model, plan, a, b)
+    }
+
+    @Test("joining a linked piece hands the plan to the join, and unlinking the join frees it")
+    func joinHandsOverPlan() async throws {
+        let (store, model, plan, a, b) = try await linkedPair()
+
+        try await model.joinActivities(a.id, b.id, asOf: day(0))
+        let join = try #require(model.activities.first)
+        #expect(join.linkedPlanID == plan.id)
+        #expect(try await store.plan(id: plan.id)?.completedActivityID == join.id)
+
+        try await model.unlinkActivity(id: join.id, asOf: day(0))
+        #expect(try await store.plan(id: plan.id)?.completedActivityID == nil)
+    }
+
+    @Test("unjoining hands the plan back to a piece")
+    func unjoinHandsBackPlan() async throws {
+        let (store, model, plan, a, b) = try await linkedPair()
+        try await model.joinActivities(a.id, b.id, asOf: day(0))
+        let joinID = try #require(model.activities.first?.id)
+
+        try await model.unjoinActivity(id: joinID, asOf: day(0))
+
+        #expect(try await store.plan(id: plan.id)?.completedActivityID == a.id)
+        #expect(try await store.activity(id: a.id)?.linkedPlanID == plan.id)
+    }
+
+    @Test("deleting a linked activity frees its plan")
+    func deleteActivityFreesPlan() async throws {
+        let (store, model, plan, a, _) = try await linkedPair()
+
+        try await model.deleteActivity(id: a.id, asOf: day(0))
+
+        #expect(try await store.plan(id: plan.id)?.completedActivityID == nil)
+    }
+
+    @Test("deleting a plan frees its activity")
+    func deletePlanFreesActivity() async throws {
+        let (store, model, plan, a, _) = try await linkedPair()
+
+        try await model.deletePlan(id: plan.id, asOf: day(0))
+
+        #expect(try await store.activity(id: a.id)?.linkedPlanID == nil)
+        #expect(model.activities.first { $0.id == a.id }?.linkedPlanID == nil)
+    }
+
+    /// Plan store that can be made to fail its reads, to exercise import's best-effort matching.
+    private actor FlakyPlanStore: PlanStore {
+        let base: InMemoryStore
+        var failReads = false
+        init(base: InMemoryStore) { self.base = base }
+        func setFailReads(_ value: Bool) { failReads = value }
+        func plans(in range: ClosedRange<Date>) async throws -> [PlannedActivity] {
+            if failReads { throw PlanLinkError.differentDay }
+            return try await base.plans(in: range)
+        }
+        func upsert(_ plans: [PlannedActivity]) async throws { try await base.upsert(plans) }
+        func plan(id: UUID) async throws -> PlannedActivity? { try await base.plan(id: id) }
+        func deletePlan(id: UUID) async throws { try await base.deletePlan(id: id) }
+    }
+
+    @Test("a failure matching plans doesn't fail the import or leave the model stale")
+    func matchingFailureIsBestEffort() async throws {
+        let store = InMemoryStore()
+        let planStore = FlakyPlanStore(base: store)
+        let model = TrainingModel(
+            stores: StoreSet(activityStore: store, planStore: planStore, workoutStore: store, cycleStore: store, raceStore: store, athleteStore: store),
+            athlete: AthleteProfile.fixture()
+        )
+        try await model.load(in: day(0)...day(1), asOf: day(0))
+        await planStore.setFailReads(true)
+
+        let activity = Activity(source: .healthKit(UUID()), sport: .running, start: day(0), duration: 1800)
+        try await model.importActivities(from: StubImporter(activities: [activity]), asOf: day(0))
+
+        #expect(model.activities.map(\.id) == [activity.id])
+    }
+
+    @Test("reconcilePlans links an already-stored activity once its plan exists")
+    func reconcilePlansLinksExisting() async throws {
+        let (store, model) = makeModel()
+        let w = workout(minutes: 30)
+        try await model.add(w, asOf: day(0))
+        let activity = Activity(source: .healthKit(UUID()), sport: .running, start: day(0), duration: 1800)
+        try await store.upsert([activity])
+        try await model.load(in: day(0)...day(1), asOf: day(0))
+        let plan = PlannedActivity(workoutID: w.id, date: day(0))
+        try await model.add(plan, asOf: day(0))
+        #expect(model.activities.first?.linkedPlanID == nil)
+
+        try await model.reconcilePlans(asOf: day(0))
+
+        #expect(model.activities.first?.linkedPlanID == plan.id)
+        #expect(model.plans.first?.completedActivityID == activity.id)
+    }
+
+    @Test("reconcilePlans completes a half-made link and drops dangling ones")
+    func repairsHalfLinks() async throws {
+        let (store, model) = makeModel()
+        let w = workout(minutes: 30)
+        try await model.add(w, asOf: day(0))
+        let plan = PlannedActivity(workoutID: w.id, date: day(0))
+        try await model.add(plan, asOf: day(0))
+        // Half link: the activity names the plan, the plan doesn't name it back.
+        let halfLinked = Activity(source: .healthKit(UUID()), sport: .running, start: day(0), duration: 1800, linkedPlanID: plan.id)
+        // Dangling: names a plan that doesn't exist.
+        let dangling = Activity(source: .healthKit(UUID()), sport: .cycling, start: day(0), duration: 1800, linkedPlanID: UUID())
+        try await store.upsert([halfLinked, dangling])
+        try await model.load(in: day(0)...day(1), asOf: day(0))
+
+        try await model.reconcilePlans(asOf: day(0))
+
+        #expect(try await store.plan(id: plan.id)?.completedActivityID == halfLinked.id)
+        #expect(try await store.activity(id: dangling.id)?.linkedPlanID == nil)
+    }
+}

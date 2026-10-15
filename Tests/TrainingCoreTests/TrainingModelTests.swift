@@ -13,7 +13,7 @@ struct TrainingModelTests {
         let store = InMemoryStore()
         let stores = StoreSet(
             activityStore: store, planStore: store, workoutStore: store,
-            cycleStore: store, athleteStore: store
+            cycleStore: store, raceStore: store, athleteStore: store
         )
         return (store, stores)
     }
@@ -85,6 +85,99 @@ struct TrainingModelTests {
         #expect((planDayMetrics?.load ?? 0) > 0)
     }
 
+    @Test("deleteWorkoutIfUnreferenced removes a workout no plan uses, and keeps one a plan still references")
+    func deleteWorkoutIfUnreferenced() async throws {
+        let (store, stores) = makeStores()
+        let used = steadyWorkout()
+        let unused = steadyWorkout()
+        try await store.upsert([used, unused])
+        let model = TrainingModel(stores: stores, athlete: AthleteProfile.fixture())
+        // Loaded window deliberately excludes the plan's day, to prove the check isn't limited to it.
+        try await model.load(in: day(0)...day(2), asOf: day(0))
+        try await store.upsert([PlannedActivity(workoutID: used.id, date: day(50))])
+
+        #expect(try await model.deleteWorkoutIfUnreferenced(id: unused.id, asOf: day(0)))
+        #expect(!(try await model.deleteWorkoutIfUnreferenced(id: used.id, asOf: day(0))))
+
+        #expect(model.workouts.map(\.id) == [used.id])
+        #expect(try await store.workout(id: unused.id) == nil)
+    }
+
+    @Test("deletePlan(id:) removes the plan from the store and state, keeps its workout, and drops its projected load")
+    func deletePlanRemovesPlanKeepsWorkout() async throws {
+        let (store, stores) = makeStores()
+        let workout = steadyWorkout()
+        try await store.upsert([workout])
+        let model = TrainingModel(stores: stores, athlete: AthleteProfile.fixture())
+        try await model.load(in: day(0)...day(10), asOf: day(0))
+        let plan = PlannedActivity(workoutID: workout.id, date: day(5))
+        let other = PlannedActivity(workoutID: workout.id, date: day(6))
+        try await model.add(plan, asOf: day(0))
+        try await model.add(other, asOf: day(0))
+
+        try await model.deletePlan(id: plan.id, asOf: day(0))
+
+        #expect(model.plans.map(\.id) == [other.id])
+        #expect(try await store.plan(id: plan.id) == nil)
+        #expect(model.workouts.map(\.id) == [workout.id])
+        let deletedDayMetrics = model.metrics.first { Calendar(identifier: .gregorian).isDate($0.day, inSameDayAs: day(5)) }
+        #expect((deletedDayMetrics?.load ?? 0) == 0)
+    }
+
+    @Test("deletePlan(id:) for an unknown id changes nothing")
+    func deleteUnknownPlanIsNoOp() async throws {
+        let (store, stores) = makeStores()
+        let workout = steadyWorkout()
+        try await store.upsert([workout])
+        let model = TrainingModel(stores: stores, athlete: AthleteProfile.fixture())
+        try await model.load(in: day(0)...day(10), asOf: day(0))
+        let plan = PlannedActivity(workoutID: workout.id, date: day(5))
+        try await model.add(plan, asOf: day(0))
+
+        try await model.deletePlan(id: UUID(), asOf: day(0))
+
+        #expect(model.plans.map(\.id) == [plan.id])
+    }
+
+    @Test("add(_ workout:) persists a new workout to the library")
+    func addWorkoutPersistsNewWorkout() async throws {
+        let (store, stores) = makeStores()
+        let athlete = AthleteProfile.fixture()
+        let model = TrainingModel(stores: stores, athlete: athlete)
+        try await model.load(in: day(0)...day(10), asOf: day(0))
+        #expect(model.workouts.isEmpty)
+
+        let workout = steadyWorkout()
+        try await model.add(workout, asOf: day(0))
+
+        #expect(model.workouts.map(\.id) == [workout.id])
+        #expect(try await store.workout(id: workout.id) == workout)
+    }
+
+    @Test("add(_ workout:) recomputes metrics for days already scheduling it, not just future additions")
+    func addWorkoutRecomputesForAlreadyScheduledDays() async throws {
+        let (store, stores) = makeStores()
+        let athlete = AthleteProfile.fixture()
+        var workout = steadyWorkout()
+        try await store.upsert([workout])
+        let plan = PlannedActivity(workoutID: workout.id, date: day(5))
+        try await store.upsert([plan])
+
+        let model = TrainingModel(stores: stores, athlete: athlete)
+        try await model.load(in: day(0)...day(10), asOf: day(0))
+        let originalLoad = model.metrics.first { Calendar(identifier: .gregorian).isDate($0.day, inSameDayAs: day(5)) }?.load ?? 0
+        #expect(originalLoad > 0)
+
+        // Correct the already-scheduled workout's own duration -- upsert replaces by id, the same
+        // path a brand-new workout takes, so this must recompute rather than leave day(5)'s load
+        // reflecting the pre-edit workout.
+        workout.blocks = [WorkoutBlock(steps: [WorkoutStep(kind: .work, goal: .time(3600), target: .heartRateZone(2))])]
+        try await model.add(workout, asOf: day(0))
+
+        let updatedLoad = model.metrics.first { Calendar(identifier: .gregorian).isDate($0.day, inSameDayAs: day(5)) }?.load ?? 0
+        #expect(updatedLoad > originalLoad)
+    }
+
     @Test("add(_ cycles:) persists to the store and updates local state")
     func addCyclesPersistsAndUpdates() async throws {
         let (store, stores) = makeStores()
@@ -98,6 +191,164 @@ struct TrainingModelTests {
 
         #expect(model.cycles.map(\.id) == [meso.id])
         #expect(try await store.cycle(id: meso.id) == meso)
+    }
+
+    @Test("add(_ race:) persists to the store and updates local state")
+    func addRacePersistsAndUpdates() async throws {
+        let (store, stores) = makeStores()
+        let athlete = AthleteProfile.fixture()
+        let model = TrainingModel(stores: stores, athlete: athlete)
+        try await model.load(in: day(0)...day(13), asOf: day(0))
+        #expect(model.races.isEmpty)
+
+        let race = Race(name: "Local 10K", date: day(5), priority: .secondary)
+        try await model.add(race, asOf: day(0))
+
+        #expect(model.races.map(\.id) == [race.id])
+        #expect(try await store.race(id: race.id) == race)
+    }
+
+    @Test("goals load without a date range, and add(_ goal:) and deleteGoal(id:) keep them in step with the store")
+    func goalsLoadAddAndDelete() async throws {
+        let store = InMemoryStore()
+        let stores = StoreSet(
+            activityStore: store, planStore: store, workoutStore: store,
+            cycleStore: store, raceStore: store, athleteStore: store, goalStore: store
+        )
+        let existing = Goal(name: "Sub-20 5k", target: .time(sport: .running, distanceMeters: 5000, seconds: 1200))
+        try await store.upsert([existing])
+        let model = TrainingModel(stores: stores, athlete: AthleteProfile.fixture())
+
+        try await model.load(in: day(0)...day(13), asOf: day(0))
+        #expect(model.goals == [existing])
+
+        let added = Goal(name: "Enjoy running again", target: .freeText)
+        try await model.add(added)
+        #expect(Set(model.goals.map(\.id)) == [existing.id, added.id])
+        #expect(try await store.goal(id: added.id) == added)
+
+        try await model.deleteGoal(id: existing.id)
+        #expect(model.goals.map(\.id) == [added.id])
+        #expect(try await store.goal(id: existing.id) == nil)
+    }
+
+    @Test("without a GoalStore, goals stay empty and changing them throws notConfigured")
+    func goalsWithoutStore() async throws {
+        let (_, stores) = makeStores()
+        let model = TrainingModel(stores: stores, athlete: AthleteProfile.fixture())
+        try await model.load(in: day(0)...day(13), asOf: day(0))
+
+        #expect(model.goals.isEmpty)
+        await #expect(throws: GoalStoreError.notConfigured) {
+            try await model.add(Goal(name: "x", target: .freeText))
+        }
+        await #expect(throws: GoalStoreError.notConfigured) {
+            try await model.deleteGoal(id: UUID())
+        }
+    }
+
+    @Test("custom templates load, and add(_ template:) and deleteTemplate(id:) keep them in step with the store")
+    func templatesLoadAddAndDelete() async throws {
+        let store = InMemoryStore()
+        let stores = StoreSet(
+            activityStore: store, planStore: store, workoutStore: store,
+            cycleStore: store, raceStore: store, athleteStore: store, templateStore: store
+        )
+        let existing = WorkoutTemplate(name: "Recovery run", sport: .running, parameters: [], blocks: [])
+        try await store.upsert([existing])
+        let model = TrainingModel(stores: stores, athlete: AthleteProfile.fixture())
+
+        try await model.load(in: day(0)...day(13), asOf: day(0))
+        #expect(model.templates == [existing])
+
+        let added = WorkoutTemplate(name: "Hill repeats", sport: .running, parameters: [], blocks: [])
+        try await model.add(added)
+        #expect(Set(model.templates.map(\.id)) == [existing.id, added.id])
+        #expect(try await store.template(id: added.id) == added)
+
+        try await model.deleteTemplate(id: existing.id)
+        #expect(model.templates.map(\.id) == [added.id])
+        #expect(try await store.template(id: existing.id) == nil)
+    }
+
+    @Test("deleting a template that a plan uses archives it; an unused one is removed, and archiving is sticky (MVP2-142)")
+    func deleteTemplateArchivesWhenUsed() async throws {
+        let store = InMemoryStore()
+        let stores = StoreSet(
+            activityStore: store, planStore: store, workoutStore: store,
+            cycleStore: store, raceStore: store, athleteStore: store, templateStore: store
+        )
+        let used = WorkoutTemplate(name: "Used", sport: .running, parameters: [], blocks: [])
+        let unused = WorkoutTemplate(name: "Unused", sport: .running, parameters: [], blocks: [])
+        try await store.upsert([used, unused])
+        let workout = try used.instantiate()
+        try await store.upsert([workout])
+        // An upcoming plan counts as much as a past one.
+        try await store.upsert([PlannedActivity(workoutID: workout.id, date: day(200))])
+        let model = TrainingModel(stores: stores, athlete: AthleteProfile.fixture())
+        try await model.load(in: day(0)...day(13), asOf: day(0))
+
+        #expect(try await model.deleteTemplate(id: unused.id, asOf: day(0)) == .deleted)
+        #expect(try await store.template(id: unused.id) == nil)
+
+        #expect(try await model.deleteTemplate(id: used.id, asOf: day(1)) == .archived)
+        let archived = try #require(try await store.template(id: used.id))
+        #expect(archived.archivedDate == day(1))
+        #expect(archived.isArchived)
+        #expect(model.templates.map(\.id) == [used.id])
+
+        // Again: still archived, and the date doesn't move.
+        #expect(try await model.deleteTemplate(id: used.id, asOf: day(5)) == .archived)
+        #expect(try await store.template(id: used.id)?.archivedDate == day(1))
+
+        // An id that was never there is a no-op.
+        #expect(try await model.deleteTemplate(id: UUID()) == .deleted)
+    }
+
+    @Test("a template whose workouts no plan references is removed, not archived")
+    func deleteTemplateWithOrphanWorkout() async throws {
+        let store = InMemoryStore()
+        let stores = StoreSet(
+            activityStore: store, planStore: store, workoutStore: store,
+            cycleStore: store, raceStore: store, athleteStore: store, templateStore: store
+        )
+        let template = WorkoutTemplate(name: "T", sport: .running, parameters: [], blocks: [])
+        try await store.upsert([template])
+        try await store.upsert([try template.instantiate()])
+        let model = TrainingModel(stores: stores, athlete: AthleteProfile.fixture())
+
+        #expect(try await model.deleteTemplate(id: template.id) == .deleted)
+        #expect(model.templates.isEmpty)
+    }
+
+    @Test("without a WorkoutTemplateStore, templates stay empty and changing them throws notConfigured")
+    func templatesWithoutStore() async throws {
+        let (_, stores) = makeStores()
+        let model = TrainingModel(stores: stores, athlete: AthleteProfile.fixture())
+        try await model.load(in: day(0)...day(13), asOf: day(0))
+
+        #expect(model.templates.isEmpty)
+        await #expect(throws: WorkoutTemplateStoreError.notConfigured) {
+            try await model.add(WorkoutTemplate(name: "x", sport: .running, parameters: [], blocks: []))
+        }
+        await #expect(throws: WorkoutTemplateStoreError.notConfigured) {
+            try await model.deleteTemplate(id: UUID())
+        }
+    }
+
+    @Test("deleteRace(id:) removes it from the store and local state")
+    func deleteRaceRemovesFromStoreAndState() async throws {
+        let (store, stores) = makeStores()
+        let athlete = AthleteProfile.fixture()
+        let model = TrainingModel(stores: stores, athlete: athlete)
+        try await model.load(in: day(0)...day(13), asOf: day(0))
+        let race = Race(name: "Local 10K", date: day(5), priority: .secondary)
+        try await model.add(race, asOf: day(0))
+
+        try await model.deleteRace(id: race.id, asOf: day(0))
+
+        #expect(model.races.isEmpty)
+        #expect(try await store.race(id: race.id) == nil)
     }
 
     @Test("recompute(asOf:) is deterministic for a fixed today")
@@ -487,7 +738,7 @@ struct TrainingModelTests {
         let otherStores = InMemoryStore()
         let stores = StoreSet(
             activityStore: fakeActivityStore, planStore: otherStores, workoutStore: otherStores,
-            cycleStore: otherStores, athleteStore: otherStores
+            cycleStore: otherStores, raceStore: otherStores, athleteStore: otherStores
         )
 
         let model = TrainingModel(stores: stores, athlete: athlete)
@@ -574,7 +825,7 @@ struct TrainingModelTests {
         let otherStores = InMemoryStore()
         let stores = StoreSet(
             activityStore: gatedStore, planStore: otherStores, workoutStore: otherStores,
-            cycleStore: otherStores, athleteStore: otherStores
+            cycleStore: otherStores, raceStore: otherStores, athleteStore: otherStores
         )
         let model = TrainingModel(stores: stores, athlete: athlete)
 
@@ -631,6 +882,10 @@ private actor DeduplicatingActivityStore: ActivityStore {
     func deleteActivity(id: UUID) async throws {
         activitiesByID.removeValue(forKey: id)
     }
+    func saveJoin(_ merged: Activity, components: [UUID], replacing replacedJoinIDs: [UUID]) async throws {}
+    func components(ofJoinedActivity id: UUID) async throws -> [Activity] { [] }
+    func unjoinActivity(id: UUID) async throws {}
+    func joinedActivity(containing componentID: UUID) async throws -> Activity? { nil }
     func tombstonedSources(among sources: [ActivitySource]) async throws -> Set<ActivitySource> { [] }
     func deduplicateActivities() async throws -> [Activity] {
         for activity in toRemove { activitiesByID.removeValue(forKey: activity.id) }
@@ -656,6 +911,10 @@ private struct ThrowingActivityStore: ActivityStore {
     func activity(id: UUID) async throws -> Activity? { nil }
     func deleteActivity(source: ActivitySource) async throws {}
     func deleteActivity(id: UUID) async throws {}
+    func saveJoin(_ merged: Activity, components: [UUID], replacing replacedJoinIDs: [UUID]) async throws {}
+    func components(ofJoinedActivity id: UUID) async throws -> [Activity] { [] }
+    func unjoinActivity(id: UUID) async throws {}
+    func joinedActivity(containing componentID: UUID) async throws -> Activity? { nil }
     func tombstonedSources(among sources: [ActivitySource]) async throws -> Set<ActivitySource> { [] }
     func deduplicateActivities() async throws -> [Activity] { [] }
 }
@@ -672,7 +931,7 @@ private struct ThrowingAthleteStore: AthleteStore {
 
 /// An actor, not a plain class with `@unchecked Sendable`, so `receivedAnchor` is genuinely
 /// data-race-safe even if a future test calls `importActivities(since:)` concurrently.
-private actor FakeImporter: ActivityImporting {
+actor FakeImporter: ActivityImporting {
     private let result: ImportResult
     private(set) var receivedAnchor: ImportAnchor?
     private(set) var callCount = 0
@@ -742,6 +1001,10 @@ private actor GatedActivityStore: ActivityStore {
     func activity(id: UUID) async throws -> Activity? { nil }
     func deleteActivity(source: ActivitySource) async throws {}
     func deleteActivity(id: UUID) async throws {}
+    func saveJoin(_ merged: Activity, components: [UUID], replacing replacedJoinIDs: [UUID]) async throws {}
+    func components(ofJoinedActivity id: UUID) async throws -> [Activity] { [] }
+    func unjoinActivity(id: UUID) async throws {}
+    func joinedActivity(containing componentID: UUID) async throws -> Activity? { nil }
     func tombstonedSources(among sources: [ActivitySource]) async throws -> Set<ActivitySource> { [] }
 
     func deduplicateActivities() async throws -> [Activity] {

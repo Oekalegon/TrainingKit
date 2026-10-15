@@ -319,6 +319,345 @@ public enum BuiltInWorkoutTemplates {
         purpose: .lthrTest
     )
 
+    /// Fast Finish Run (MVP2-106): an easy run that finishes faster than it started.
+    ///
+    /// A fixed 5-minute Zone 1 warmup, `duration` (Zone 2), then `finish` (Zone 3). The finish is
+    /// about a third of the Zone 2 duration, so its default is `duration / 3` rounded to the minute
+    /// (10 minutes against 30). The two are separate parameters because a template value can't be
+    /// derived from another, so changing `duration` doesn't move `finish` — the athlete keeps the
+    /// ratio. The run ends on the Zone 3 effort, with no cooldown.
+    public static let fastFinishRun = WorkoutTemplate(
+        id: UUID(uuidString: "8F5D6E4E-6E0E-4B8B-9C1A-9E6F9F1C1A0A")!,
+        name: "Fast Finish Run",
+        sport: .running,
+        parameters: [
+            WorkoutTemplateParameter(
+                key: "duration", name: "Zone 2 duration", unit: .minutes, defaultValue: 30 * 60, range: 15 * 60...90 * 60
+            ),
+            WorkoutTemplateParameter(
+                key: "finish", name: "Zone 3 finish", unit: .minutes, defaultValue: 10 * 60, range: 5 * 60...30 * 60
+            ),
+        ],
+        blocks: [
+            TemplateBlock(steps: [
+                TemplateStep(kind: .warmup, goal: .time(.fixed(5 * 60)), target: .heartRateZone(1)),
+            ]),
+            TemplateBlock(steps: [
+                TemplateStep(kind: .work, goal: .time(.parameter("duration")), target: .heartRateZone(2)),
+            ]),
+            TemplateBlock(steps: [
+                TemplateStep(kind: .work, goal: .time(.parameter("finish")), target: .heartRateZone(3)),
+            ]),
+        ]
+    )
+
+    /// Cruise Interval Runs (MVP2-106): Zone 3 intervals of 5 to 15 minutes with short Zone 1 recoveries.
+    ///
+    /// A fixed 5-minute Zone 1 warmup and 5-minute Zone 2 ramp-in, then `reps` (3-6) times a Zone 3
+    /// effort of `work` seconds (5-15 minutes) and a fixed 3-minute Zone 1 recovery, then a fixed
+    /// 5-minute Zone 2 run and a 5-minute Zone 1 cooldown. The last repetition keeps its recovery.
+    /// As in ``tempoRun``, only the edge blocks are `.warmup`/`.cooldown`, matching what
+    /// `WorkoutKitBridge` sends to the Watch.
+    public static let cruiseIntervalRun = WorkoutTemplate(
+        id: UUID(uuidString: "8F5D6E4E-6E0E-4B8B-9C1A-9E6F9F1C1A0B")!,
+        name: "Cruise Interval Runs",
+        sport: .running,
+        parameters: [
+            WorkoutTemplateParameter(key: "reps", name: "Repetitions", unit: .count, defaultValue: 4, range: 3...6),
+            WorkoutTemplateParameter(
+                key: "work", name: "Effort", unit: .minutes, defaultValue: 10 * 60, range: 5 * 60...15 * 60
+            ),
+        ],
+        blocks: [
+            TemplateBlock(steps: [
+                TemplateStep(kind: .warmup, goal: .time(.fixed(5 * 60)), target: .heartRateZone(1)),
+            ]),
+            TemplateBlock(steps: [
+                TemplateStep(kind: .work, goal: .time(.fixed(5 * 60)), target: .heartRateZone(2)),
+            ]),
+            TemplateBlock(
+                steps: [
+                    TemplateStep(kind: .work, goal: .time(.parameter("work")), target: .heartRateZone(3)),
+                    TemplateStep(kind: .recovery, goal: .time(.fixed(3 * 60)), target: .heartRateZone(1)),
+                ],
+                repetitions: .parameter("reps")
+            ),
+            TemplateBlock(steps: [
+                TemplateStep(kind: .work, goal: .time(.fixed(5 * 60)), target: .heartRateZone(2)),
+            ]),
+            TemplateBlock(steps: [
+                TemplateStep(kind: .cooldown, goal: .time(.fixed(5 * 60)), target: .heartRateZone(1)),
+            ]),
+        ]
+    )
+
+    /// Long run with speed play, a long fartlek (MVP2-106): a long run broken up by short Zone 3 surges.
+    ///
+    /// A fixed 5-minute Zone 1 warmup and 5-minute Zone 2 ramp-in, then `reps` (8-20) times 0.5 km
+    /// in Zone 3 and 1.5 km in Zone 2 (a distance-based recovery, so the run is 2 km per repetition),
+    /// then a fixed 5-minute Zone 1 cooldown. The last repetition keeps its Zone 2 leg.
+    public static let longFartlekRun = WorkoutTemplate(
+        id: UUID(uuidString: "8F5D6E4E-6E0E-4B8B-9C1A-9E6F9F1C1A0C")!,
+        name: "Long run with speed play (Long Fartlek)",
+        titleName: "Long Fartlek",
+        sport: .running,
+        parameters: [
+            WorkoutTemplateParameter(key: "reps", name: "Repetitions", unit: .count, defaultValue: 12, range: 8...20),
+        ],
+        blocks: [
+            TemplateBlock(steps: [
+                TemplateStep(kind: .warmup, goal: .time(.fixed(5 * 60)), target: .heartRateZone(1)),
+            ]),
+            TemplateBlock(steps: [
+                TemplateStep(kind: .work, goal: .time(.fixed(5 * 60)), target: .heartRateZone(2)),
+            ]),
+            TemplateBlock(
+                steps: [
+                    TemplateStep(kind: .work, goal: .distance(.fixed(500)), target: .heartRateZone(3)),
+                    TemplateStep(kind: .recovery, goal: .distance(.fixed(1_500)), target: .heartRateZone(2)),
+                ],
+                repetitions: .parameter("reps")
+            ),
+            TemplateBlock(steps: [
+                TemplateStep(kind: .cooldown, goal: .time(.fixed(5 * 60)), target: .heartRateZone(1)),
+            ]),
+        ]
+    )
+
+    /// Long run with fast finish (MVP2-106): a long Zone 2 run that ends with a Zone 3 stretch.
+    ///
+    /// A fixed 5-minute Zone 1 warmup, `distance` (Zone 2, 12-25 km), then `finish` (Zone 3, 1-4 km).
+    /// Like ``fastFinishRun`` it ends on the Zone 3 effort, with no cooldown.
+    public static let longRunFastFinish = WorkoutTemplate(
+        id: UUID(uuidString: "8F5D6E4E-6E0E-4B8B-9C1A-9E6F9F1C1A0D")!,
+        name: "Long run with fast finish",
+        sport: .running,
+        parameters: [
+            WorkoutTemplateParameter(
+                key: "distance", name: "Zone 2 distance", unit: .meters, defaultValue: 16_000, range: 12_000...25_000
+            ),
+            WorkoutTemplateParameter(
+                key: "finish", name: "Zone 3 finish", unit: .meters, defaultValue: 2_000, range: 1_000...4_000
+            ),
+        ],
+        blocks: [
+            TemplateBlock(steps: [
+                TemplateStep(kind: .warmup, goal: .time(.fixed(5 * 60)), target: .heartRateZone(1)),
+            ]),
+            TemplateBlock(steps: [
+                TemplateStep(kind: .work, goal: .distance(.parameter("distance")), target: .heartRateZone(2)),
+            ]),
+            TemplateBlock(steps: [
+                TemplateStep(kind: .work, goal: .distance(.parameter("finish")), target: .heartRateZone(3)),
+            ]),
+        ]
+    )
+
+    /// Fartlek, Zone 4 (MVP2-106): short Zone 4 efforts with 2-minute Zone 1 recoveries.
+    ///
+    /// A fixed 5-minute Zone 1 warmup and 5-minute Zone 2 ramp-in, then `reps` (3-12) times a Zone 4
+    /// effort of `work` seconds (1-5 minutes) and a fixed 2-minute Zone 1 recovery, then a fixed
+    /// 5-minute Zone 1 cooldown. The last repetition keeps its recovery. It is a separate template
+    /// from ``fartlekZone5`` because a template's zone is fixed, not a parameter. Not to be confused
+    /// with ``longFartlekRun``, the distance-based long run.
+    public static let fartlekZone4 = fartlek(
+        uuid: "8F5D6E4E-6E0E-4B8B-9C1A-9E6F9F1C1A0E", name: "Fartlek (Zone 4)", zone: 4
+    )
+
+    /// Fartlek, Zone 5 (MVP2-106): the same shape as ``fartlekZone4``, with Zone 5 efforts.
+    public static let fartlekZone5 = fartlek(
+        uuid: "8F5D6E4E-6E0E-4B8B-9C1A-9E6F9F1C1A0F", name: "Fartlek (Zone 5)", zone: 5
+    )
+
+    private static func fartlek(uuid: String, name: String, zone: Int) -> WorkoutTemplate {
+        WorkoutTemplate(
+            id: UUID(uuidString: uuid)!,
+            name: name,
+            titleName: "Fartlek",
+            sport: .running,
+            parameters: [
+                WorkoutTemplateParameter(key: "reps", name: "Repetitions", unit: .count, defaultValue: 6, range: 3...12),
+                WorkoutTemplateParameter(key: "work", name: "Effort", unit: .minutes, defaultValue: 2 * 60, range: 60...5 * 60),
+            ],
+            blocks: [
+                TemplateBlock(steps: [
+                    TemplateStep(kind: .warmup, goal: .time(.fixed(5 * 60)), target: .heartRateZone(1)),
+                ]),
+                TemplateBlock(steps: [
+                    TemplateStep(kind: .work, goal: .time(.fixed(5 * 60)), target: .heartRateZone(2)),
+                ]),
+                TemplateBlock(
+                    steps: [
+                        TemplateStep(kind: .work, goal: .time(.parameter("work")), target: .heartRateZone(zone)),
+                        TemplateStep(kind: .recovery, goal: .time(.fixed(2 * 60)), target: .heartRateZone(1)),
+                    ],
+                    repetitions: .parameter("reps")
+                ),
+                TemplateBlock(steps: [
+                    TemplateStep(kind: .cooldown, goal: .time(.fixed(5 * 60)), target: .heartRateZone(1)),
+                ]),
+            ]
+        )
+    }
+
+    /// Hill repetition runs (MVP2-106): `reps` (6-12) uphill efforts of `work` seconds (30-90) at
+    /// RPE 10, each followed by a Zone 1 recovery of `rest` seconds (90-150).
+    ///
+    /// A fixed 5-minute Zone 1 warmup, then a Zone 2 run to the hill ended by the athlete (an open
+    /// step, counted as 10 minutes in planned duration and load), the repetitions, then a fixed
+    /// 5-minute Zone 1 cooldown. Unlike ``baseHillSprints`` there is no second open run: the last
+    /// recovery is the descent, and the cooldown follows. The effort's RPE target stays in the app,
+    /// since WorkoutKit has no perceived-exertion alert.
+    public static let hillRepetitionRun = hillRepetitions(
+        uuid: "8F5D6E4E-6E0E-4B8B-9C1A-9E6F9F1C1A10", name: "Hill Repetition Runs", titleName: "Hill Repeats", effortRPE: 10
+    )
+
+    private static func hillRepetitions(uuid: String, name: String, titleName: String, effortRPE: Int) -> WorkoutTemplate {
+        WorkoutTemplate(
+            id: UUID(uuidString: uuid)!,
+            name: name,
+            titleName: titleName,
+            sport: .running,
+            venue: .outdoor(nil),
+            parameters: [
+                WorkoutTemplateParameter(key: "reps", name: "Repetitions", unit: .count, defaultValue: 8, range: 6...12),
+                WorkoutTemplateParameter(key: "work", name: "Uphill effort", unit: .minutes, defaultValue: 60, range: 30...90),
+                WorkoutTemplateParameter(key: "rest", name: "Recovery", unit: .minutes, defaultValue: 120, range: 90...150),
+            ],
+            blocks: [
+                TemplateBlock(steps: [
+                    TemplateStep(kind: .warmup, goal: .time(.fixed(5 * 60)), target: .heartRateZone(1)),
+                ]),
+                TemplateBlock(steps: [
+                    TemplateStep(kind: .work, goal: .open, target: .heartRateZone(2)),
+                ]),
+                TemplateBlock(
+                    steps: [
+                        TemplateStep(kind: .work, goal: .time(.parameter("work")), target: .rpe(effortRPE)),
+                        TemplateStep(kind: .recovery, goal: .time(.parameter("rest")), target: .heartRateZone(1)),
+                    ],
+                    repetitions: .parameter("reps")
+                ),
+                TemplateBlock(steps: [
+                    TemplateStep(kind: .cooldown, goal: .time(.fixed(5 * 60)), target: .heartRateZone(1)),
+                ]),
+            ]
+        )
+    }
+
+    /// Long interval runs (MVP2-106): Zone 4 efforts of 3 to 5 minutes with Zone 1 recoveries of 2 to 4 minutes.
+    ///
+    /// A fixed 5-minute Zone 1 warmup and 5-minute Zone 2 ramp-in, then `reps` (3-8) times a Zone 4
+    /// effort of `work` seconds (3-5 minutes) and a Zone 1 recovery of `rest` seconds (2-4 minutes),
+    /// then a fixed 5-minute Zone 1 cooldown. The last repetition keeps its recovery. Like
+    /// ``shortIntervalRun``, only the edge blocks are `.warmup`/`.cooldown`.
+    public static let longIntervalRun = WorkoutTemplate(
+        id: UUID(uuidString: "8F5D6E4E-6E0E-4B8B-9C1A-9E6F9F1C1A11")!,
+        name: "Long Interval Runs",
+        sport: .running,
+        parameters: [
+            WorkoutTemplateParameter(key: "reps", name: "Repetitions", unit: .count, defaultValue: 5, range: 3...8),
+            WorkoutTemplateParameter(
+                key: "work", name: "Effort", unit: .minutes, defaultValue: 4 * 60, range: 3 * 60...5 * 60
+            ),
+            WorkoutTemplateParameter(
+                key: "rest", name: "Recovery", unit: .minutes, defaultValue: 3 * 60, range: 2 * 60...4 * 60
+            ),
+        ],
+        blocks: [
+            TemplateBlock(steps: [
+                TemplateStep(kind: .warmup, goal: .time(.fixed(5 * 60)), target: .heartRateZone(1)),
+            ]),
+            TemplateBlock(steps: [
+                TemplateStep(kind: .work, goal: .time(.fixed(5 * 60)), target: .heartRateZone(2)),
+            ]),
+            TemplateBlock(
+                steps: [
+                    TemplateStep(kind: .work, goal: .time(.parameter("work")), target: .heartRateZone(4)),
+                    TemplateStep(kind: .recovery, goal: .time(.parameter("rest")), target: .heartRateZone(1)),
+                ],
+                repetitions: .parameter("reps")
+            ),
+            TemplateBlock(steps: [
+                TemplateStep(kind: .cooldown, goal: .time(.fixed(5 * 60)), target: .heartRateZone(1)),
+            ]),
+        ]
+    )
+
+    /// Mixed interval runs (MVP2-106): a ladder of Zone 5 and Zone 4 efforts around a 10-minute Zone 3 block.
+    ///
+    /// A fixed 5-minute Zone 1 warmup and 5-minute Zone 2 ramp-in, then, mirrored around the Zone 3
+    /// block:
+    /// 1. `reps` (1-3) times a Zone 5 effort of `hard` seconds (30-120) and a 3-minute Zone 1 recovery.
+    /// 2. `reps` times a Zone 4 effort of `moderate` seconds (90-360) and a 2-minute Zone 1 recovery.
+    /// 3. A fixed 10-minute Zone 3 run.
+    /// 4. The Zone 4 block again.
+    /// 5. The Zone 5 block again.
+    /// 6. A fixed 5-minute Zone 1 cooldown.
+    ///
+    /// The mirrored blocks share their `reps`, `hard` and `moderate` parameters, so the workout stays
+    /// symmetric. The last repetition of each block keeps its recovery.
+    public static let mixedIntervalRun = WorkoutTemplate(
+        id: UUID(uuidString: "8F5D6E4E-6E0E-4B8B-9C1A-9E6F9F1C1A12")!,
+        name: "Mixed Interval Runs",
+        sport: .running,
+        parameters: [
+            WorkoutTemplateParameter(key: "reps", name: "Repetitions", unit: .count, defaultValue: 2, range: 1...3),
+            WorkoutTemplateParameter(key: "hard", name: "Zone 5 effort", unit: .minutes, defaultValue: 60, range: 30...120),
+            WorkoutTemplateParameter(
+                key: "moderate", name: "Zone 4 effort", unit: .minutes, defaultValue: 3 * 60, range: 90...6 * 60
+            ),
+        ],
+        blocks: [
+            TemplateBlock(steps: [
+                TemplateStep(kind: .warmup, goal: .time(.fixed(5 * 60)), target: .heartRateZone(1)),
+            ]),
+            TemplateBlock(steps: [
+                TemplateStep(kind: .work, goal: .time(.fixed(5 * 60)), target: .heartRateZone(2)),
+            ]),
+            zone5Block,
+            zone4Block,
+            TemplateBlock(steps: [
+                TemplateStep(kind: .work, goal: .time(.fixed(10 * 60)), target: .heartRateZone(3)),
+            ]),
+            zone4Block,
+            zone5Block,
+            TemplateBlock(steps: [
+                TemplateStep(kind: .cooldown, goal: .time(.fixed(5 * 60)), target: .heartRateZone(1)),
+            ]),
+        ]
+    )
+
+    private static let zone5Block = TemplateBlock(
+        steps: [
+            TemplateStep(kind: .work, goal: .time(.parameter("hard")), target: .heartRateZone(5)),
+            TemplateStep(kind: .recovery, goal: .time(.fixed(3 * 60)), target: .heartRateZone(1)),
+        ],
+        repetitions: .parameter("reps")
+    )
+
+    private static let zone4Block = TemplateBlock(
+        steps: [
+            TemplateStep(kind: .work, goal: .time(.parameter("moderate")), target: .heartRateZone(4)),
+            TemplateStep(kind: .recovery, goal: .time(.fixed(2 * 60)), target: .heartRateZone(1)),
+        ],
+        repetitions: .parameter("reps")
+    )
+
+    /// Sarcomere runs (MVP2-106): ``hillRepetitionRun`` run downhill, eccentric repetitions that
+    /// build muscle strength and resistance to the damage of downhill running.
+    ///
+    /// The same structure and parameters as ``hillRepetitionRun``: a 5-minute Zone 1 warmup, an open
+    /// Zone 2 run, here to the top of the hill, `reps` (6-12) times a fast downhill effort of `work`
+    /// seconds (30-90) and a Zone 1 recovery of `rest` seconds (90-150), the walk or jog back up the
+    /// hill, and a 5-minute Zone 1 cooldown. The downhill effort is RPE 8, fast but controlled, not the all-out
+    /// RPE 10 of the uphill version: a flat-out descent risks a fall, and the stimulus is the
+    /// eccentric load, not the effort. The downhill itself isn't modelled, so the athlete picks the
+    /// slope. The RPE target stays in the app, since WorkoutKit has no perceived-exertion alert.
+    public static let sarcomereRun = hillRepetitions(
+        uuid: "8F5D6E4E-6E0E-4B8B-9C1A-9E6F9F1C1A13", name: "Sarcomere Runs", titleName: "Downhill Repeats", effortRPE: 8
+    )
+
     /// Every built-in template, in the order they should appear in a library UI.
-    public static let all: [WorkoutTemplate] = [recoveryRun, easyRun, longRun, tempoRun, baseHillSprints, shortIntervalRun, shortIntervalRunTrack, maxHRTest, lthrTest]
+    public static let all: [WorkoutTemplate] = [recoveryRun, easyRun, longRun, tempoRun, baseHillSprints, shortIntervalRun, shortIntervalRunTrack, maxHRTest, lthrTest, fastFinishRun, cruiseIntervalRun, longFartlekRun, longRunFastFinish, fartlekZone4, fartlekZone5, hillRepetitionRun, longIntervalRun, mixedIntervalRun, sarcomereRun]
 }

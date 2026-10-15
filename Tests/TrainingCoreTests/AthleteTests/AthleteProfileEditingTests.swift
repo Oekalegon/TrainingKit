@@ -144,6 +144,19 @@ struct AthleteProfileEditingTests {
         #expect(decoded.usesHealthKitRestingHeartRate)
     }
 
+    @Test("a profile stored before run availability existed decodes with none, and availability round-trips")
+    func runAvailabilityCoding() throws {
+        var original = AthleteProfile.fixture()
+        var object = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(original)) as? [String: Any])
+        object.removeValue(forKey: "runAvailability")
+        let legacy = try JSONDecoder().decode(AthleteProfile.self, from: JSONSerialization.data(withJSONObject: object))
+        #expect(legacy.runAvailability == RunAvailability())
+
+        original.runAvailability[.tuesday] = [.morning]
+        let decoded = try JSONDecoder().decode(AthleteProfile.self, from: JSONEncoder().encode(original))
+        #expect(decoded.runAvailability == original.runAvailability)
+    }
+
     @Test("the history and the switch round-trip, and the current pace is also written under its old key")
     func roundTrips() throws {
         var original = AthleteProfile.fixture()

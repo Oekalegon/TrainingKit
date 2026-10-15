@@ -602,6 +602,7 @@ struct TrainingModelAthleteEditCacheTests {
             changed.dateOfBirth = Date(timeIntervalSince1970: 631_152_000)
             changed.mainSport = .cycling
             changed.mainVenue = .indoor(.treadmill)
+            changed.runAvailability[.monday] = [.morning]
             return changed
         }
 

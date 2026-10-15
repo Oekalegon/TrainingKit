@@ -4,7 +4,7 @@ import TrainingCore
 
 /// The athlete's own preferences, the only part of the profile that syncs through CloudKit
 /// (MVP2-131): name, picture, time zone, week start, main sport and venue, the pace history and the
-/// HealthKit resting-heart-rate switch. All of it is typed or chosen by the athlete.
+/// HealthKit resting-heart-rate switch and the run availability (MVP5-104). All of it is typed or chosen by the athlete.
 ///
 /// The rest of the profile (sex, date of birth, the heart-rate settings, which come from HealthKit)
 /// stays in the local-only ``AthleteProfileRecord``, since Apple's guideline 5.1.3(ii) forbids storing
@@ -30,6 +30,7 @@ struct AthletePreferences: Codable, Equatable {
     var mainVenue: Venue?
     var paceHistory: [PaceSettings]
     var usesHealthKitRestingHeartRate: Bool
+    var runAvailability: RunAvailability
 
     /// The preferences part of `profile`.
     init(of profile: AthleteProfile) {
@@ -41,6 +42,27 @@ struct AthletePreferences: Codable, Equatable {
         mainVenue = profile.mainVenue
         paceHistory = profile.paceHistory
         usesHealthKitRestingHeartRate = profile.usesHealthKitRestingHeartRate
+        runAvailability = profile.runAvailability
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case name, avatarImageData, timeZone, weekStartsOn, mainSport, mainVenue, paceHistory
+        case usesHealthKitRestingHeartRate, runAvailability
+    }
+
+    /// Decodes the preferences; a payload written before ``runAvailability`` existed gets no
+    /// availability instead of failing the whole profile.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        name = try container.decode(String.self, forKey: .name)
+        avatarImageData = try container.decodeIfPresent(Data.self, forKey: .avatarImageData)
+        timeZone = try container.decode(TimeZone.self, forKey: .timeZone)
+        weekStartsOn = try container.decode(Weekday.self, forKey: .weekStartsOn)
+        mainSport = try container.decode(Sport.self, forKey: .mainSport)
+        mainVenue = try container.decodeIfPresent(Venue.self, forKey: .mainVenue)
+        paceHistory = try container.decode([PaceSettings].self, forKey: .paceHistory)
+        usesHealthKitRestingHeartRate = try container.decode(Bool.self, forKey: .usesHealthKitRestingHeartRate)
+        runAvailability = try container.decodeIfPresent(RunAvailability.self, forKey: .runAvailability) ?? RunAvailability()
     }
 
     /// `profile` with these preferences in place of its own.
@@ -54,6 +76,7 @@ struct AthletePreferences: Codable, Equatable {
         merged.mainVenue = mainVenue
         merged.paceHistory = paceHistory
         merged.usesHealthKitRestingHeartRate = usesHealthKitRestingHeartRate
+        merged.runAvailability = runAvailability
         return merged
     }
 }

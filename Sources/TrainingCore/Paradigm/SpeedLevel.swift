@@ -16,7 +16,16 @@ public enum SpeedLevel: String, Sendable, Codable, Hashable, CaseIterable, Compa
     case max
 
     public static func < (lhs: SpeedLevel, rhs: SpeedLevel) -> Bool {
-        allCases.firstIndex(of: lhs)! < allCases.firstIndex(of: rhs)!
+        lhs.rank < rhs.rank
+    }
+
+    private var rank: Int {
+        switch self {
+        case .slow: 0
+        case .moderate: 1
+        case .fast: 2
+        case .max: 3
+        }
     }
 
     /// The level of a work step in heart-rate zone `zone` (1...5).

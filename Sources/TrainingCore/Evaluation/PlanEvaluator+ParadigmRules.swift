@@ -79,6 +79,7 @@ extension PlanEvaluator {
     }
 
     /// The micro's length in whole calendar days, rounded so a daylight-saving day does not change it.
+    /// Assumes day-granular ranges (start-of-day bounds), as ``TrainingCycle/dateRange`` documents.
     private func length(of micro: TrainingCycle) -> Int {
         Int((micro.dateRange.upperBound.timeIntervalSince(micro.dateRange.lowerBound) / Self.secondsPerDay).rounded()) + 1
     }

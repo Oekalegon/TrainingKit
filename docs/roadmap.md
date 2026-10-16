@@ -51,6 +51,8 @@ Per-slot options (MVP5-127): `SlotOptions` (`longRunPossible`, default true; `tr
 
 Run types per weekday (MVP5-110): `RunType` (recovery, easy, long, threshold, interval) maps to an `IntensityCategory` and to the small generic `SessionType`; `RunAvailability.dayRunTypes` holds the run types the athlete names per `Weekday` on the same athlete calendar as the free parts (a named type is tied to its days, an unnamed type is free on every running day); day assignment (MVP5-119) and the picker (MVP5-112) are still to do.
 
+Peak weekly volume (MVP5-133): `PlanPreferences.maxWeeklyVolume`, a `VolumeTarget` (`VolumeMeasure` distance, time or TRIMP, positive amount) per `Sport` for the most in any 7 days, no limit by default and decoding unchanged from stored preferences; the volume curve (MVP5-117) and the wizard field (MVP5-134, TrainingApp) are still to do.
+
 See design doc §8 and the "Roadmap seams" table (§12) for how this plugs into MVP 1 without reshaping the core.
 
 ## MVP 6 — AI Coach

@@ -22,6 +22,8 @@ extension PlanGuardrails {
         public var maxAcceptableTSB: Double?
         /// Replaces ``PlanGuardrails/maxLongestRunIncreaseFraction``.
         public var maxLongestRunIncreaseFraction: Double?
+        /// Replaces ``PlanGuardrails/longestRunLookBackDays``.
+        public var longestRunLookBackDays: Int?
 
         /// Creates a set of overrides; every parameter defaults to `nil` (no replacement).
         public init(
@@ -32,7 +34,8 @@ extension PlanGuardrails {
             maxTSBOnRaceDay: Double? = nil,
             minAcceptableTSB: Double? = nil,
             maxAcceptableTSB: Double? = nil,
-            maxLongestRunIncreaseFraction: Double? = nil
+            maxLongestRunIncreaseFraction: Double? = nil,
+            longestRunLookBackDays: Int? = nil
         ) {
             self.maxMonotony = maxMonotony
             self.maxStrainPercentile = maxStrainPercentile
@@ -42,6 +45,7 @@ extension PlanGuardrails {
             self.minAcceptableTSB = minAcceptableTSB
             self.maxAcceptableTSB = maxAcceptableTSB
             self.maxLongestRunIncreaseFraction = maxLongestRunIncreaseFraction
+            self.longestRunLookBackDays = longestRunLookBackDays
         }
 
         /// `guardrails` with every non-`nil` override applied.
@@ -58,6 +62,7 @@ extension PlanGuardrails {
             result.minAcceptableTSB = minAcceptableTSB ?? result.minAcceptableTSB
             result.maxAcceptableTSB = maxAcceptableTSB ?? result.maxAcceptableTSB
             result.maxLongestRunIncreaseFraction = maxLongestRunIncreaseFraction ?? result.maxLongestRunIncreaseFraction
+            result.longestRunLookBackDays = longestRunLookBackDays ?? result.longestRunLookBackDays
             return result
         }
     }

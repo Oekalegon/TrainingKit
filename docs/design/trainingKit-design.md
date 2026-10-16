@@ -678,7 +678,8 @@ struct PlanGuardrails: Sendable, Codable {
     var minAcceptableTSB: Double = -30         // any day
     var maxAcceptableTSB: Double = 25          // any day
     var strainTrailingWindowDays: Int = 84
-    var maxLongestRunIncreaseFraction: Double = 0.10   // a run vs the longest of the previous 28 days
+    var maxLongestRunIncreaseFraction: Double = 0.10   // a run vs the longest earlier run
+    var longestRunLookBackDays: Int = 28
 }
 
 struct PlanEvaluator: Sendable {
@@ -695,7 +696,7 @@ Rules, all computed from the projected series:
 | Strain | weekly load × monotony | Absolute thresholds don't transfer across athletes in TRIMP units, so compare against the athlete's own trailing distribution |
 | Race-day TSB | TSB on `Race.date` | Taper landed: positive but not so high that fitness was lost (a warning, not a risk) |
 | TSB band | TSB on any day | Below `minAcceptableTSB` (−30) is the injury-risk band; above `maxAcceptableTSB` (25) reads as detraining (a warning) |
-| Longest run | a run's planned duration vs the longest run of the previous 28 days (any type, the day itself excluded) | at most +10 % (`maxLongestRunIncreaseFraction`); risk; a run with no earlier run in the look-back is not checked; needs `sessions`, not cycles |
+| Longest run | a run's planned duration vs the longest run of the previous 28 days (any type, the day itself excluded) | at most +10 % (`maxLongestRunIncreaseFraction`) within `longestRunLookBackDays` (28); a chain of runs each within the limit of the last passes; risk; a run with no earlier run in the look-back is not checked; needs `sessions`, not cycles |
 | Paradigm rules | intensity distribution, hard-session spacing, hard sessions per micro | only with a `TrainingParadigm` (see "Paradigm rules" below) |
 
 Earlier iterations also had a CTL-ramp rule (CTL[d] − CTL[d−7]), an ATL/CTL ratio, and cycle-aware recovery-micro, meso-progress, taper-shape and consecutive-load rules. They were removed (MVP5-101 review) as thresholds nobody had asked for; ramp control is left to the generator's own volume curve (MVP5-117) and the longest-run rule. Only `.risk` findings make a plan unacceptable, so a missed race-day TSB or an over-high TSB is reported but doesn't by itself send the generator back to adjust.

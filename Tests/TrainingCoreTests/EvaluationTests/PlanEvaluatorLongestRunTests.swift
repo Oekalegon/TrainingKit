@@ -38,6 +38,13 @@ struct PlanEvaluatorLongestRunTests {
         #expect(findings([run(0, minutes: 100), run(29, minutes: 150)]).isEmpty)
     }
 
+    @Test("the look-back is a guardrail")
+    func lookBackGuardrail() {
+        let sessions = [run(0, minutes: 100), run(15, minutes: 150)]
+        #expect(findings(sessions).count == 1)
+        #expect(findings(sessions, guardrails: PlanGuardrails(longestRunLookBackDays: 14)).isEmpty)
+    }
+
     @Test("the longest previous run is the baseline, not the latest; any type counts")
     func longestIsBaseline() {
         let sessions = [run(0, minutes: 120), run(3, minutes: 30), PlanSession(day: day(10), seconds: 125 * 60, intensity: .high, speed: .fast)]

@@ -26,9 +26,12 @@ public struct PlanGuardrails: Sendable, Codable, Hashable {
     /// detraining (fitness being lost to insufficient load), the same freshness-band check as
     /// ``maxTSBOnRaceDay`` but not gated on it being a race day.
     public var maxAcceptableTSB: Double
-    /// The fractional increase of a run over the longest run of the previous 28 days above which
+    /// The fractional increase of a run over the longest run of the previous ``longestRunLookBackDays`` days above which
     /// the run is too much of a jump (0.10 allows 10 % more).
     public var maxLongestRunIncreaseFraction: Double
+    /// How many days before a run the longest-run rule looks back for the longest earlier run;
+    /// defaults to 28 (four weeks), whatever the micro length.
+    public var longestRunLookBackDays: Int
 
     /// Creates a set of plan guardrails, defaulting to the values discussed in the design doc.
     ///
@@ -44,7 +47,9 @@ public struct PlanGuardrails: Sendable, Codable, Hashable {
     ///   - minAcceptableTSB: The lowest acceptable TSB on any day; defaults to -30.
     ///   - maxAcceptableTSB: The highest acceptable TSB on any day; defaults to 25.
     ///   - maxLongestRunIncreaseFraction: The fractional increase of a run over the longest run of
-    ///     the previous 28 days above which it is flagged; defaults to 0.10.
+    ///     the previous `longestRunLookBackDays` days above which it is flagged; defaults to 0.10.
+    ///   - longestRunLookBackDays: How many days before a run to look for the longest earlier run;
+    ///     defaults to 28.
     public init(
         maxMonotony: Double = 2.0,
         maxStrainPercentile: Double = 0.95,
@@ -53,7 +58,8 @@ public struct PlanGuardrails: Sendable, Codable, Hashable {
         maxTSBOnRaceDay: Double = 25,
         minAcceptableTSB: Double = -30,
         maxAcceptableTSB: Double = 25,
-        maxLongestRunIncreaseFraction: Double = 0.10
+        maxLongestRunIncreaseFraction: Double = 0.10,
+        longestRunLookBackDays: Int = 28
     ) {
         self.maxMonotony = maxMonotony
         self.maxStrainPercentile = maxStrainPercentile
@@ -63,11 +69,12 @@ public struct PlanGuardrails: Sendable, Codable, Hashable {
         self.minAcceptableTSB = minAcceptableTSB
         self.maxAcceptableTSB = maxAcceptableTSB
         self.maxLongestRunIncreaseFraction = maxLongestRunIncreaseFraction
+        self.longestRunLookBackDays = longestRunLookBackDays
     }
 
     private enum CodingKeys: String, CodingKey {
         case maxMonotony, maxStrainPercentile, strainTrailingWindowDays, minTSBOnRaceDay, maxTSBOnRaceDay
-        case minAcceptableTSB, maxAcceptableTSB, maxLongestRunIncreaseFraction
+        case minAcceptableTSB, maxAcceptableTSB, maxLongestRunIncreaseFraction, longestRunLookBackDays
     }
 
     /// Decodes guardrails; a missing value (for instance `maxLongestRunIncreaseFraction` in a
@@ -84,5 +91,6 @@ public struct PlanGuardrails: Sendable, Codable, Hashable {
         minAcceptableTSB = try container.decodeIfPresent(Double.self, forKey: .minAcceptableTSB) ?? defaults.minAcceptableTSB
         maxAcceptableTSB = try container.decodeIfPresent(Double.self, forKey: .maxAcceptableTSB) ?? defaults.maxAcceptableTSB
         maxLongestRunIncreaseFraction = try container.decodeIfPresent(Double.self, forKey: .maxLongestRunIncreaseFraction) ?? defaults.maxLongestRunIncreaseFraction
+        longestRunLookBackDays = try container.decodeIfPresent(Int.self, forKey: .longestRunLookBackDays) ?? defaults.longestRunLookBackDays
     }
 }

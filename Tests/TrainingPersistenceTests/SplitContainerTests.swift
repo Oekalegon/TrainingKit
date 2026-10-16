@@ -98,7 +98,7 @@ struct SplitContainerTests {
         let container = try TestContainers.make(cloudKitDatabase: .none, isStoredInMemoryOnly: true)
         let store = SwiftDataStore(modelContainer: container)
         var profile = AthleteProfile.fixture(name: "Alex")
-        profile.runAvailability = RunAvailability(slots: [.saturday: [.morning, .evening]])
+        profile.runAvailability = RunAvailability(slots: [.saturday: [.morning, .evening]], dayRunTypes: [.sunday: [.long]])
         try await store.save(profile)
 
         #expect(try await store.athleteProfile()?.runAvailability == profile.runAvailability)

@@ -90,7 +90,7 @@ struct AthleteProfile: Sendable, Codable {
     var usesHealthKitRestingHeartRate: Bool         // MVP2-132: whether the host app merges HealthKit's
                                                        // resting HR into the history (default true)
     var avatarImageData: Data?                      // MVP2-132: the athlete's chosen picture, kept small
-    var runAvailability: RunAvailability            // MVP5-104: free day slots per weekday (+ MVP5-127 per-slot options), one global setting
+    var runAvailability: RunAvailability            // MVP5-104: free day slots per weekday (+ MVP5-127 per-slot options, MVP5-131 runs per weekday, MVP5-110 run types), one global setting
                                                        // (synced with the other preferences); default none
 }
 ```

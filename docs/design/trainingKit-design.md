@@ -710,7 +710,7 @@ The rules read `sessions: [PlanSession]` (day, planned seconds, `IntensityCatego
 | `hardSessionSpacing` | days between consecutive hard sessions | at least `minDaysBetweenHardSessions` (Tue to Thu is 2; `nil` = off) | risk |
 | `hardSessionsPerMicro` | hard sessions in a micro | at most `maxHardSessionsPerMicro[length in days]`; a length with no entry is not checked, so 7-, 10- and 14-day micros are set independently | risk |
 
-A session is *hard* when its intensity is at least `hardIntensity` (default `.high`) or, if the paradigm sets `hardSpeed`, its speed is at least that, so a paradigm can put max-speed easy runs on the hard days while the distribution still counts their time as easy. The distribution and per-micro rules need `cycles`; spacing does not. Boundaries pass (a share exactly at the tolerance, a count exactly at the maximum). The built-in paradigms (80/20 polarized, triphasic) are MVP5-103.
+A session is *hard* when its intensity is at least `hardIntensity` (default `.high`) or, if the paradigm sets `hardSpeed`, its speed is at least that, so a paradigm can put max-speed easy runs on the hard days while the distribution still counts their time as easy. The distribution and per-micro rules need `cycles`; spacing does not. `PlanFinding.subject` names the category or level a distribution finding is about (`"intensity.high"`, `"speed.max"`). Boundaries pass (a share exactly at the tolerance, a count exactly at the maximum). The built-in paradigms (80/20 polarized, triphasic) are MVP5-103.
 
 Guardrail values are `Codable` and user-editable; MVP 4 can tune them from observed outcomes (e.g. the athlete who tolerates a lower TSB without issue).
 

@@ -15,6 +15,7 @@ public struct IntensityMix: Sendable, Codable, Hashable {
     /// The target share of planned time per speed level, using each session's ``PlanSession/speed``.
     public var speedShares: [SpeedLevel: Double]
     /// How far an actual share may be from its target, as a fraction (0.05 is five percentage points).
+    /// Negative values are treated as 0 when checked.
     public var tolerance: Double
 
     /// Creates a mix.

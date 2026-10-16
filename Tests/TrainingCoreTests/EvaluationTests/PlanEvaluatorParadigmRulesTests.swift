@@ -134,8 +134,9 @@ struct PlanEvaluatorParadigmRulesTests {
         let result = findings(.intensityDistribution, sessions: heavy, cycles: cycles, paradigm: paradigm)
         #expect(result.count == 2)
         #expect(result.allSatisfy { $0.severity == .warning && $0.day == day(0) })
-        let high = result.first { abs($0.value - 0.3) < 1e-9 }
-        #expect(high != nil && abs(high!.threshold - 0.25) < 1e-9)
+        let high = result.first { $0.subject == "intensity.high" }
+        #expect(high != nil && abs(high!.value - 0.3) < 1e-9 && abs(high!.threshold - 0.25) < 1e-9)
+        #expect(result.contains { $0.subject == "intensity.low" })
     }
 
     @Test("distribution: the phase's mix wins over the default; a phase with neither is skipped")
@@ -162,6 +163,15 @@ struct PlanEvaluatorParadigmRulesTests {
             // Intensity is all low (passes); half the time is max speed, and the slow share is 50 %.
             #expect(findings(.intensityDistribution, sessions: [sprints, easy], cycles: cycles, paradigm: paradigm).count == 2)
         }
+    }
+
+    @Test("distribution: a negative tolerance is treated as zero; speed findings name the level")
+    func distributionTolerance() {
+        let mix = IntensityMix(intensityShares: [.low: 0.5], speedShares: [.max: 0], tolerance: -0.2)
+        let paradigm = TrainingParadigm(name: "x", defaultMix: mix)
+        let sessions = [session(0, .low, speed: .max, minutes: 30), session(2, .high, speed: .fast, minutes: 30)]
+        let result = findings(.intensityDistribution, sessions: sessions, cycles: [micro(start: 0, length: 7)], paradigm: paradigm)
+        #expect(result.map(\.subject) == ["speed.max"]) // low is exactly 0.5; tolerance clamps to 0
     }
 
     @Test("distribution: a micro with no sessions or no planned time is skipped")

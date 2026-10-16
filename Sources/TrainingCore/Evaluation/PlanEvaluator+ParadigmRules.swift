@@ -46,7 +46,8 @@ extension PlanEvaluator {
     ///
     /// A ``Severity/warning`` dated at the micro's start for every listed category or level whose
     /// share is further than the mix's tolerance from its target; `value` is the actual share and
-    /// `threshold` the nearest bound (target ± tolerance) it crosses. A share exactly at the
+    /// `threshold` the nearest bound (target ± tolerance) it crosses, and `subject` names the category
+    /// or level (`"intensity.high"`, `"speed.max"`). A share exactly at the
     /// tolerance passes. Micros with no sessions, or no planned time, are not checked.
     func intensityDistributionFindings(sessions: [PlanSession], cycles: [TrainingCycle], paradigm: TrainingParadigm) -> [PlanFinding] {
         var findings: [PlanFinding] = []
@@ -56,19 +57,20 @@ extension PlanEvaluator {
             let total = inMicro.reduce(0) { $0 + $1.seconds }
             guard total > 0 else { continue }
 
-            func check(target: Double, actual: Double) {
+            func check(_ subject: String, target: Double, actual: Double) {
                 let deviation = actual - target
-                guard abs(deviation) > mix.tolerance + Self.shareEpsilon else { return }
-                let bound = deviation > 0 ? target + mix.tolerance : target - mix.tolerance
-                findings.append(PlanFinding(day: micro.dateRange.lowerBound, rule: .intensityDistribution, severity: .warning, value: actual, threshold: bound))
+                let tolerance = max(mix.tolerance, 0)
+                guard abs(deviation) > tolerance + Self.shareEpsilon else { return }
+                let bound = deviation > 0 ? target + tolerance : target - tolerance
+                findings.append(PlanFinding(day: micro.dateRange.lowerBound, rule: .intensityDistribution, severity: .warning, value: actual, threshold: bound, subject: subject))
             }
             for category in IntensityCategory.allCases {
                 guard let target = mix.intensityShares[category] else { continue }
-                check(target: target, actual: inMicro.filter { $0.intensity == category }.reduce(0) { $0 + $1.seconds } / total)
+                check("intensity.\(category)", target: target, actual: inMicro.filter { $0.intensity == category }.reduce(0) { $0 + $1.seconds } / total)
             }
             for level in SpeedLevel.allCases {
                 guard let target = mix.speedShares[level] else { continue }
-                check(target: target, actual: inMicro.filter { $0.speed == level }.reduce(0) { $0 + $1.seconds } / total)
+                check("speed.\(level.rawValue)", target: target, actual: inMicro.filter { $0.speed == level }.reduce(0) { $0 + $1.seconds } / total)
             }
         }
         return findings

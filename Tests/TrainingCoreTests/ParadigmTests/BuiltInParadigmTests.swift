@@ -19,7 +19,7 @@ struct BuiltInParadigmTests {
     }
 
     private func findings(_ paradigm: TrainingParadigm, _ sessions: [PlanSession], length: Int = 7, phase: CyclePhase) -> [PlanFinding] {
-        evaluator.evaluate([], races: [], cycles: [micro(length: length, phase: phase)], sessions: sessions, paradigm: paradigm).findings
+        evaluator.evaluate([], races: [], cycles: [micro(length: length, phase: phase)], sessions: sessions, paradigm: paradigm).findings.filter { $0.rule != .longestRun }
     }
 
     @Test("the built-in list holds both paradigms, with their phases in order")

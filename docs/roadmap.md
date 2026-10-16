@@ -39,11 +39,13 @@ This is the foundation the MVP 5 plan generator builds on: everything it produce
 
 The deterministic plan generator: `PlanPreferences` (training days, per-day sport/session-type, starting volume, weekly ramp), a Create Plan wizard sheet (training days, primary race/target, preferred long-run/interval days, recovery-week cadence, max TRIMP ramp), `PlanGenerator` that lays out cycles via `CycleLayoutBuilder` (already built in MVP 1) and fills them with library workouts, iterated against `PlanEvaluator`'s guardrails via a fixed set of heuristic adjustments — no LLM involved yet. Also covers a set of standard plans by target distance.
 
-Groundwork laid for paradigms (MVP5-102/103): `CyclePhase` is a named, paradigm-defined value rather than a fixed enum, and each micro carries a separate `MicroLoadRole` (build/recovery/taper/race) that rules such as build progression read (MVP5-113). Stored cycles written with the old enum still decode.
+Groundwork laid for paradigms (MVP5-102/103): `CyclePhase` is a named, paradigm-defined value rather than a fixed enum, and each micro carries a separate `MicroLoadRole` (build/recovery/taper/race) that rules read instead of the phase (MVP5-113). Stored cycles written with the old enum still decode.
 
 Training paradigms (MVP5-102): `TrainingParadigm` (named phases in order, `PlanGuardrails.Overrides`, the settings of three paradigm rules) with `IntensityMix` targets per phase, and `PlanSession` with a `SpeedLevel` next to `IntensityCategory` (hill sprints are low intensity but max speed). `PlanEvaluator` gains `intensityDistribution` (warning), `hardSessionSpacing` and `hardSessionsPerMicro` (risks), which run only when a paradigm is supplied. The built-in 80/20 and triphasic paradigms are MVP5-103.
 
 Built-in paradigms (MVP5-103): `TrainingParadigm.polarized8020` and `.triphasic` (`builtIn` lists them), rules data only. Triphasic encodes its phases, the easy-only conditioning and base mixes, max-speed sprints as hard for placement, and 2-day spacing; the structural/specific session profiles wait for MVP5-100, and layout (micro length, meso pattern, phase lengths) for the generator.
+
+Longest-run rule (MVP5-116): `maxBuildProgressionFraction` and the `buildProgression` rule are gone; `PlanRule.longestRun` (a risk) flags a run more than `maxLongestRunIncreaseFraction` (10 %) longer than the longest planned run of the previous 28 days, by duration, any run type, from the `sessions` passed to the evaluator. `PlanGuardrails` now decodes tolerantly.
 
 Several plans, one active at a time (MVP5-124): a `TrainingPlan` (draft/active/archived) groups planned workouts and cycles through their `planID`; only the active plan feeds the fitness series, statistics, activity matching and calendar export, and data from before plans existed is adopted into a "Current plan". The generator's proposal and commit target a plan; the Plans screen is MVP5-125.
 

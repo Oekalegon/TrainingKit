@@ -43,7 +43,7 @@ Groundwork laid for paradigms (MVP5-102/103): `CyclePhase` is a named, paradigm-
 
 Several plans, one active at a time (MVP5-124): a `TrainingPlan` (draft/active/archived) groups planned workouts and cycles through their `planID`; only the active plan feeds the fitness series, statistics, activity matching and calendar export, and data from before plans existed is adopted into a "Current plan". The generator's proposal and commit target a plan; the Plans screen is MVP5-125.
 
-Run availability (MVP5-104): `RunAvailability` (free `DaySlot`s per `Weekday`, independent of the paradigm and stored as `AthleteProfile.runAvailability`, synced with the preferences) and `PlanPreferences` carrying it as the generator's input; day parts are `.morning`, `.afternoon` and `.evening` (MVP5-129; the old combined `afternoonEvening` still decodes to the last two); the settings screen (MVP5-105) is still to do.
+Run availability (MVP5-104): `RunAvailability` (free `DaySlot`s per `Weekday`, independent of the paradigm and stored as `AthleteProfile.runAvailability`, synced with the preferences) and `PlanPreferences` carrying it as the generator's input; day parts are `.morning`, `.afternoon` and `.evening` (MVP5-129; the old combined `afternoonEvening` still decodes to the last two); the number of runs per weekday is its own field, `runsPerDay` (MVP5-131); the settings screen (MVP5-105) is still to do.
 
 Per-slot options (MVP5-127): `SlotOptions` (`longRunPossible`, default true; `trackAvailable`, default false) per weekday and slot on `RunAvailability`, decoding unchanged from stored availability; the generator rules (MVP5-119) and the app toggles (MVP5-128) are still to do.
 

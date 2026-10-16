@@ -24,7 +24,8 @@ public enum PlanRule: Sendable, Codable, Hashable {
     /// its phase in ``TrainingParadigm/phaseMixes``/``TrainingParadigm/defaultMix`` (``IntensityMix``).
     /// A ``Severity/warning``.
     case intensityDistribution
-    /// Two hard sessions closer than ``TrainingParadigm/minDaysBetweenHardSessions``.
+    /// Two hard sessions (and long runs, when ``TrainingParadigm/spacesLongRunsAsHard`` is set)
+    /// closer than ``TrainingParadigm/minDaysBetweenHardSessions``.
     /// A ``Severity/risk``.
     case hardSessionSpacing
     /// More hard sessions in a micro than ``TrainingParadigm/maxHardSessionsPerMicro`` allows for

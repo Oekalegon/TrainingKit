@@ -47,6 +47,13 @@ struct TrainingParadigmTests {
         #expect(overrides == PlanGuardrails.Overrides())
     }
 
+    @Test("a session or paradigm stored before long-run spacing decodes with it off")
+    func legacyLongRun() throws {
+        let session = try JSONDecoder().decode(PlanSession.self, from: Data(#"{"day":0,"seconds":60,"intensity":1,"speed":"slow"}"#.utf8))
+        #expect(!session.isLongRun)
+        #expect(!TrainingParadigm(name: "Old").spacesLongRunsAsHard)
+    }
+
     @Test("hardness reads the intensity threshold, and speed only when the paradigm sets hardSpeed")
     func hardness() {
         let day = Date(timeIntervalSince1970: 0)

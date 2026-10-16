@@ -71,6 +71,13 @@ struct RunTypeTests {
         #expect(preferences.validated(microLength: 14).dayRunTypes == preferences.dayRunTypes)
     }
 
+    @Test("a micro of no days has no run types")
+    func emptyMicro() {
+        let preferences = PlanPreferences(dayRunTypes: [0: [.long]])
+        #expect(preferences.runTypes(onDay: 0, microLength: 0).isEmpty)
+        #expect(preferences.runTypes(onDay: 0, microLength: -3).isEmpty)
+    }
+
     @Test("round-trips through Codable")
     func roundTrip() throws {
         let preferences = PlanPreferences(

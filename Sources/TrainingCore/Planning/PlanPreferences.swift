@@ -89,7 +89,8 @@ public struct PlanPreferences: Sendable, Codable, Hashable {
 
     /// Decodes preferences, falling back to the default for any missing field so a payload written
     /// before a field existed still decodes. Run types this version does not know, and days that
-    /// are not integers or are negative, are dropped. Saving again writes only what was understood.
+    /// are not integers or are negative, are dropped. A day whose types are all unknown to this version is dropped too, so it becomes an
+    /// unspecified day. Saving again writes only what was understood.
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         runAvailability = try container.decodeIfPresent(RunAvailability.self, forKey: .runAvailability) ?? RunAvailability()

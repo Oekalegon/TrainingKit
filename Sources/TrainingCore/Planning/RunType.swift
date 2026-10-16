@@ -43,9 +43,4 @@ public enum RunType: String, Sendable, Codable, Hashable, CaseIterable {
         case .interval: .interval
         }
     }
-
-    /// The run types allowed on a micro day for which the athlete has not chosen any: only the
-    /// easy ones, ``recovery`` and ``easy`` (zones 1 and 2). Quality and long runs happen only on
-    /// days the athlete names them.
-    public static let defaultForUnspecifiedDay: Set<RunType> = [.recovery, .easy]
 }

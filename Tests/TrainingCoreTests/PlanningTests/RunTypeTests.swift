@@ -22,11 +22,26 @@ struct RunTypeTests {
         #expect(Set(RunType.allCases.map(\.sessionType)).count == 5)
     }
 
-    @Test("defaults to no run types, so a day allows only recovery and easy runs")
+    @Test("defaults to no run types, so every day allows every run type")
     func defaults() {
         let preferences = PlanPreferences()
         #expect(preferences.dayRunTypes.isEmpty)
-        #expect(preferences.runTypes(onDay: 3, microLength: 7) == [.recovery, .easy])
+        #expect(preferences.runTypes(onDay: 3, microLength: 7) == Set(RunType.allCases))
+    }
+
+    @Test("an unspecified day allows the types no day names")
+    func unspecifiedDays() {
+        let preferences = PlanPreferences(dayRunTypes: [6: [.long], 1: [.interval, .easy]])
+        #expect(preferences.runTypes(onDay: 3, microLength: 7) == [.recovery, .threshold])
+        #expect(preferences.runTypes(onDay: 6, microLength: 7) == [.long])
+        // The long run on day 6 is beyond a 6-day micro, so it no longer reserves the type.
+        #expect(preferences.runTypes(onDay: 3, microLength: 6) == [.recovery, .threshold, .long])
+    }
+
+    @Test("an unspecified day can end up with no types when every type is named elsewhere")
+    func fullyNamed() {
+        let preferences = PlanPreferences(dayRunTypes: [0: Set(RunType.allCases)])
+        #expect(preferences.runTypes(onDay: 1, microLength: 7).isEmpty)
     }
 
     @Test("several types per day, and empty sets and negative days are dropped")

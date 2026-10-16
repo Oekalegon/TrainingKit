@@ -12,6 +12,11 @@
 /// rejected on storage: they are kept (so changing the micro length back restores them), ignored
 /// by ``runTypes(onDay:microLength:)`` and removed by ``validated(microLength:)``. Only negative
 /// keys can never be valid and are dropped on init, on decode and on ``setRunTypes(_:onDay:)``.
+///
+/// A day with an entry allows exactly the types in it. A day without one allows every run type
+/// that no day of the micro names, so a type the athlete pins to certain days (a long run on
+/// Sunday) is not offered on the others, while a type they never mention (threshold) can go on
+/// any unspecified day.
 public struct PlanPreferences: Sendable, Codable, Hashable {
     /// When the athlete can run. Seeded from the athlete's global availability setting, which does
     /// not depend on any plan or on the training paradigm. Defaults to no availability.
@@ -19,7 +24,7 @@ public struct PlanPreferences: Sendable, Codable, Hashable {
 
     /// The run types the athlete allows on each micro day, keyed by the 0-based day within the
     /// micro-cycle. A day never maps to an empty set: empty entries are removed. A day without an
-    /// entry allows only ``RunType/defaultForUnspecifiedDay``; read the effective types through
+    /// entry allows the types no day names; read the effective types through
     /// ``runTypes(onDay:microLength:)``.
     public private(set) var dayRunTypes: [Int: Set<RunType>]
 
@@ -28,7 +33,7 @@ public struct PlanPreferences: Sendable, Codable, Hashable {
     /// - Parameters:
     ///   - runAvailability: When the athlete can run. Defaults to no availability.
     ///   - dayRunTypes: The allowed run types per 0-based micro day. Empty sets and negative days
-    ///     are dropped. Defaults to none, so every day allows ``RunType/defaultForUnspecifiedDay``.
+    ///     are dropped. Defaults to none, so every day allows every run type.
     public init(
         runAvailability: RunAvailability = RunAvailability(),
         dayRunTypes: [Int: Set<RunType>] = [:]
@@ -43,18 +48,21 @@ public struct PlanPreferences: Sendable, Codable, Hashable {
     ///   - day: The 0-based day within the micro.
     ///   - microLength: The micro's length in days.
     /// - Returns: An empty set when `day` is outside `0..<microLength` (the day does not exist in
-    ///   that micro); the stored types when there are some; otherwise
-    ///   ``RunType/defaultForUnspecifiedDay``.
+    ///   that micro); the stored types when there are some; otherwise every run type that no day in
+    ///   `0..<microLength` names (entries beyond the micro are ignored). This can be empty when the
+    ///   athlete has named every type on other days.
     public func runTypes(onDay day: Int, microLength: Int) -> Set<RunType> {
         guard day >= 0, day < microLength else { return [] }
-        return dayRunTypes[day] ?? RunType.defaultForUnspecifiedDay
+        if let types = dayRunTypes[day] { return types }
+        let named = dayRunTypes.filter { $0.key < microLength }.values.reduce(into: Set<RunType>()) { $0.formUnion($1) }
+        return Set(RunType.allCases).subtracting(named)
     }
 
     /// Sets the run types allowed on a micro day.
     ///
     /// The day is stored even when it is beyond the current micro length (see the type
-    /// documentation). An empty set removes the entry, so the day allows
-    /// ``RunType/defaultForUnspecifiedDay`` again; a negative day is ignored.
+    /// documentation). An empty set removes the entry, so the day is
+    /// unspecified again; a negative day is ignored.
     ///
     /// - Parameters:
     ///   - types: The allowed run types.

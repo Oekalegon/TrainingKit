@@ -1,8 +1,8 @@
 /// A part of the day an athlete can run in, one element of ``RunAvailability``.
 ///
 /// Three coarse parts rather than clock times: the generator only needs to know whether a second
-/// session fits on a day, not when exactly it starts. The generator (MVP5-119) allows a two-a-day
-/// on a day with any two of the three parts free.
+/// session fits on a day, not when exactly it starts. How many runs a day gets is
+/// ``RunAvailability/runs(on:)``, and the generator (MVP5-119) puts each run in its own free part.
 ///
 /// Availability stored while there were only two parts (`morning` and a combined
 /// `afternoonEvening`) still decodes: ``RunAvailability`` reads the old `afternoonEvening` name,

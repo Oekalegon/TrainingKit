@@ -9,8 +9,10 @@
 /// Each free slot can also carry ``SlotOptions`` (whether a long run fits, whether a track is
 /// available); a slot without stored options has ``SlotOptions/default``.
 ///
-/// A day with any two of the three parts (``DaySlot/morning``, ``DaySlot/afternoon``,
-/// ``DaySlot/evening``) free allows a two-a-day; the generator rule is MVP5-119. Availability stored
+/// How many runs the athlete wants on a day is stated explicitly (``runs(on:)``, default 1), not
+/// inferred from the free parts: two free parts do not by themselves mean a two-a-day. The
+/// generator (MVP5-119) places that many runs on the day, each in its own free part, so a day never
+/// has more runs than free parts. Availability stored
 /// with the former combined `afternoonEvening` slot decodes to both ``DaySlot/afternoon`` and
 /// ``DaySlot/evening``, with its options on both, so it keeps its meaning.
 public struct RunAvailability: Sendable, Codable, Hashable {
@@ -21,6 +23,11 @@ public struct RunAvailability: Sendable, Codable, Hashable {
     /// no entry, so read them through ``subscript(_:_:)``.
     public private(set) var slotOptions: [Weekday: [DaySlot: SlotOptions]]
 
+    /// The stored number of runs per weekday, only for the days where it is above 1 (the default).
+    /// Not capped by the free slots, so it is kept when parts are removed and re-added; read the
+    /// effective number through ``runs(on:)``.
+    public private(set) var runsPerDay: [Weekday: Int]
+
     /// Creates availability from the free slots per weekday.
     ///
     /// - Parameters:
@@ -28,9 +35,16 @@ public struct RunAvailability: Sendable, Codable, Hashable {
     ///     availability on any day.
     ///   - slotOptions: The options per weekday and slot. Entries equal to ``SlotOptions/default``
     ///     are dropped. Defaults to the default options on every slot.
-    public init(slots: [Weekday: Set<DaySlot>] = [:], slotOptions: [Weekday: [DaySlot: SlotOptions]] = [:]) {
+    ///   - runsPerDay: The number of runs per weekday. Values of 1 or less are dropped (a day has at
+    ///     least one run, the default). Defaults to one run on every day.
+    public init(
+        slots: [Weekday: Set<DaySlot>] = [:],
+        slotOptions: [Weekday: [DaySlot: SlotOptions]] = [:],
+        runsPerDay: [Weekday: Int] = [:]
+    ) {
         self.slots = slots.filter { !$0.value.isEmpty }
         self.slotOptions = Self.sparse(slotOptions)
+        self.runsPerDay = runsPerDay.filter { $0.value > 1 }
     }
 
     private static func sparse(_ options: [Weekday: [DaySlot: SlotOptions]]) -> [Weekday: [DaySlot: SlotOptions]] {
@@ -52,6 +66,25 @@ public struct RunAvailability: Sendable, Codable, Hashable {
         }
     }
 
+    /// The number of runs the athlete wants on a weekday: 0 on a day without free slots, otherwise
+    /// the stored number (1 when none is stored) capped at the number of free slots.
+    public func runs(on weekday: Weekday) -> Int {
+        min(runsPerDay[weekday] ?? 1, slots[weekday]?.count ?? 0)
+    }
+
+    /// Sets the number of runs wanted on a weekday.
+    ///
+    /// The number is kept as given, so it is not lost when slots are removed and returns when they
+    /// are added again; ``runs(on:)`` applies the cap. A count of 1 or less sets the default of one
+    /// run and removes the stored entry.
+    ///
+    /// - Parameters:
+    ///   - count: The number of runs.
+    ///   - weekday: The weekday it applies to.
+    public mutating func setRuns(_ count: Int, on weekday: Weekday) {
+        runsPerDay[weekday] = count > 1 ? count : nil
+    }
+
     /// The free slots on a weekday; an empty set means the athlete does not run that day.
     ///
     /// Assigning an empty set removes the weekday.
@@ -61,15 +94,17 @@ public struct RunAvailability: Sendable, Codable, Hashable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case slots, slotOptions
+        case slots, slotOptions, runsPerDay
     }
 
     /// Decodes availability, ignoring weekdays and slots this version does not know (for instance
     /// written by a newer version) and treating a missing `slots` as no availability and a missing
-    /// `slotOptions` as the default options on every slot. The legacy `afternoonEvening` slot and
-    /// options key stand for both ``DaySlot/afternoon`` and ``DaySlot/evening``; when options are
-    /// stored under the legacy key and under a new name, the new name's options win. Saving it again
-    /// writes only what was understood, in the new form, so the unknown values are lost.
+    /// `slotOptions` as the default options on every slot. A missing `runsPerDay` means one run a
+    /// day; entries of 1 or less, or for unknown weekdays, are dropped. The legacy `afternoonEvening`
+    /// slot and options key stand for both ``DaySlot/afternoon`` and ``DaySlot/evening``; when
+    /// options are stored under the legacy key and under a new name, the new name's options win.
+    /// Saving it again writes only what was understood, in the new form, so the unknown values are
+    /// lost.
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let raw = try container.decodeIfPresent([String: [String]].self, forKey: .slots) ?? [:]
@@ -95,10 +130,19 @@ public struct RunAvailability: Sendable, Codable, Hashable {
             }
         }
         slotOptions = Self.sparse(decodedOptions)
+
+        let rawRuns = try container.decodeIfPresent([String: Int].self, forKey: .runsPerDay) ?? [:]
+        var decodedRuns: [Weekday: Int] = [:]
+        for (key, count) in rawRuns {
+            guard let rawValue = Int(key), let weekday = Weekday(rawValue: rawValue), count > 1 else { continue }
+            decodedRuns[weekday] = count
+        }
+        runsPerDay = decodedRuns
     }
 
     /// Encodes the slots keyed by the weekday's raw value (1 = Sunday), with slot names sorted so the
-    /// output is stable, and the non-default slot options keyed the same way.
+    /// output is stable, and the non-default slot options and the runs per day (above 1) keyed the
+    /// same way.
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         let raw = Dictionary(uniqueKeysWithValues: slots.map { weekday, daySlots in
@@ -110,6 +154,9 @@ public struct RunAvailability: Sendable, Codable, Hashable {
                 (String(weekday.rawValue), Dictionary(uniqueKeysWithValues: perSlot.map { ($0.key.rawValue, $0.value) }))
             })
             try container.encode(rawOptions, forKey: .slotOptions)
+        }
+        if !runsPerDay.isEmpty {
+            try container.encode(Dictionary(uniqueKeysWithValues: runsPerDay.map { (String($0.key.rawValue), $0.value) }), forKey: .runsPerDay)
         }
     }
 }

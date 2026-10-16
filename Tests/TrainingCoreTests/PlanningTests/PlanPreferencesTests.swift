@@ -172,4 +172,69 @@ struct PlanPreferencesTests {
         #expect(decoded[.saturday, .afternoon].trackAvailable)
         #expect(decoded[.saturday, .evening].trackAvailable)
     }
+
+    @Test("runs per day default to one on a free day and none on a day without slots")
+    func runsDefault() {
+        let availability = RunAvailability(slots: [.monday: [.morning, .evening]])
+
+        #expect(availability.runs(on: .monday) == 1)
+        #expect(availability.runs(on: .tuesday) == 0)
+        #expect(availability.runsPerDay.isEmpty)
+    }
+
+    @Test("runs are capped at the free slots, but the stored count is kept")
+    func runsCappedByFreeSlots() {
+        var availability = RunAvailability(slots: [.saturday: [.morning]])
+        availability.setRuns(2, on: .saturday)
+
+        #expect(availability.runs(on: .saturday) == 1)
+        #expect(availability.runsPerDay[.saturday] == 2)
+
+        availability[.saturday] = [.morning, .evening]
+        #expect(availability.runs(on: .saturday) == 2)
+
+        availability[.saturday] = [.morning, .afternoon, .evening]
+        availability.setRuns(3, on: .saturday)
+        #expect(availability.runs(on: .saturday) == 3)
+    }
+
+    @Test("a count of 1 or less is the default and is not stored")
+    func runsSparse() {
+        var availability = RunAvailability(slots: [.monday: [.morning, .evening]], runsPerDay: [.monday: 1, .tuesday: 0, .friday: -3])
+        #expect(availability.runsPerDay.isEmpty)
+
+        availability.setRuns(2, on: .monday)
+        availability.setRuns(1, on: .monday)
+        #expect(availability.runsPerDay.isEmpty)
+    }
+
+    @Test("runs per day round-trip through Codable")
+    func runsRoundTrip() throws {
+        let availability = RunAvailability(slots: [.saturday: [.morning, .evening]], runsPerDay: [.saturday: 2])
+
+        let data = try JSONEncoder().encode(PlanPreferences(runAvailability: availability))
+        let decoded = try JSONDecoder().decode(PlanPreferences.self, from: data)
+
+        #expect(decoded.runAvailability == availability)
+        #expect(decoded.runAvailability.runs(on: .saturday) == 2)
+    }
+
+    @Test("availability stored before runs per day existed decodes to one run a day, and one run writes no field")
+    func legacyWithoutRuns() throws {
+        let json = #"{"slots":{"7":["morning","evening"]}}"#
+
+        let decoded = try JSONDecoder().decode(RunAvailability.self, from: Data(json.utf8))
+
+        #expect(decoded.runs(on: .saturday) == 1)
+        #expect(!String(decoding: try JSONEncoder().encode(decoded), as: UTF8.self).contains("runsPerDay"))
+    }
+
+    @Test("stored counts of 1 or less and unknown weekdays are ignored on decode")
+    func runsTolerantDecoding() throws {
+        let json = #"{"slots":{"7":["morning","evening"]},"runsPerDay":{"7":2,"2":1,"3":0,"9":2}}"#
+
+        let decoded = try JSONDecoder().decode(RunAvailability.self, from: Data(json.utf8))
+
+        #expect(decoded.runsPerDay == [.saturday: 2])
+    }
 }

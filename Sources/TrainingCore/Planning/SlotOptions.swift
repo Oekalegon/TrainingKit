@@ -5,6 +5,9 @@
 /// - It puts a long run only on a slot with ``longRunPossible``.
 /// - It puts a track session only on a slot with ``trackAvailable``, and falls back to another
 ///   quality session when there is none. An interval session never requires a track.
+///
+/// Options only matter for slots that are free in ``RunAvailability/slots``. They are kept when a
+/// slot is removed, so re-adding the slot restores them.
 public struct SlotOptions: Sendable, Codable, Hashable {
     /// Whether the slot leaves enough time for a long run.
     public var longRunPossible: Bool

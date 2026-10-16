@@ -1,3 +1,5 @@
+import Foundation
+
 /// What the athlete wants from a generated plan: the generator's soft inputs.
 ///
 /// Preferences are honoured where possible but never override ``PlanGuardrails``. For now this
@@ -67,7 +69,7 @@ public struct PlanPreferences: Sendable, Codable, Hashable {
         try container.encode(runAvailability, forKey: .runAvailability)
         if !maxWeeklyVolume.isEmpty {
             let sorter = JSONEncoder()
-            sorter.outputFormatting = .sortedKeys
+            sorter.outputFormatting = JSONEncoder.OutputFormatting.sortedKeys
             let entries = try maxWeeklyVolume
                 .map { (key: try sorter.encode($0.key), limit: VolumeLimit(sport: $0.key, volume: $0.value)) }
                 .sorted { $0.key.lexicographicallyPrecedes($1.key) }

@@ -8,8 +8,10 @@ import Foundation
 /// current plan look" check.
 ///
 /// The cycle-free rules (TSB band, monotony, strain, race-day TSB) always run.
-/// The build-progression rule additionally runs whenever `cycles` is non-empty; see
-/// ``evaluate(_:races:cycles:guardrails:)``.
+/// The build-progression rule additionally runs whenever `cycles` is non-empty, and the three
+/// paradigm rules (intensity distribution, hard-session spacing, hard sessions per micro) run
+/// when a ``TrainingParadigm`` is supplied; see
+/// ``evaluate(_:races:cycles:guardrails:sessions:paradigm:)``.
 public struct PlanEvaluator: Sendable {
     /// Creates a plan evaluator.
     public init() {}
@@ -28,13 +30,22 @@ public struct PlanEvaluator: Sendable {
     ///     never crashes or silently skips the rules that don't need cycles, it just can't run the
     ///     ones that do.
     ///   - guardrails: The thresholds to check against; defaults to ``PlanGuardrails``'s defaults.
+    ///     A supplied `paradigm`'s ``TrainingParadigm/guardrailOverrides`` are applied on top.
+    ///   - sessions: The planned sessions the paradigm rules read; day-granular in the same
+    ///     timezone as `metrics`. Ignored without a `paradigm`.
+    ///   - paradigm: The training paradigm to check the plan against. Without one, the three
+    ///     paradigm rules are skipped and the result is exactly as before paradigms existed.
     /// - Returns: Every finding from every rule that could run, in chronological order.
     public func evaluate(
         _ metrics: [FitnessMetrics],
         races: [Race],
         cycles: [TrainingCycle] = [],
-        guardrails: PlanGuardrails = PlanGuardrails()
+        guardrails: PlanGuardrails = PlanGuardrails(),
+        sessions: [PlanSession] = [],
+        paradigm: TrainingParadigm? = nil
     ) -> PlanEvaluation {
+        let guardrails = paradigm.map { $0.guardrailOverrides.applied(to: guardrails) } ?? guardrails
+
         // `uniquingKeysWith` rather than `uniqueKeysWithValues:` — the latter traps if `metrics`
         // ever contains two entries for the same day, which nothing here enforces against caller
         // input; keeping the later entry mirrors "last write wins" for any accidental duplicate.
@@ -48,6 +59,14 @@ public struct PlanEvaluator: Sendable {
 
         if !cycles.isEmpty {
             findings += buildProgressionFindings(cycles: cycles, metrics: metrics, guardrails: guardrails)
+        }
+
+        if let paradigm {
+            findings += hardSessionSpacingFindings(sessions: sessions, paradigm: paradigm)
+            if !cycles.isEmpty {
+                findings += hardSessionsPerMicroFindings(sessions: sessions, cycles: cycles, paradigm: paradigm)
+                findings += intensityDistributionFindings(sessions: sessions, cycles: cycles, paradigm: paradigm)
+            }
         }
 
         return PlanEvaluation(findings: findings.sorted { $0.day < $1.day })

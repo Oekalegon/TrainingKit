@@ -1,4 +1,4 @@
-/// The result of running ``PlanEvaluator/evaluate(_:races:cycles:guardrails:)``.
+/// The result of running ``PlanEvaluator/evaluate(_:races:cycles:guardrails:sessions:paradigm:)``.
 public struct PlanEvaluation: Sendable, Hashable {
     /// Every guardrail observation from the evaluation, in chronological order.
     public let findings: [PlanFinding]

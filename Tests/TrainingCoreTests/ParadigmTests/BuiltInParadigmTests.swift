@@ -52,11 +52,23 @@ struct BuiltInParadigmTests {
         #expect(!findings(.polarized8020, hard, length: 10, phase: .build).contains { $0.rule == .hardSessionsPerMicro })
     }
 
-    @Test("polarized: consecutive hard days break the spacing rule; back-to-back easy long runs do not")
-    func polarizedSpacing() {
+    @Test("both built-ins space a long run like a hard session; an ultra-style paradigm can opt out")
+    func longRunSpacing() {
         #expect(findings(.polarized8020, [session(0, .high, minutes: 10), session(1, .high, minutes: 10)], phase: .build).contains { $0.rule == .hardSessionSpacing })
-        let longRuns = [session(5, .low, minutes: 150), session(6, .low, minutes: 150)]
-        #expect(findings(.polarized8020, longRuns, phase: .build).filter { $0.rule == .hardSessionSpacing }.isEmpty)
+        let long = PlanSession(day: day(5), seconds: 9000, intensity: .low, speed: .slow, isLongRun: true)
+        let hardNext = session(6, .high, minutes: 20)
+        let afterLong = PlanSession(day: day(6), seconds: 9000, intensity: .low, speed: .slow, isLongRun: true)
+        for paradigm in TrainingParadigm.builtIn {
+            #expect(findings(paradigm, [long, hardNext], phase: .base).contains { $0.rule == .hardSessionSpacing })
+            #expect(findings(paradigm, [long, afterLong], phase: .base).contains { $0.rule == .hardSessionSpacing })
+        }
+        // Long runs do not count towards the per-micro maximum.
+        let three = [long, session(2, .high, minutes: 20), session(4, .high, minutes: 20)]
+        #expect(!findings(.polarized8020, three, phase: .build).contains { $0.rule == .hardSessionsPerMicro })
+
+        var ultra = TrainingParadigm.polarized8020
+        ultra.spacesLongRunsAsHard = false
+        #expect(!findings(ultra, [long, afterLong], phase: .build).contains { $0.rule == .hardSessionSpacing })
     }
 
     @Test("triphasic: base allows slow runs and max-speed sprints but not tempo or fast work")

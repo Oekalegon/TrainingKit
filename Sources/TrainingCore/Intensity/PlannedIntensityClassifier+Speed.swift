@@ -22,12 +22,14 @@ extension PlannedIntensityClassifier {
     ///   - day: The calendar day of the session.
     ///   - workout: The planned workout.
     ///   - athlete: The athlete whose zones and pace model resolve the steps' targets.
-    public func session(on day: Date, for workout: StructuredWorkout, athlete: AthleteProfile) -> PlanSession {
+    ///   - isLongRun: Whether the workout is its micro's long run; defaults to `false`.
+    public func session(on day: Date, for workout: StructuredWorkout, athlete: AthleteProfile, isLongRun: Bool = false) -> PlanSession {
         PlanSession(
             day: day,
             seconds: plannedSteps(workout, athlete: athlete).reduce(0) { $0 + $1.seconds },
             intensity: assess(workout, athlete: athlete).category,
-            speed: speedLevel(of: workout, athlete: athlete)
+            speed: speedLevel(of: workout, athlete: athlete),
+            isLongRun: isLongRun
         )
     }
 }

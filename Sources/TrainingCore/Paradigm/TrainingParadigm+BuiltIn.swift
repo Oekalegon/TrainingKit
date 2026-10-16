@@ -8,13 +8,14 @@ extension TrainingParadigm {
     ///   ``IntensityCategory/veryLow`` are left unlisted, so both count as the easy remainder.
     /// - Hard: intensity of ``IntensityCategory/high`` or more; speed is ignored.
     /// - Spacing: at least 2 days between hard sessions, so never on consecutive days. Long runs
-    ///   are easy, so back-to-back long runs are not affected.
+    ///   are spaced like hard sessions (``spacesLongRunsAsHard``).
     /// - Hard sessions per micro: at most 2 in a 7-day micro, 3 in 10 days, 4 in 14 days.
     public static let polarized8020 = TrainingParadigm(
         name: "80/20 polarized",
         phases: [.base, .build, .peak, .taper],
         defaultMix: IntensityMix(intensityShares: [.high: 0.2, .medium: 0], tolerance: 0.05),
         hardIntensity: .high,
+        spacesLongRunsAsHard: true,
         minDaysBetweenHardSessions: 2,
         maxHardSessionsPerMicro: [7: 2, 10: 3, 14: 4]
     )
@@ -32,7 +33,7 @@ extension TrainingParadigm {
     ///   work. Structural, specific and taper have no target yet.
     /// - Hard: intensity of ``IntensityCategory/high`` or more, or ``SpeedLevel/max`` speed, so an
     ///   easy session of maximal 8-second sprints is placed like a hard day.
-    /// - Spacing: at least 2 days between hard sessions.
+    /// - Spacing: at least 2 days between hard sessions; long runs are spaced like hard sessions.
     /// - Hard sessions per micro: no limit; the athlete sets the number of sessions per micro.
     public static let triphasic = TrainingParadigm(
         name: "Triphasic",
@@ -51,6 +52,7 @@ extension TrainingParadigm {
         ],
         hardIntensity: .high,
         hardSpeed: .max,
+        spacesLongRunsAsHard: true,
         minDaysBetweenHardSessions: 2
     )
 

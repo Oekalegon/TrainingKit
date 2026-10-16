@@ -1,7 +1,7 @@
 import Foundation
 
 /// The `cycles`-dependent rule from design doc §10.4, split out of the main file since it only
-/// runs when the caller supplies cycles (see ``PlanEvaluator/evaluate(_:races:cycles:guardrails:)``).
+/// runs when the caller supplies cycles (see ``PlanEvaluator/evaluate(_:races:cycles:guardrails:sessions:paradigm:)``).
 extension PlanEvaluator {
     /// A build-role micro's mean daily load relative to the previous build-role micro (skipping over
     /// any recovery micros in between). Below 0% is ``Severity/info`` (the plan isn't building, but

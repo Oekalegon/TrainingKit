@@ -13,6 +13,10 @@ public struct PlanFinding: Sendable, Hashable {
     public let value: Double
     /// The guardrail threshold `value` was compared against.
     public let threshold: Double
+    /// What within the rule the finding is about, when a rule checks several things at once: for
+    /// ``PlanRule/intensityDistribution`` the intensity category or speed level that missed its
+    /// share (`"intensity.high"`, `"speed.max"`); `nil` for every other rule.
+    public let subject: String?
 
     /// Creates a plan finding.
     ///
@@ -22,11 +26,13 @@ public struct PlanFinding: Sendable, Hashable {
     ///   - severity: How urgently this should be acted on.
     ///   - value: The computed signal value that triggered this finding.
     ///   - threshold: The guardrail threshold `value` was compared against.
-    public init(day: Date, rule: PlanRule, severity: Severity, value: Double, threshold: Double) {
+    ///   - subject: What within the rule the finding is about; defaults to `nil`.
+    public init(day: Date, rule: PlanRule, severity: Severity, value: Double, threshold: Double, subject: String? = nil) {
         self.day = day
         self.rule = rule
         self.severity = severity
         self.value = value
         self.threshold = threshold
+        self.subject = subject
     }
 }

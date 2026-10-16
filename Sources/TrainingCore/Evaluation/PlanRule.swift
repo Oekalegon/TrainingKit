@@ -1,7 +1,9 @@
 /// Which guardrail a ``PlanFinding`` came from.
 ///
-/// The first four run on `[FitnessMetrics]` alone; the last needs the `cycles` parameter of
-/// ``PlanEvaluator/evaluate(_:races:cycles:guardrails:)`` and is skipped without it.
+/// The first four run on `[FitnessMetrics]` alone; ``buildProgression`` needs the `cycles`
+/// parameter of ``PlanEvaluator/evaluate(_:races:cycles:guardrails:sessions:paradigm:)`` and is
+/// skipped without it. The last three are the paradigm rules: they run only when a
+/// ``TrainingParadigm`` is supplied, and the two that read micros also need `cycles`.
 public enum PlanRule: Sendable, Codable, Hashable {
     /// A day's monotony against ``PlanGuardrails/maxMonotony``.
     case monotony
@@ -18,4 +20,14 @@ public enum PlanRule: Sendable, Codable, Hashable {
     /// A build-phase micro's load relative to the previous build-phase micro, against
     /// ``PlanGuardrails/maxBuildProgressionFraction``.
     case buildProgression
+    /// A micro's share of planned time per intensity category or speed level against the target of
+    /// its phase in ``TrainingParadigm/phaseMixes``/``TrainingParadigm/defaultMix`` (``IntensityMix``).
+    /// A ``Severity/warning``.
+    case intensityDistribution
+    /// Two hard sessions closer than ``TrainingParadigm/minDaysBetweenHardSessions``.
+    /// A ``Severity/risk``.
+    case hardSessionSpacing
+    /// More hard sessions in a micro than ``TrainingParadigm/maxHardSessionsPerMicro`` allows for
+    /// its length. A ``Severity/risk``.
+    case hardSessionsPerMicro
 }

@@ -696,8 +696,23 @@ Rules, all computed from the projected series:
 | Race-day TSB | TSB on `Race.date` | Taper landed: positive but not so high that fitness was lost (a warning, not a risk) |
 | TSB band | TSB on any day | Below `minAcceptableTSB` (−30) is the injury-risk band; above `maxAcceptableTSB` (25) reads as detraining (a warning) |
 | Build progression | mean daily load of a build-role micro vs the previous build-role micro | Cycle-aware (§10.4); to be replaced by a longest-run rule (MVP5-116) |
+| Paradigm rules | intensity distribution, hard-session spacing, hard sessions per micro | only with a `TrainingParadigm` (see "Paradigm rules" below) |
 
 Earlier iterations also had a CTL-ramp rule (CTL[d] − CTL[d−7]), an ATL/CTL ratio, and cycle-aware recovery-micro, meso-progress, taper-shape and consecutive-load rules. They were removed (MVP5-101 review) as thresholds nobody had asked for; ramp control is left to the generator's own volume curve (MVP5-117) and `buildProgression`. Only `.risk` findings make a plan unacceptable, so a missed race-day TSB or an over-high TSB is reported but doesn't by itself send the generator back to adjust.
+
+#### Paradigm rules (MVP5-102)
+
+A `TrainingParadigm` (name, `phases: [CyclePhase]` in order, `guardrailOverrides: PlanGuardrails.Overrides`, the settings below) turns on three more rules. They run only when `PlanEvaluator.evaluate(_:races:cycles:guardrails:sessions:paradigm:)` gets a paradigm; without one the result is exactly as before. The paradigm's overrides are applied on top of `guardrails` first. `PlanGuardrails.Overrides` is a struct of optionals, one per threshold; a `nil` field leaves the default.
+
+The rules read `sessions: [PlanSession]` (day, planned seconds, `IntensityCategory`, `SpeedLevel`), so the evaluator stays a pure function. Two independent scales describe a session: **intensity** (from time in zones, §intensity classification) and **speed** (`slow`/`moderate`/`fast`/`max`, the highest zone of the work steps, however short; `PlannedIntensityClassifier.speedLevel(of:athlete:)`). Hill sprints are `low` intensity but `max` speed.
+
+| Rule | Signal | Check | Severity |
+|---|---|---|---|
+| `intensityDistribution` | per micro, share of planned time per intensity category and per speed level | each *listed* share within `tolerance` of its target in the phase's `IntensityMix` (`phaseMixes[phase]`, else `defaultMix`); polarized 80/20 is `[.low: 0.8, .high: 0.2]`, a base phase of easy runs lists `.medium`/`.high` at 0 | warning |
+| `hardSessionSpacing` | days between consecutive hard sessions | at least `minDaysBetweenHardSessions` (Tue to Thu is 2; `nil` = off) | risk |
+| `hardSessionsPerMicro` | hard sessions in a micro | at most `maxHardSessionsPerMicro[length in days]`; a length with no entry is not checked, so 7-, 10- and 14-day micros are set independently | risk |
+
+A session is *hard* when its intensity is at least `hardIntensity` (default `.high`) or, if the paradigm sets `hardSpeed`, its speed is at least that, so a paradigm can put max-speed easy runs on the hard days while the distribution still counts their time as easy. The distribution and per-micro rules need `cycles`; spacing does not. `PlanFinding.subject` names the category or level a distribution finding is about (`"intensity.high"`, `"speed.max"`). Boundaries pass (a share exactly at the tolerance, a count exactly at the maximum). The built-in paradigms (80/20 polarized, triphasic) are MVP5-103.
 
 Guardrail values are `Codable` and user-editable; MVP 4 can tune them from observed outcomes (e.g. the athlete who tolerates a lower TSB without issue).
 
@@ -1080,7 +1095,7 @@ Added to `PlanGuardrails` (§8.2):
 |---|---|---|
 | Build progression | mean daily load of a build micro vs the previous build micro (per day, so 7-, 10- and 14-day micros compare alike) | between 0 % and ~+10 % |
 
-`PlanEvaluator.evaluate` gains a `cycles: [TrainingCycle]` parameter; without cycles it falls back to the cycle-free rules from §8.2.
+`PlanEvaluator.evaluate` gains a `cycles: [TrainingCycle]` parameter (the micro-based paradigm rules of §8.2 read it too); without cycles it falls back to the cycle-free rules from §8.2.
 
 ---
 

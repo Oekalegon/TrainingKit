@@ -76,6 +76,8 @@ See `docs/design/trainingKit-design.md` in the package repository for the full m
 - ``PlanStatus``
 - ``PlanPreferences``
 - ``RunAvailability``
+- ``RunType``
+- ``SessionType``
 - ``DaySlot``
 - ``SlotOptions``
 - ``PlannedLoadEstimator``

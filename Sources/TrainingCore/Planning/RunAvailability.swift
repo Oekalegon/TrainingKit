@@ -15,6 +15,13 @@
 /// has more runs than free parts. Read the number through ``runs(on:)``,
 /// which applies that cap, rather than ``runsPerDay``.
 ///
+/// The athlete can also say which ``RunType``s they want on which weekday (``runTypes(on:)``). A day
+/// can name several types (Thursday: interval and threshold) and the generator decides which one it
+/// places. Naming a type ties it to the days that name it, so a long run named for Sunday goes only
+/// on Sunday; a type no weekday names is free and allowed on every running day, named or not, so the
+/// generator may put an easy run on a Sunday that names a long run. Several weekdays can name the
+/// same type (long on Saturday and Sunday) and the generator picks one or more of them.
+///
 /// Availability stored with the former combined `afternoonEvening` slot decodes to both
 /// ``DaySlot/afternoon`` and ``DaySlot/evening``, with its options on both, so it keeps its meaning.
 public struct RunAvailability: Sendable, Codable, Hashable {
@@ -30,6 +37,10 @@ public struct RunAvailability: Sendable, Codable, Hashable {
     /// effective number through ``runs(on:)``.
     public private(set) var runsPerDay: [Weekday: Int]
 
+    /// The run types named per weekday. A weekday never maps to an empty set: empty entries are
+    /// removed. Read the effective types through ``runTypes(on:)``.
+    public private(set) var dayRunTypes: [Weekday: Set<RunType>]
+
     /// Creates availability from the free slots per weekday.
     ///
     /// - Parameters:
@@ -39,14 +50,18 @@ public struct RunAvailability: Sendable, Codable, Hashable {
     ///     are dropped. Defaults to the default options on every slot.
     ///   - runsPerDay: The number of runs per weekday. Values of 1 or less are dropped (a day has at
     ///     least one run, the default). Defaults to one run on every day.
+    ///   - dayRunTypes: The run types named per weekday. Empty sets are dropped. Defaults to none, so
+    ///     every running day allows every run type.
     public init(
         slots: [Weekday: Set<DaySlot>] = [:],
         slotOptions: [Weekday: [DaySlot: SlotOptions]] = [:],
-        runsPerDay: [Weekday: Int] = [:]
+        runsPerDay: [Weekday: Int] = [:],
+        dayRunTypes: [Weekday: Set<RunType>] = [:]
     ) {
         self.slots = slots.filter { !$0.value.isEmpty }
         self.slotOptions = Self.sparse(slotOptions)
         self.runsPerDay = runsPerDay.filter { $0.value > 1 }
+        self.dayRunTypes = dayRunTypes.filter { !$0.value.isEmpty }
     }
 
     private static func sparse(_ options: [Weekday: [DaySlot: SlotOptions]]) -> [Weekday: [DaySlot: SlotOptions]] {
@@ -87,6 +102,30 @@ public struct RunAvailability: Sendable, Codable, Hashable {
         runsPerDay[weekday] = count > 1 ? count : nil
     }
 
+    /// The run types the generator may place on a weekday: the types the weekday names plus every
+    /// type that no weekday names. Empty on a day without free slots (no running that day). It is
+    /// also empty for an unnamed weekday when the athlete has named every type on other days.
+    ///
+    /// - Parameter weekday: The weekday to read.
+    public func runTypes(on weekday: Weekday) -> Set<RunType> {
+        guard !self[weekday].isEmpty else { return [] }
+        let named = dayRunTypes.values.reduce(into: Set<RunType>()) { $0.formUnion($1) }
+        return (dayRunTypes[weekday] ?? []).union(Set(RunType.allCases).subtracting(named))
+    }
+
+    /// Sets the run types named for a weekday.
+    ///
+    /// The types are kept as given, also on a weekday without free slots, so they return when slots
+    /// are added; ``runTypes(on:)`` is empty on such a day. An empty set removes the entry, so the
+    /// weekday names nothing.
+    ///
+    /// - Parameters:
+    ///   - types: The run types to name.
+    ///   - weekday: The weekday they apply to.
+    public mutating func setRunTypes(_ types: Set<RunType>, on weekday: Weekday) {
+        dayRunTypes[weekday] = types.isEmpty ? nil : types
+    }
+
     /// The free slots on a weekday; an empty set means the athlete does not run that day.
     ///
     /// Assigning an empty set removes the weekday.
@@ -96,13 +135,14 @@ public struct RunAvailability: Sendable, Codable, Hashable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case slots, slotOptions, runsPerDay
+        case slots, slotOptions, runsPerDay, dayRunTypes
     }
 
     /// Decodes availability, ignoring weekdays and slots this version does not know (for instance
     /// written by a newer version) and treating a missing `slots` as no availability and a missing
     /// `slotOptions` as the default options on every slot. A missing `runsPerDay` means one run a
-    /// day; entries of 1 or less, or for unknown weekdays, are dropped. The legacy `afternoonEvening`
+    /// day; entries of 1 or less, or for unknown weekdays, are dropped. A missing `dayRunTypes` means no
+    /// run types named; unknown run types and weekdays are dropped, and a weekday left with none is too. The legacy `afternoonEvening`
     /// slot and options key stand for both ``DaySlot/afternoon`` and ``DaySlot/evening``; when
     /// options are stored under the legacy key and under a new name, the new name's options win.
     /// Saving it again writes only what was understood, in the new form, so the unknown values are
@@ -140,6 +180,15 @@ public struct RunAvailability: Sendable, Codable, Hashable {
             decodedRuns[weekday] = count
         }
         runsPerDay = decodedRuns
+
+        let rawTypes = try container.decodeIfPresent([String: [String]].self, forKey: .dayRunTypes) ?? [:]
+        var decodedTypes: [Weekday: Set<RunType>] = [:]
+        for (key, names) in rawTypes {
+            guard let rawValue = Int(key), let weekday = Weekday(rawValue: rawValue) else { continue }
+            let known = Set(names.compactMap(RunType.init(rawValue:)))
+            if !known.isEmpty { decodedTypes[weekday] = known }
+        }
+        dayRunTypes = decodedTypes
     }
 
     /// Encodes the slots keyed by the weekday's raw value (1 = Sunday), with slot names sorted so the
@@ -159,6 +208,9 @@ public struct RunAvailability: Sendable, Codable, Hashable {
         }
         if !runsPerDay.isEmpty {
             try container.encode(Dictionary(uniqueKeysWithValues: runsPerDay.map { (String($0.key.rawValue), $0.value) }), forKey: .runsPerDay)
+        }
+        if !dayRunTypes.isEmpty {
+            try container.encode(Dictionary(uniqueKeysWithValues: dayRunTypes.map { (String($0.key.rawValue), $0.value.map(\.rawValue).sorted()) }), forKey: .dayRunTypes)
         }
     }
 }

@@ -712,6 +712,18 @@ The rules read `sessions: [PlanSession]` (day, planned seconds, `IntensityCatego
 | `hardSessionSpacing` | days between consecutive hard sessions | at least `minDaysBetweenHardSessions` (Tue to Thu is 2; `nil` = off) | risk |
 | `hardSessionsPerMicro` | hard sessions in a micro | at most `maxHardSessionsPerMicro[length in days]`; a length with no entry is not checked, so 7-, 10- and 14-day micros are set independently | risk |
 
+**Built-in paradigms (MVP5-103)** are static `TrainingParadigm` values, `TrainingParadigm.builtIn` lists them; they hold rules data only (layout such as micro length, meso pattern and phase lengths belongs to the generator):
+
+| | `polarized8020` | `triphasic` |
+|---|---|---|
+| Phases | base, build, peak, taper | conditioning, base, structural, specific, taper (`CyclePhase.conditioning/.structural/.specific`) |
+| Distribution (per micro, ±0.05) | `high` 0.2, `medium` 0; `low` and `veryLow` unlisted, so both are the easy remainder | conditioning: `medium`/`high` 0, speed `moderate`/`fast`/`max` 0; base: `medium`/`high` 0, speed `moderate`/`fast` 0 (slow running and max-speed sprints allowed); later phases: none yet |
+| Hard | intensity ≥ `high` | intensity ≥ `high` or speed `max` (so 8 s sprints are placed like a hard day) |
+| Spacing | at least 2 days; long runs are spaced like hard sessions (`spacesLongRunsAsHard`) | same |
+| Hard per micro | 7 d: 2, 10 d: 3, 14 d: 4 | no limit (the athlete sets sessions per micro) |
+
+Long runs (`PlanSession.isLongRun`) are spaced like hard sessions but do not count towards the per-micro maximum. A paradigm for ultra distances, where full-length long runs are not possible, sets `spacesLongRunsAsHard` to `false`. The structural and specific session profiles (interval work lengths, race-target fractions) are still MVP5-100 and the generator's.
+
 A session is *hard* when its intensity is at least `hardIntensity` (default `.high`) or, if the paradigm sets `hardSpeed`, its speed is at least that, so a paradigm can put max-speed easy runs on the hard days while the distribution still counts their time as easy. The distribution and per-micro rules need `cycles`; spacing does not. `PlanFinding.subject` names the category or level a distribution finding is about (`"intensity.high"`, `"speed.max"`). Boundaries pass (a share exactly at the tolerance, a count exactly at the maximum). The built-in paradigms (80/20 polarized, triphasic) are MVP5-103.
 
 Guardrail values are `Codable` and user-editable; MVP 4 can tune them from observed outcomes (e.g. the athlete who tolerates a lower TSB without issue).

@@ -32,6 +32,11 @@ public struct TrainingParadigm: Sendable, Codable, Hashable {
     public var hardIntensity: IntensityCategory
     /// The lowest speed level that makes a session hard; `nil` (the default) to ignore speed.
     public var hardSpeed: SpeedLevel?
+    /// Whether ``PlanSession/isLongRun`` sessions count as hard for ``PlanRule/hardSessionSpacing``
+    /// (but not for ``maxHardSessionsPerMicro``). A long run is usually spaced like a hard session;
+    /// a paradigm for ultra distances, where long runs of full length are not possible, sets this
+    /// to `false`. Defaults to `false`.
+    public var spacesLongRunsAsHard: Bool
     /// The minimum number of days from one hard session to the next (Tuesday to Thursday is 2);
     /// `nil` switches ``PlanRule/hardSessionSpacing`` off.
     public var minDaysBetweenHardSessions: Int?
@@ -49,6 +54,7 @@ public struct TrainingParadigm: Sendable, Codable, Hashable {
     ///   - phaseMixes: The distribution target per phase; defaults to none.
     ///   - hardIntensity: The lowest intensity category that makes a session hard; defaults to `.high`.
     ///   - hardSpeed: The lowest speed level that makes a session hard; defaults to `nil`.
+    ///   - spacesLongRunsAsHard: Whether long runs are spaced like hard sessions; defaults to `false`.
     ///   - minDaysBetweenHardSessions: The minimum days between hard sessions; `nil` for no check.
     ///   - maxHardSessionsPerMicro: The maximum hard sessions per micro, by micro length in days.
     public init(
@@ -59,6 +65,7 @@ public struct TrainingParadigm: Sendable, Codable, Hashable {
         phaseMixes: [CyclePhase: IntensityMix] = [:],
         hardIntensity: IntensityCategory = .high,
         hardSpeed: SpeedLevel? = nil,
+        spacesLongRunsAsHard: Bool = false,
         minDaysBetweenHardSessions: Int? = nil,
         maxHardSessionsPerMicro: [Int: Int] = [:]
     ) {
@@ -69,6 +76,7 @@ public struct TrainingParadigm: Sendable, Codable, Hashable {
         self.phaseMixes = phaseMixes
         self.hardIntensity = hardIntensity
         self.hardSpeed = hardSpeed
+        self.spacesLongRunsAsHard = spacesLongRunsAsHard
         self.minDaysBetweenHardSessions = minDaysBetweenHardSessions
         self.maxHardSessionsPerMicro = maxHardSessionsPerMicro
     }
@@ -82,8 +90,16 @@ public struct TrainingParadigm: Sendable, Codable, Hashable {
         return false
     }
 
+    /// Whether `session` counts as hard when spacing sessions: ``isHard(_:)``, or a long run when
+    /// ``spacesLongRunsAsHard`` is set.
+    ///
+    /// - Parameter session: The session to judge.
+    public func isHardForSpacing(_ session: PlanSession) -> Bool {
+        isHard(session) || (spacesLongRunsAsHard && session.isLongRun)
+    }
+
     private enum CodingKeys: String, CodingKey {
-        case name, phases, guardrailOverrides, defaultMix, phaseMixes, hardIntensity, hardSpeed
+        case name, phases, guardrailOverrides, defaultMix, phaseMixes, hardIntensity, hardSpeed, spacesLongRunsAsHard
         case minDaysBetweenHardSessions, maxHardSessionsPerMicro
     }
 
@@ -98,6 +114,7 @@ public struct TrainingParadigm: Sendable, Codable, Hashable {
         phaseMixes = Dictionary(mixes.map { (CyclePhase($0.key), $0.value) }, uniquingKeysWith: { first, _ in first })
         hardIntensity = try container.decodeIfPresent(IntensityCategory.self, forKey: .hardIntensity) ?? .high
         hardSpeed = try container.decodeIfPresent(SpeedLevel.self, forKey: .hardSpeed)
+        spacesLongRunsAsHard = try container.decodeIfPresent(Bool.self, forKey: .spacesLongRunsAsHard) ?? false
         minDaysBetweenHardSessions = try container.decodeIfPresent(Int.self, forKey: .minDaysBetweenHardSessions)
         let limits = try container.decodeIfPresent([String: Int].self, forKey: .maxHardSessionsPerMicro) ?? [:]
         maxHardSessionsPerMicro = Dictionary(limits.compactMap { key, value in Int(key).map { ($0, value) } }, uniquingKeysWith: { first, _ in first })
@@ -113,6 +130,7 @@ public struct TrainingParadigm: Sendable, Codable, Hashable {
         try container.encode(Dictionary(uniqueKeysWithValues: phaseMixes.map { ($0.key.id, $0.value) }), forKey: .phaseMixes)
         try container.encode(hardIntensity, forKey: .hardIntensity)
         try container.encodeIfPresent(hardSpeed, forKey: .hardSpeed)
+        try container.encode(spacesLongRunsAsHard, forKey: .spacesLongRunsAsHard)
         try container.encodeIfPresent(minDaysBetweenHardSessions, forKey: .minDaysBetweenHardSessions)
         try container.encode(Dictionary(uniqueKeysWithValues: maxHardSessionsPerMicro.map { (String($0.key), $0.value) }), forKey: .maxHardSessionsPerMicro)
     }

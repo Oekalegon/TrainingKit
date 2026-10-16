@@ -7,7 +7,7 @@ extension PlanEvaluator {
     /// Slack for comparing shares that are sums of floating-point fractions against a bound.
     private static let shareEpsilon = 1e-9
 
-    /// Two hard sessions closer together than ``TrainingParadigm/minDaysBetweenHardSessions``.
+    /// Two hard sessions (or long runs, if the paradigm spaces them as hard) closer together than ``TrainingParadigm/minDaysBetweenHardSessions``.
     ///
     /// Compares each hard session with the previous one in date order, so two on the same day
     /// (0 days apart) fail any minimum of 1 or more. A ``Severity/risk`` dated at the later
@@ -15,7 +15,7 @@ extension PlanEvaluator {
     /// calendar days, rounded, so a daylight-saving day does not change the count.
     func hardSessionSpacingFindings(sessions: [PlanSession], paradigm: TrainingParadigm) -> [PlanFinding] {
         guard let minimum = paradigm.minDaysBetweenHardSessions else { return [] }
-        let hard = sessions.filter(paradigm.isHard).sorted { $0.day < $1.day }
+        let hard = sessions.filter(paradigm.isHardForSpacing).sorted { $0.day < $1.day }
         var findings: [PlanFinding] = []
         for (previous, current) in zip(hard, hard.dropFirst()) {
             let gap = Int((current.day.timeIntervalSince(previous.day) / Self.secondsPerDay).rounded())

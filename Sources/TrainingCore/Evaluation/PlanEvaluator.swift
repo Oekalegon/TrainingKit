@@ -7,8 +7,8 @@ import Foundation
 /// ``PlanEvaluation/isAcceptable``, but MVP 1 already exposes this as a read-only "how does my
 /// current plan look" check.
 ///
-/// The cycle-free rules (TSB band, monotony, strain, race-day TSB) always run.
-/// The build-progression rule additionally runs whenever `cycles` is non-empty, and the three
+/// The metric rules (TSB band, monotony, strain, race-day TSB) always run, and the longest-run
+/// rule runs on whatever `sessions` it is given. The three
 /// paradigm rules (intensity distribution, hard-session spacing, hard sessions per micro) run
 /// when a ``TrainingParadigm`` is supplied; see
 /// ``evaluate(_:races:cycles:guardrails:sessions:paradigm:)``.
@@ -20,19 +20,18 @@ public struct PlanEvaluator: Sendable {
     ///
     /// - Parameters:
     ///   - metrics: The projected fitness series to evaluate. Must be gap-free and chronologically
-    ///     ordered, as produced by ``FitnessMetricsCalculator`` — the CTL-ramp and consecutive-load
-    ///     rules rely on this rather than re-deriving day boundaries from a timezone this type
-    ///     never receives.
+    ///     ordered, as produced by ``FitnessMetricsCalculator``, so the rules don't re-derive day boundaries from a timezone
+    ///     this type never receives.
     ///   - races: Races to check race-day TSB for. A race whose `date` doesn't match a day in
     ///     `metrics` exactly is skipped.
     ///   - cycles: The macro/meso/micro cycles the plan is laid out against, e.g. from
-    ///     ``CycleLayoutBuilder``. Without cycles, only the cycle-free rules run — the evaluator
-    ///     never crashes or silently skips the rules that don't need cycles, it just can't run the
-    ///     ones that do.
+    ///     ``CycleLayoutBuilder``. Only the paradigm rules that read micros (hard sessions per micro,
+    ///     intensity distribution) use them; the others run without.
     ///   - guardrails: The thresholds to check against; defaults to ``PlanGuardrails``'s defaults.
     ///     A supplied `paradigm`'s ``TrainingParadigm/guardrailOverrides`` are applied on top.
-    ///   - sessions: The planned sessions the paradigm rules read; day-granular in the same
-    ///     timezone as `metrics`. Ignored without a `paradigm`.
+    ///   - sessions: The planned runs, day-granular in the same timezone as `metrics`: the
+    ///     longest-run rule reads them, and so do the paradigm rules. Include the recent past runs
+    ///     so a plan's first weeks have a longest run to compare with.
     ///   - paradigm: The training paradigm to check the plan against. Without one, the three
     ///     paradigm rules are skipped and the result is exactly as before paradigms existed.
     /// - Returns: Every finding from every rule that could run, in chronological order.
@@ -57,9 +56,7 @@ public struct PlanEvaluator: Sendable {
         findings += strainFindings(metrics: metrics, guardrails: guardrails)
         findings += raceDayTSBFindings(metricsByDay: metricsByDay, races: races, guardrails: guardrails)
 
-        if !cycles.isEmpty {
-            findings += buildProgressionFindings(cycles: cycles, metrics: metrics, guardrails: guardrails)
-        }
+        findings += longestRunFindings(sessions: sessions, guardrails: guardrails)
 
         if let paradigm {
             findings += hardSessionSpacingFindings(sessions: sessions, paradigm: paradigm)

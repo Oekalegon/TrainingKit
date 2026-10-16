@@ -1,0 +1,35 @@
+import Foundation
+
+extension PlanEvaluator {
+    private static let secondsPerDay: TimeInterval = 86_400
+    /// The look-back for the longest previous run, in days (four weeks, whatever the micro length).
+    static let longestRunLookBackDays = 28
+    private static let fractionEpsilon = 1e-9
+
+    /// A run longer than the longest run of the previous ``longestRunLookBackDays`` days by more
+    /// than ``PlanGuardrails/maxLongestRunIncreaseFraction``.
+    ///
+    /// Every session counts as a run, of any type, and is compared by planned duration with the
+    /// longest session from the 28 days before its day (the day itself is not part of the look-back).
+    /// A session with no run in that look-back is not checked. A ``Severity/risk`` dated at the
+    /// session; `value` is the fractional increase and `threshold` the limit. Each run is judged
+    /// against the earlier runs of the plan, so a chain of runs each within the limit of the last
+    /// is allowed. Day gaps are whole calendar days, rounded, so a daylight-saving day does not
+    /// shift the window.
+    func longestRunFindings(sessions: [PlanSession], guardrails: PlanGuardrails) -> [PlanFinding] {
+        let ordered = sessions.filter { $0.seconds > 0 }.sorted { $0.day < $1.day }
+        var findings: [PlanFinding] = []
+        for run in ordered {
+            let previous = ordered.filter { other in
+                let gap = Int((run.day.timeIntervalSince(other.day) / Self.secondsPerDay).rounded())
+                return gap >= 1 && gap <= Self.longestRunLookBackDays
+            }
+            guard let longest = previous.map(\.seconds).max() else { continue }
+            let increase = (run.seconds - longest) / longest
+            if increase > guardrails.maxLongestRunIncreaseFraction + Self.fractionEpsilon {
+                findings.append(PlanFinding(day: run.day, rule: .longestRun, severity: .risk, value: increase, threshold: guardrails.maxLongestRunIncreaseFraction))
+            }
+        }
+        return findings
+    }
+}

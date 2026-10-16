@@ -678,7 +678,7 @@ struct PlanGuardrails: Sendable, Codable {
     var minAcceptableTSB: Double = -30         // any day
     var maxAcceptableTSB: Double = 25          // any day
     var strainTrailingWindowDays: Int = 84
-    var maxBuildProgressionFraction: Double = 0.10
+    var maxLongestRunIncreaseFraction: Double = 0.10   // a run vs the longest of the previous 28 days
 }
 
 struct PlanEvaluator: Sendable {
@@ -695,10 +695,10 @@ Rules, all computed from the projected series:
 | Strain | weekly load × monotony | Absolute thresholds don't transfer across athletes in TRIMP units, so compare against the athlete's own trailing distribution |
 | Race-day TSB | TSB on `Race.date` | Taper landed: positive but not so high that fitness was lost (a warning, not a risk) |
 | TSB band | TSB on any day | Below `minAcceptableTSB` (−30) is the injury-risk band; above `maxAcceptableTSB` (25) reads as detraining (a warning) |
-| Build progression | mean daily load of a build-role micro vs the previous build-role micro | Cycle-aware (§10.4); to be replaced by a longest-run rule (MVP5-116) |
+| Longest run | a run's planned duration vs the longest run of the previous 28 days (any type, the day itself excluded) | at most +10 % (`maxLongestRunIncreaseFraction`); risk; a run with no earlier run in the look-back is not checked; needs `sessions`, not cycles |
 | Paradigm rules | intensity distribution, hard-session spacing, hard sessions per micro | only with a `TrainingParadigm` (see "Paradigm rules" below) |
 
-Earlier iterations also had a CTL-ramp rule (CTL[d] − CTL[d−7]), an ATL/CTL ratio, and cycle-aware recovery-micro, meso-progress, taper-shape and consecutive-load rules. They were removed (MVP5-101 review) as thresholds nobody had asked for; ramp control is left to the generator's own volume curve (MVP5-117) and `buildProgression`. Only `.risk` findings make a plan unacceptable, so a missed race-day TSB or an over-high TSB is reported but doesn't by itself send the generator back to adjust.
+Earlier iterations also had a CTL-ramp rule (CTL[d] − CTL[d−7]), an ATL/CTL ratio, and cycle-aware recovery-micro, meso-progress, taper-shape and consecutive-load rules. They were removed (MVP5-101 review) as thresholds nobody had asked for; ramp control is left to the generator's own volume curve (MVP5-117) and the longest-run rule. Only `.risk` findings make a plan unacceptable, so a missed race-day TSB or an over-high TSB is reported but doesn't by itself send the generator back to adjust.
 
 #### Paradigm rules (MVP5-102)
 
@@ -1101,13 +1101,7 @@ The delta for a cycle compares against the previous sibling at the same level an
 
 ### 10.4 Evaluator rules that need cycles
 
-Added to `PlanGuardrails` (§8.2):
-
-| Rule | Signal | Check |
-|---|---|---|
-| Build progression | mean daily load of a build micro vs the previous build micro (per day, so 7-, 10- and 14-day micros compare alike) | between 0 % and ~+10 % |
-
-`PlanEvaluator.evaluate` gains a `cycles: [TrainingCycle]` parameter (the micro-based paradigm rules of §8.2 read it too); without cycles it falls back to the cycle-free rules from §8.2.
+No cycle-based guardrail remains. The build-progression rule (mean daily load of a build micro against the previous one) was replaced by the longest-run rule of §8.2 (MVP5-116), which reads planned runs, not cycles. `PlanEvaluator.evaluate` still takes `cycles: [TrainingCycle]`, but only the micro-based paradigm rules of §8.2 (hard sessions per micro, intensity distribution) read it.
 
 ---
 

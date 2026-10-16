@@ -20,8 +20,8 @@ extension PlanGuardrails {
         public var minAcceptableTSB: Double?
         /// Replaces ``PlanGuardrails/maxAcceptableTSB``.
         public var maxAcceptableTSB: Double?
-        /// Replaces ``PlanGuardrails/maxBuildProgressionFraction``.
-        public var maxBuildProgressionFraction: Double?
+        /// Replaces ``PlanGuardrails/maxLongestRunIncreaseFraction``.
+        public var maxLongestRunIncreaseFraction: Double?
 
         /// Creates a set of overrides; every parameter defaults to `nil` (no replacement).
         public init(
@@ -32,7 +32,7 @@ extension PlanGuardrails {
             maxTSBOnRaceDay: Double? = nil,
             minAcceptableTSB: Double? = nil,
             maxAcceptableTSB: Double? = nil,
-            maxBuildProgressionFraction: Double? = nil
+            maxLongestRunIncreaseFraction: Double? = nil
         ) {
             self.maxMonotony = maxMonotony
             self.maxStrainPercentile = maxStrainPercentile
@@ -41,7 +41,7 @@ extension PlanGuardrails {
             self.maxTSBOnRaceDay = maxTSBOnRaceDay
             self.minAcceptableTSB = minAcceptableTSB
             self.maxAcceptableTSB = maxAcceptableTSB
-            self.maxBuildProgressionFraction = maxBuildProgressionFraction
+            self.maxLongestRunIncreaseFraction = maxLongestRunIncreaseFraction
         }
 
         /// `guardrails` with every non-`nil` override applied.
@@ -57,7 +57,7 @@ extension PlanGuardrails {
             result.maxTSBOnRaceDay = maxTSBOnRaceDay ?? result.maxTSBOnRaceDay
             result.minAcceptableTSB = minAcceptableTSB ?? result.minAcceptableTSB
             result.maxAcceptableTSB = maxAcceptableTSB ?? result.maxAcceptableTSB
-            result.maxBuildProgressionFraction = maxBuildProgressionFraction ?? result.maxBuildProgressionFraction
+            result.maxLongestRunIncreaseFraction = maxLongestRunIncreaseFraction ?? result.maxLongestRunIncreaseFraction
             return result
         }
     }

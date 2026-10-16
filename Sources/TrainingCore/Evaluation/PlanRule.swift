@@ -1,8 +1,8 @@
 /// Which guardrail a ``PlanFinding`` came from.
 ///
-/// The first four run on `[FitnessMetrics]` alone; ``buildProgression`` needs the `cycles`
-/// parameter of ``PlanEvaluator/evaluate(_:races:cycles:guardrails:sessions:paradigm:)`` and is
-/// skipped without it. The last three are the paradigm rules: they run only when a
+/// The first four run on `[FitnessMetrics]` alone; ``longestRun`` reads the `sessions`
+/// parameter of ``PlanEvaluator/evaluate(_:races:cycles:guardrails:sessions:paradigm:)`` and finds
+/// nothing without them. The last three are the paradigm rules: they run only when a
 /// ``TrainingParadigm`` is supplied, and the two that read micros also need `cycles`.
 public enum PlanRule: Sendable, Codable, Hashable {
     /// A day's monotony against ``PlanGuardrails/maxMonotony``.
@@ -17,9 +17,9 @@ public enum PlanRule: Sendable, Codable, Hashable {
     /// signal (TSB = CTL − ATL), independent of whether the plan has any known phase (build,
     /// recovery, taper) to judge it against.
     case tsbBand
-    /// A build-phase micro's load relative to the previous build-phase micro, against
-    /// ``PlanGuardrails/maxBuildProgressionFraction``.
-    case buildProgression
+    /// A run longer than the longest run of the previous 28 days by more than
+    /// ``PlanGuardrails/maxLongestRunIncreaseFraction``. A ``Severity/risk``.
+    case longestRun
     /// A micro's share of planned time per intensity category or speed level against the target of
     /// its phase in ``TrainingParadigm/phaseMixes``/``TrainingParadigm/defaultMix`` (``IntensityMix``).
     /// A ``Severity/warning``.

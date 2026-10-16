@@ -26,9 +26,9 @@ public struct PlanGuardrails: Sendable, Codable, Hashable {
     /// detraining (fitness being lost to insufficient load), the same freshness-band check as
     /// ``maxTSBOnRaceDay`` but not gated on it being a race day.
     public var maxAcceptableTSB: Double
-    /// The fractional increase in mean daily load from one build micro to the next above which the
-    /// progression is too aggressive.
-    public var maxBuildProgressionFraction: Double
+    /// The fractional increase of a run over the longest run of the previous 28 days above which
+    /// the run is too much of a jump (0.10 allows 10 % more).
+    public var maxLongestRunIncreaseFraction: Double
 
     /// Creates a set of plan guardrails, defaulting to the values discussed in the design doc.
     ///
@@ -43,8 +43,8 @@ public struct PlanGuardrails: Sendable, Codable, Hashable {
     ///   - maxTSBOnRaceDay: The highest acceptable TSB on race day; defaults to 25.
     ///   - minAcceptableTSB: The lowest acceptable TSB on any day; defaults to -30.
     ///   - maxAcceptableTSB: The highest acceptable TSB on any day; defaults to 25.
-    ///   - maxBuildProgressionFraction: The fractional increase in mean daily load between build
-    ///     micros above which the progression is too aggressive; defaults to 0.10.
+    ///   - maxLongestRunIncreaseFraction: The fractional increase of a run over the longest run of
+    ///     the previous 28 days above which it is flagged; defaults to 0.10.
     public init(
         maxMonotony: Double = 2.0,
         maxStrainPercentile: Double = 0.95,
@@ -53,7 +53,7 @@ public struct PlanGuardrails: Sendable, Codable, Hashable {
         maxTSBOnRaceDay: Double = 25,
         minAcceptableTSB: Double = -30,
         maxAcceptableTSB: Double = 25,
-        maxBuildProgressionFraction: Double = 0.10
+        maxLongestRunIncreaseFraction: Double = 0.10
     ) {
         self.maxMonotony = maxMonotony
         self.maxStrainPercentile = maxStrainPercentile
@@ -62,6 +62,27 @@ public struct PlanGuardrails: Sendable, Codable, Hashable {
         self.maxTSBOnRaceDay = maxTSBOnRaceDay
         self.minAcceptableTSB = minAcceptableTSB
         self.maxAcceptableTSB = maxAcceptableTSB
-        self.maxBuildProgressionFraction = maxBuildProgressionFraction
+        self.maxLongestRunIncreaseFraction = maxLongestRunIncreaseFraction
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case maxMonotony, maxStrainPercentile, strainTrailingWindowDays, minTSBOnRaceDay, maxTSBOnRaceDay
+        case minAcceptableTSB, maxAcceptableTSB, maxLongestRunIncreaseFraction
+    }
+
+    /// Decodes guardrails; a missing value (for instance `maxLongestRunIncreaseFraction` in a
+    /// payload from before it existed) takes its default, and the removed
+    /// `maxBuildProgressionFraction` is ignored.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let defaults = PlanGuardrails()
+        maxMonotony = try container.decodeIfPresent(Double.self, forKey: .maxMonotony) ?? defaults.maxMonotony
+        maxStrainPercentile = try container.decodeIfPresent(Double.self, forKey: .maxStrainPercentile) ?? defaults.maxStrainPercentile
+        strainTrailingWindowDays = try container.decodeIfPresent(Int.self, forKey: .strainTrailingWindowDays) ?? defaults.strainTrailingWindowDays
+        minTSBOnRaceDay = try container.decodeIfPresent(Double.self, forKey: .minTSBOnRaceDay) ?? defaults.minTSBOnRaceDay
+        maxTSBOnRaceDay = try container.decodeIfPresent(Double.self, forKey: .maxTSBOnRaceDay) ?? defaults.maxTSBOnRaceDay
+        minAcceptableTSB = try container.decodeIfPresent(Double.self, forKey: .minAcceptableTSB) ?? defaults.minAcceptableTSB
+        maxAcceptableTSB = try container.decodeIfPresent(Double.self, forKey: .maxAcceptableTSB) ?? defaults.maxAcceptableTSB
+        maxLongestRunIncreaseFraction = try container.decodeIfPresent(Double.self, forKey: .maxLongestRunIncreaseFraction) ?? defaults.maxLongestRunIncreaseFraction
     }
 }

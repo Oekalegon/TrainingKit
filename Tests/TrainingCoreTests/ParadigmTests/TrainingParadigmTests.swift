@@ -9,9 +9,9 @@ struct TrainingParadigmTests {
         let base = PlanGuardrails()
         #expect(PlanGuardrails.Overrides().applied(to: base) == base)
 
-        let applied = PlanGuardrails.Overrides(minAcceptableTSB: -45, maxBuildProgressionFraction: 0.15).applied(to: base)
+        let applied = PlanGuardrails.Overrides(minAcceptableTSB: -45, maxLongestRunIncreaseFraction: 0.15).applied(to: base)
         #expect(applied.minAcceptableTSB == -45)
-        #expect(applied.maxBuildProgressionFraction == 0.15)
+        #expect(applied.maxLongestRunIncreaseFraction == 0.15)
         #expect(applied.maxMonotony == base.maxMonotony)
         #expect(applied.strainTrailingWindowDays == base.strainTrailingWindowDays)
     }

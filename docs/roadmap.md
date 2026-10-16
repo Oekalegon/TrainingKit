@@ -41,6 +41,8 @@ The deterministic plan generator: `PlanPreferences` (training days, per-day spor
 
 Groundwork laid for paradigms (MVP5-102/103): `CyclePhase` is a named, paradigm-defined value rather than a fixed enum, and each micro carries a separate `MicroLoadRole` (build/recovery/taper/race) that rules such as build progression read (MVP5-113). Stored cycles written with the old enum still decode.
 
+Several plans, one active at a time (MVP5-124): a `TrainingPlan` (draft/active/archived) groups planned workouts and cycles through their `planID`; only the active plan feeds the fitness series, statistics, activity matching and calendar export, and data from before plans existed is adopted into a "Current plan". The generator's proposal and commit target a plan; the Plans screen is MVP5-125.
+
 Run availability (MVP5-104): `RunAvailability` (free `DaySlot`s per `Weekday`, independent of the paradigm and stored as `AthleteProfile.runAvailability`, synced with the preferences) and `PlanPreferences` carrying it as the generator's input; the settings screen (MVP5-105) is still to do.
 
 Per-slot options (MVP5-127): `SlotOptions` (`longRunPossible`, default true; `trackAvailable`, default false) per weekday and slot on `RunAvailability`, decoding unchanged from stored availability; the generator rules (MVP5-119) and the app toggles (MVP5-128) are still to do.

@@ -23,6 +23,7 @@ SwiftData models and CloudKit sync that conform to TrainingCore's store protocol
 - ``PlannedActivityRecord``
 - ``StructuredWorkoutRecord``
 - ``GoalRecord``
+- ``TrainingPlanRecord``
 - ``WorkoutTemplateRecord``
 - ``TrainingCycleRecord``
 - ``AthleteProfileRecord``

@@ -915,4 +915,86 @@ struct SwiftDataStoreTests {
         )
         #expect(try legacy.toActivity().steps.isEmpty)
     }
+
+    // MARK: TrainingPlanStore
+
+    @Test("TrainingPlanStore round-trips, keeps one plan active and replaces by id")
+    func trainingPlanStoreRoundTrip() async throws {
+        let store = try makeStore()
+        let first = TrainingPlan(name: "A", status: .active, targetRaceID: UUID(), createdDate: day(0))
+        let second = TrainingPlan(name: "B", status: .draft, createdDate: day(1))
+        try await store.upsertTrainingPlan(first)
+        try await store.upsertTrainingPlan(second)
+        #expect(try await store.trainingPlan(id: first.id) == first)
+
+        var activated = second
+        activated.status = .active
+        try await store.upsertTrainingPlan(activated)
+        #expect(try await store.trainingPlan(id: first.id)?.status == .draft)
+        #expect(try await store.trainingPlan(id: second.id) == activated)
+        #expect(try await store.trainingPlans().count == 2)
+        #expect(try await store.trainingPlans().filter { $0.status == .active }.count == 1)
+    }
+
+    @Test("deleting a training plan removes its cycles and workouts in the same write, keeps the rest")
+    func trainingPlanDeleteCascades() async throws {
+        let store = try makeStore()
+        let doomed = TrainingPlan(name: "Doomed"), kept = TrainingPlan(name: "Kept")
+        try await store.upsertTrainingPlan(doomed)
+        try await store.upsertTrainingPlan(kept)
+        let workoutID = UUID()
+        let future = PlannedActivity(workoutID: workoutID, date: day(5), planID: doomed.id)
+        let missed = PlannedActivity(workoutID: workoutID, date: day(-5), planID: doomed.id)
+        let other = PlannedActivity(workoutID: workoutID, date: day(5), planID: kept.id)
+        let unassigned = PlannedActivity(workoutID: workoutID, date: day(6))
+        try await store.upsert([future, missed, other, unassigned])
+        let doomedMacro = TrainingCycle(level: .macro, phase: .base, name: "M", dateRange: day(0)...day(30), planID: doomed.id)
+        let keptMacro = TrainingCycle(level: .macro, phase: .base, name: "M", dateRange: day(0)...day(30), planID: kept.id)
+        try await store.upsert([doomedMacro, keptMacro])
+
+        try await store.deleteTrainingPlan(id: doomed.id)
+
+        #expect(try await store.trainingPlan(id: doomed.id) == nil)
+        #expect(try await store.plan(id: future.id) == nil)
+        #expect(try await store.plan(id: missed.id) == nil)
+        #expect(try await store.plan(id: other.id) != nil)
+        #expect(try await store.plan(id: unassigned.id) != nil)
+        #expect(try await store.cycle(id: doomedMacro.id) == nil)
+        #expect(try await store.cycle(id: keptMacro.id) != nil)
+    }
+
+    @Test("a training plan with a completed workout is history: deleting it throws and changes nothing")
+    func completedTrainingPlanIsNeverDeleted() async throws {
+        let store = try makeStore()
+        let plan = TrainingPlan(name: "Done a run", createdDate: day(0))
+        try await store.upsertTrainingPlan(plan)
+        let done = PlannedActivity(workoutID: UUID(), date: day(-5), completedActivityID: UUID(), planID: plan.id)
+        let future = PlannedActivity(workoutID: UUID(), date: day(5), planID: plan.id)
+        let cycle = TrainingCycle(level: .macro, phase: .base, name: "M", dateRange: day(-10)...day(30), planID: plan.id)
+        try await store.upsert([done, future])
+        try await store.upsert([cycle])
+
+        await #expect(throws: TrainingPlanError.hasCompletedWorkouts(plan.id)) {
+            try await store.deleteTrainingPlan(id: plan.id)
+        }
+
+        #expect(try await store.trainingPlan(id: plan.id) == plan)
+        #expect(try await store.plan(id: done.id) == done)
+        #expect(try await store.plan(id: future.id) == future)
+        #expect(try await store.cycle(id: cycle.id) == cycle)
+    }
+
+    @Test("two training plans can hold overlapping macro cycles; one plan can't")
+    func trainingPlansOverlapPerPlan() async throws {
+        let store = try makeStore()
+        func macro(_ range: ClosedRange<Date>, _ plan: UUID) -> TrainingCycle {
+            TrainingCycle(level: .macro, phase: .base, name: "M", dateRange: range, planID: plan)
+        }
+        let a = UUID(), b = UUID()
+        try await store.upsert([macro(day(0)...day(30), a)])
+        try await store.upsert([macro(day(10)...day(40), b)])
+        await #expect(throws: CycleStoreError.self) {
+            try await store.upsert([macro(day(5)...day(20), a)])
+        }
+    }
 }

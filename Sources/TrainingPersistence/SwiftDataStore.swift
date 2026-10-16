@@ -22,7 +22,7 @@ import SwiftData
 /// already needed this: see its doc comment below.
 @ModelActor
 public actor SwiftDataStore: ActivityStore, PlanStore, WorkoutLibraryStore, CycleStore, RaceStore, GoalStore,
-    WorkoutTemplateStore, AthleteStore, FitnessMetricsCacheStore {
+    WorkoutTemplateStore, AthleteStore, FitnessMetricsCacheStore, TrainingPlanStore {
     // MARK: ActivityStore
 
     /// See `ActivityStore/activities(in:)`.
@@ -514,6 +514,136 @@ public actor SwiftDataStore: ActivityStore, PlanStore, WorkoutLibraryStore, Cycl
 
     private func fetchGoalRecord(id: UUID) throws -> GoalRecord? {
         let descriptor = FetchDescriptor<GoalRecord>(predicate: #Predicate { $0.id == id })
+        return try modelContext.fetch(descriptor).first
+    }
+
+    // MARK: TrainingPlanStore
+
+    /// See `TrainingPlanStore/trainingPlans()`.
+    ///
+    /// A record that can't be decoded is skipped and logged rather than thrown, as for goals: plans
+    /// sync, so another device on a newer version can write a status this one doesn't know, and one
+    /// such plan mustn't make `TrainingModel.load(in:asOf:)` fail for everything else.
+    public func trainingPlans() async throws -> [TrainingPlan] {
+        try modelContext.fetch(FetchDescriptor<TrainingPlanRecord>()).compactMap { record in
+            do {
+                return try record.toTrainingPlan()
+            } catch {
+                Logging.persistence.error(
+                    "Skipping training plan \(record.id, privacy: .public) that can't be decoded: \(String(describing: error), privacy: .public)"
+                )
+                return nil
+            }
+        }
+    }
+
+    /// See `TrainingPlanStore/trainingPlan(id:)`.
+    public func trainingPlan(id: UUID) async throws -> TrainingPlan? {
+        try fetchTrainingPlanRecord(id: id)?.toTrainingPlan()
+    }
+
+    /// See `TrainingPlanStore/upsertTrainingPlan(_:cancelingActivePlanOn:)`. The demotion of the
+    /// previously active plan and the write of `plan` go out in one save.
+    public func upsertTrainingPlan(_ plan: TrainingPlan, cancelingActivePlanOn date: Date?) async throws {
+        var existing: TrainingPlanRecord?
+        for record in try modelContext.fetch(FetchDescriptor<TrainingPlanRecord>()) {
+            if record.id == plan.id {
+                existing = record
+            } else if plan.status == .active, var other = try? record.toTrainingPlan(), other.status == .active {
+                other.status = date == nil ? .draft : .cancelled
+                other.cancelledDate = date
+                try record.update(from: other)
+            }
+        }
+        if let existing {
+            try existing.update(from: plan)
+        } else {
+            modelContext.insert(try TrainingPlanRecord(plan: plan))
+        }
+        try modelContext.save()
+    }
+
+    /// See `TrainingPlanStore/adoptUnassigned(intoActivePlanOrNew:)`. One fetch-and-save, so a link
+    /// written meanwhile isn't overwritten with a stale copy.
+    public func adoptUnassigned(intoActivePlanOrNew newPlan: TrainingPlan) async throws -> Bool {
+        let planRecords = try modelContext.fetch(FetchDescriptor<PlannedActivityRecord>())
+        let cycleRecords = try modelContext.fetch(FetchDescriptor<TrainingCycleRecord>())
+        var orphanPlans: [(PlannedActivityRecord, PlannedActivity)] = []
+        for record in planRecords {
+            let plan = try record.toPlan()
+            if plan.planID == nil { orphanPlans.append((record, plan)) }
+        }
+        var orphanCycles: [(TrainingCycleRecord, TrainingCycle)] = []
+        for record in cycleRecords {
+            let cycle = try record.toCycle()
+            if cycle.planID == nil { orphanCycles.append((record, cycle)) }
+        }
+        guard !orphanPlans.isEmpty || !orphanCycles.isEmpty else { return false }
+
+        let existing = try await trainingPlans().canonicalActivePlan
+        let targetID: UUID
+        if let existing {
+            targetID = existing.id
+        } else {
+            targetID = newPlan.id
+            if let record = try fetchTrainingPlanRecord(id: newPlan.id) {
+                try record.update(from: newPlan)
+            } else {
+                modelContext.insert(try TrainingPlanRecord(plan: newPlan))
+            }
+        }
+        for (record, var plan) in orphanPlans {
+            plan.planID = targetID
+            try record.update(from: plan)
+        }
+        for (record, var cycle) in orphanCycles {
+            cycle.planID = targetID
+            try record.update(from: cycle)
+        }
+        try modelContext.save()
+        return true
+    }
+
+    /// See `TrainingPlanStore/insertTrainingPlan(_:cycles:plannedActivities:)`. Everything goes out in
+    /// one save, after the cycles are validated.
+    public func insertTrainingPlan(_ plan: TrainingPlan, cycles: [TrainingCycle], plannedActivities: [PlannedActivity]) async throws {
+        var existingCycles: [UUID: TrainingCycle] = [:]
+        for record in try modelContext.fetch(FetchDescriptor<TrainingCycleRecord>()) {
+            existingCycles[record.id] = try record.toCycle()
+        }
+        try CycleNestingValidator.validate(cycles, existing: existingCycles)
+
+        for record in try modelContext.fetch(FetchDescriptor<TrainingPlanRecord>()) where plan.status == .active {
+            if var other = try? record.toTrainingPlan(), other.status == .active, other.id != plan.id {
+                other.status = .draft
+                try record.update(from: other)
+            }
+        }
+        modelContext.insert(try TrainingPlanRecord(plan: plan))
+        for cycle in cycles { modelContext.insert(try TrainingCycleRecord(cycle: cycle)) }
+        for planned in plannedActivities { modelContext.insert(try PlannedActivityRecord(plan: planned)) }
+        try modelContext.save()
+    }
+
+    /// See `TrainingPlanStore/deleteTrainingPlan(id:)`. Refuses, before changing anything, a plan with a
+    /// completed workout; otherwise the plan, its cycles and its planned workouts go in one save.
+    public func deleteTrainingPlan(id: UUID) async throws {
+        guard let record = try fetchTrainingPlanRecord(id: id) else { return }
+        let ownedWorkouts = try modelContext.fetch(FetchDescriptor<PlannedActivityRecord>())
+            .filter { try $0.toPlan().planID == id }
+        guard try !ownedWorkouts.contains(where: { try $0.toPlan().completedActivityID != nil }) else {
+            throw TrainingPlanError.hasCompletedWorkouts(id)
+        }
+        for cycleRecord in try modelContext.fetch(FetchDescriptor<TrainingCycleRecord>()) {
+            if try cycleRecord.toCycle().planID == id { modelContext.delete(cycleRecord) }
+        }
+        for planRecord in ownedWorkouts { modelContext.delete(planRecord) }
+        modelContext.delete(record)
+        try modelContext.save()
+    }
+
+    private func fetchTrainingPlanRecord(id: UUID) throws -> TrainingPlanRecord? {
+        let descriptor = FetchDescriptor<TrainingPlanRecord>(predicate: #Predicate { $0.id == id })
         return try modelContext.fetch(descriptor).first
     }
 

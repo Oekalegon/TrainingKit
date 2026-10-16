@@ -13,18 +13,19 @@
 /// by ``runTypes(onDay:microLength:)`` and removed by ``validated(microLength:)``. Only negative
 /// keys can never be valid and are dropped on init, on decode and on ``setRunTypes(_:onDay:)``.
 ///
-/// A day with an entry allows exactly the types in it. A day without one allows every run type
-/// that no day of the micro names, so a type the athlete pins to certain days (a long run on
-/// Sunday) is not offered on the others, while a type they never mention (threshold) can go on
-/// any unspecified day.
+/// A day can name several types (Thursday: interval and threshold); the plan then decides which
+/// one it places there. Naming a type ties it to the days that name it: it is not offered on the
+/// other days. A type no day names is free: it is allowed on every day, with or without an entry,
+/// so the plan may put an easy run on a Sunday that names a long run (for instance to stay within
+/// a volume limit), and a type nobody mentions (threshold) can go on any day.
 public struct PlanPreferences: Sendable, Codable, Hashable {
     /// When the athlete can run. Seeded from the athlete's global availability setting, which does
     /// not depend on any plan or on the training paradigm. Defaults to no availability.
     public var runAvailability: RunAvailability
 
     /// The run types the athlete allows on each micro day, keyed by the 0-based day within the
-    /// micro-cycle. A day never maps to an empty set: empty entries are removed. A day without an
-    /// entry allows the types no day names; read the effective types through
+    /// micro-cycle. A day never maps to an empty set: empty entries are removed. Read the
+    /// effective types, which also include the types no day names, through
     /// ``runTypes(onDay:microLength:)``.
     public private(set) var dayRunTypes: [Int: Set<RunType>]
 
@@ -42,20 +43,20 @@ public struct PlanPreferences: Sendable, Codable, Hashable {
         self.dayRunTypes = dayRunTypes.filter { $0.key >= 0 && !$0.value.isEmpty }
     }
 
-    /// The run types allowed on a day of a micro-cycle of the given length.
+    /// The run types the plan may place on a day of a micro-cycle of the given length. The types the
+    /// day names are what the athlete asks for there; the others are types the athlete left free.
     ///
     /// - Parameters:
     ///   - day: The 0-based day within the micro.
     ///   - microLength: The micro's length in days.
     /// - Returns: An empty set when `day` is outside `0..<microLength` (the day does not exist in
-    ///   that micro); the stored types when there are some; otherwise every run type that no day in
-    ///   `0..<microLength` names (entries beyond the micro are ignored). This can be empty when the
-    ///   athlete has named every type on other days.
+    ///   that micro). Otherwise the types the day names plus every type that no day in
+    ///   `0..<microLength` names (entries beyond the micro are ignored). This is empty only for an
+    ///   unspecified day when the athlete has named every type on other days.
     public func runTypes(onDay day: Int, microLength: Int) -> Set<RunType> {
         guard day >= 0, day < microLength else { return [] }
-        if let types = dayRunTypes[day] { return types }
         let named = dayRunTypes.filter { $0.key < microLength }.values.reduce(into: Set<RunType>()) { $0.formUnion($1) }
-        return Set(RunType.allCases).subtracting(named)
+        return (dayRunTypes[day] ?? []).union(Set(RunType.allCases).subtracting(named))
     }
 
     /// Sets the run types allowed on a micro day.

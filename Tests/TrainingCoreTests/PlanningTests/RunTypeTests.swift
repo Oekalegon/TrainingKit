@@ -29,11 +29,13 @@ struct RunTypeTests {
         #expect(preferences.runTypes(onDay: 3, microLength: 7) == Set(RunType.allCases))
     }
 
-    @Test("an unspecified day allows the types no day names")
+    @Test("a day allows the types it names plus the types no day names")
     func unspecifiedDays() {
         let preferences = PlanPreferences(dayRunTypes: [6: [.long], 1: [.interval, .easy]])
         #expect(preferences.runTypes(onDay: 3, microLength: 7) == [.recovery, .threshold])
-        #expect(preferences.runTypes(onDay: 6, microLength: 7) == [.long])
+        // A named day also gets the free types, but not types named only on other days.
+        #expect(preferences.runTypes(onDay: 6, microLength: 7) == [.long, .recovery, .threshold])
+        #expect(preferences.runTypes(onDay: 1, microLength: 7) == [.interval, .easy, .recovery, .threshold])
         // The long run on day 6 is beyond a 6-day micro, so it no longer reserves the type.
         #expect(preferences.runTypes(onDay: 3, microLength: 6) == [.recovery, .threshold, .long])
     }
@@ -48,7 +50,7 @@ struct RunTypeTests {
     func normalisation() {
         var preferences = PlanPreferences(dayRunTypes: [0: [.easy, .long], 1: [], -1: [.easy]])
         #expect(preferences.dayRunTypes == [0: [.easy, .long]])
-        #expect(preferences.runTypes(onDay: 0, microLength: 7) == [.easy, .long])
+        #expect(preferences.runTypes(onDay: 0, microLength: 7) == [.easy, .long, .recovery, .threshold, .interval])
 
         preferences.setRunTypes([.interval], onDay: 2)
         preferences.setRunTypes([], onDay: 0)
@@ -62,7 +64,7 @@ struct RunTypeTests {
         #expect(preferences.runTypes(onDay: 9, microLength: 7).isEmpty)
         #expect(preferences.runTypes(onDay: 7, microLength: 7).isEmpty)
         #expect(preferences.runTypes(onDay: -1, microLength: 7).isEmpty)
-        #expect(preferences.runTypes(onDay: 9, microLength: 10) == [.long])
+        #expect(preferences.runTypes(onDay: 9, microLength: 10) == [.long, .easy, .recovery, .interval])
         #expect(preferences.dayRunTypes[9] == [.long])
 
         #expect(preferences.validated(microLength: 7).dayRunTypes == [1: [.threshold]])
@@ -92,5 +94,16 @@ struct RunTypeTests {
         let json = #"{"dayRunTypes":{"0":["easy","fartlek"],"1":["fartlek"],"2":[],"-1":["easy"],"x":["easy"],"3":["long"]}}"#
         let decoded = try JSONDecoder().decode(PlanPreferences.self, from: Data(json.utf8))
         #expect(decoded.dayRunTypes == [0: [.easy], 3: [.long]])
+    }
+}
+
+@Suite("RunType several per day")
+struct RunTypeSeveralPerDayTests {
+    @Test("several types on one day are all kept, the plan picks one")
+    func several() {
+        let preferences = PlanPreferences(dayRunTypes: [3: [.interval, .threshold], 6: [.long], 0: [.easy, .recovery]])
+        #expect(preferences.runTypes(onDay: 3, microLength: 7) == [.interval, .threshold])
+        #expect(preferences.runTypes(onDay: 6, microLength: 7) == [.long])
+        #expect(preferences.runTypes(onDay: 2, microLength: 7).isEmpty)
     }
 }

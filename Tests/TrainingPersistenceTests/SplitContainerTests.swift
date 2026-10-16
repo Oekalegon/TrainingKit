@@ -113,6 +113,32 @@ struct SplitContainerTests {
         #expect(try await store.athleteProfile()?.runAvailability == RunAvailability())
     }
 
+    @Test("slot options sync with the availability, and a record written without them decodes to the defaults")
+    func slotOptionsSync() async throws {
+        let container = try TestContainers.make(cloudKitDatabase: .none, isStoredInMemoryOnly: true)
+        let store = SwiftDataStore(modelContainer: container)
+        var profile = AthleteProfile.fixture(name: "Alex")
+        profile.runAvailability = RunAvailability(
+            slots: [.saturday: [.morning, .afternoonEvening]],
+            slotOptions: [.saturday: [.morning: SlotOptions(longRunPossible: true, trackAvailable: true)]]
+        )
+        try await store.save(profile)
+
+        #expect(try await store.athleteProfile()?.runAvailability == profile.runAvailability)
+
+        let context = ModelContext(container)
+        let record = try #require(context.fetch(FetchDescriptor<AthletePreferencesRecord>()).first)
+        var object = try #require(JSONSerialization.jsonObject(with: record.payload) as? [String: Any])
+        var availability = try #require(object["runAvailability"] as? [String: Any])
+        availability.removeValue(forKey: "slotOptions")
+        object["runAvailability"] = availability
+        record.payload = try JSONSerialization.data(withJSONObject: object)
+        try context.save()
+
+        let expected = RunAvailability(slots: [.saturday: [.morning, .afternoonEvening]])
+        #expect(try await store.athleteProfile()?.runAvailability == expected)
+    }
+
     @Test("saving twice keeps one preferences record")
     func oneRecord() async throws {
         let container = try TestContainers.make(cloudKitDatabase: .none, isStoredInMemoryOnly: true)

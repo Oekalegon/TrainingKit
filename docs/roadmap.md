@@ -43,6 +43,8 @@ Groundwork laid for paradigms (MVP5-102/103): `CyclePhase` is a named, paradigm-
 
 Run availability (MVP5-104): `RunAvailability` (free `DaySlot`s per `Weekday`, independent of the paradigm and stored as `AthleteProfile.runAvailability`, synced with the preferences) and `PlanPreferences` carrying it as the generator's input; the settings screen (MVP5-105) is still to do.
 
+Per-slot options (MVP5-127): `SlotOptions` (`longRunPossible`, default true; `trackAvailable`, default false) per weekday and slot on `RunAvailability`, decoding unchanged from stored availability; the generator rules (MVP5-119) and the app toggles (MVP5-128) are still to do.
+
 See design doc §8 and the "Roadmap seams" table (§12) for how this plugs into MVP 1 without reshaping the core.
 
 ## MVP 6 — AI Coach

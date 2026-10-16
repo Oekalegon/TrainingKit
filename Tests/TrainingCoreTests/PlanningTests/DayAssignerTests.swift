@@ -157,6 +157,18 @@ struct DayAssignerTests {
         #expect(assign(narrow, hard: 0, long: 0).assignments.isEmpty)
     }
 
+    @Test("a custom hardTypes order picks the type; a long run and a hard session may share a two-a-day without a paradigm")
+    func customHardTypesAndSameDay() {
+        var avail = availability([.monday], slots: [.morning, .evening])
+        avail.setRuns(2, on: .monday)
+        let result = DayAssigner(hardTypes: [.threshold]).assign(micro: micro(days: 1), availability: avail, hardCount: 1, longCount: 1, calendar: calendar)
+        #expect(Set(result.assignments.map(\.runType)) == [.long, .threshold])
+        #expect(result.dropped.isEmpty)
+        // With a spacing paradigm the same day is too close.
+        let spaced = DayAssigner(paradigm: paradigm, hardTypes: [.threshold]).assign(micro: micro(days: 1), availability: avail, hardCount: 1, longCount: 1, calendar: calendar)
+        #expect(spaced.dropped == [DroppedSession(kind: .hard, reason: .spacing)])
+    }
+
     @Test("weekdays map by date, so a 10-day micro that crosses a week uses each weekday twice")
     func tenDayMicro() {
         let result = assign(availability([.monday, .thursday]), hard: 0, long: 0, days: 10)

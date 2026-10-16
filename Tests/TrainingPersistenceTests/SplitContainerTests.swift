@@ -98,7 +98,7 @@ struct SplitContainerTests {
         let container = try TestContainers.make(cloudKitDatabase: .none, isStoredInMemoryOnly: true)
         let store = SwiftDataStore(modelContainer: container)
         var profile = AthleteProfile.fixture(name: "Alex")
-        profile.runAvailability = RunAvailability(slots: [.saturday: [.morning, .afternoonEvening]])
+        profile.runAvailability = RunAvailability(slots: [.saturday: [.morning, .evening]])
         try await store.save(profile)
 
         #expect(try await store.athleteProfile()?.runAvailability == profile.runAvailability)
@@ -119,7 +119,7 @@ struct SplitContainerTests {
         let store = SwiftDataStore(modelContainer: container)
         var profile = AthleteProfile.fixture(name: "Alex")
         profile.runAvailability = RunAvailability(
-            slots: [.saturday: [.morning, .afternoonEvening]],
+            slots: [.saturday: [.morning, .evening]],
             slotOptions: [.saturday: [.morning: SlotOptions(longRunPossible: true, trackAvailable: true)]]
         )
         try await store.save(profile)
@@ -135,7 +135,42 @@ struct SplitContainerTests {
         record.payload = try JSONSerialization.data(withJSONObject: object)
         try context.save()
 
-        let expected = RunAvailability(slots: [.saturday: [.morning, .afternoonEvening]])
+        let expected = RunAvailability(slots: [.saturday: [.morning, .evening]])
+        #expect(try await store.athleteProfile()?.runAvailability == expected)
+    }
+
+    @Test("a preferences record written with the combined afternoonEvening slot decodes to afternoon and evening")
+    func legacyAfternoonEveningRecord() async throws {
+        let container = try TestContainers.make(cloudKitDatabase: .none, isStoredInMemoryOnly: true)
+        let store = SwiftDataStore(modelContainer: container)
+        var profile = AthleteProfile.fixture(name: "Alex")
+        profile.runAvailability = RunAvailability(slots: [.saturday: [.morning]])
+        try await store.save(profile)
+
+        let context = ModelContext(container)
+        let record = try #require(context.fetch(FetchDescriptor<AthletePreferencesRecord>()).first)
+        var object = try #require(JSONSerialization.jsonObject(with: record.payload) as? [String: Any])
+        object["runAvailability"] = [
+            "slots": ["7": ["morning", "afternoonEvening"]],
+            "slotOptions": ["7": ["afternoonEvening": ["trackAvailable": true]]],
+        ]
+        record.payload = try JSONSerialization.data(withJSONObject: object)
+        try context.save()
+
+        let expected = RunAvailability(
+            slots: [.saturday: [.morning, .afternoon, .evening]],
+            slotOptions: [.saturday: [
+                .afternoon: SlotOptions(trackAvailable: true),
+                .evening: SlotOptions(trackAvailable: true),
+            ]]
+        )
+        let loaded = try #require(try await store.athleteProfile())
+        #expect(loaded.runAvailability == expected)
+
+        // Saving again writes the new form.
+        try await store.save(loaded)
+        let rewritten = try #require(ModelContext(container).fetch(FetchDescriptor<AthletePreferencesRecord>()).first)
+        #expect(!String(decoding: rewritten.payload, as: UTF8.self).contains("afternoonEvening"))
         #expect(try await store.athleteProfile()?.runAvailability == expected)
     }
 

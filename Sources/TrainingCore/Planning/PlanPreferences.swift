@@ -66,9 +66,12 @@ public struct PlanPreferences: Sendable, Codable, Hashable {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(runAvailability, forKey: .runAvailability)
         if !maxWeeklyVolume.isEmpty {
-            let entries = maxWeeklyVolume
-                .map { VolumeLimit(sport: $0.key, volume: $0.value) }
-                .sorted { "\($0.sport)" < "\($1.sport)" }
+            let sorter = JSONEncoder()
+            sorter.outputFormatting = .sortedKeys
+            let entries = try maxWeeklyVolume
+                .map { (key: try sorter.encode($0.key), limit: VolumeLimit(sport: $0.key, volume: $0.value)) }
+                .sorted { $0.key.lexicographicallyPrecedes($1.key) }
+                .map(\.limit)
             try container.encode(entries, forKey: .maxWeeklyVolume)
         }
     }

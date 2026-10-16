@@ -12,8 +12,8 @@ public struct MicroVolumeTarget: Identifiable, Sendable, Hashable {
     public let phase: CyclePhase
     /// The micro's load role.
     public let loadRole: MicroLoadRole
-    /// The volume for the whole micro, in the measure of the curve's inputs. Per 7 days it is
-    /// ``target`` divided by `lengthDays / 7`.
+    /// The volume for the whole micro, in the measure of the curve's inputs. The volume per 7 days
+    /// is the amount divided by `lengthDays / 7`.
     public let target: VolumeTarget
 
     /// Creates a micro volume target.

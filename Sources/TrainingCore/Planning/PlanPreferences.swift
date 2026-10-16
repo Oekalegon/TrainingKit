@@ -23,7 +23,7 @@ public struct PlanPreferences: Sendable, Codable, Hashable {
     /// not depend on any plan or on the training paradigm. Defaults to no availability.
     public var runAvailability: RunAvailability
 
-    /// The run types the athlete allows on each micro day, keyed by the 0-based day within the
+    /// The run types the athlete names for each micro day, keyed by the 0-based day within the
     /// micro-cycle. A day never maps to an empty set: empty entries are removed. Read the
     /// effective types, which also include the types no day names, through
     /// ``runTypes(onDay:microLength:)``.
@@ -33,7 +33,7 @@ public struct PlanPreferences: Sendable, Codable, Hashable {
     ///
     /// - Parameters:
     ///   - runAvailability: When the athlete can run. Defaults to no availability.
-    ///   - dayRunTypes: The allowed run types per 0-based micro day. Empty sets and negative days
+    ///   - dayRunTypes: The run types named per 0-based micro day. Empty sets and negative days
     ///     are dropped. Defaults to none, so every day allows every run type.
     public init(
         runAvailability: RunAvailability = RunAvailability(),
@@ -62,11 +62,11 @@ public struct PlanPreferences: Sendable, Codable, Hashable {
     /// Sets the run types allowed on a micro day.
     ///
     /// The day is stored even when it is beyond the current micro length (see the type
-    /// documentation). An empty set removes the entry, so the day is
-    /// unspecified again; a negative day is ignored.
+    /// documentation). An empty set removes the entry, so the day is unspecified
+    /// again; a negative day is ignored.
     ///
     /// - Parameters:
-    ///   - types: The allowed run types.
+    ///   - types: The run types to name for the day.
     ///   - day: The 0-based day within the micro.
     public mutating func setRunTypes(_ types: Set<RunType>, onDay day: Int) {
         guard day >= 0 else { return }
@@ -89,7 +89,7 @@ public struct PlanPreferences: Sendable, Codable, Hashable {
 
     /// Decodes preferences, falling back to the default for any missing field so a payload written
     /// before a field existed still decodes. Run types this version does not know, and days that
-    /// are not integers or are negative, are dropped;. Saving again writes only what was understood.
+    /// are not integers or are negative, are dropped. Saving again writes only what was understood.
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         runAvailability = try container.decodeIfPresent(RunAvailability.self, forKey: .runAvailability) ?? RunAvailability()

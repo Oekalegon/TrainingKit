@@ -5,12 +5,16 @@ import Foundation
 /// Volumes are given **per 7 days** and scaled by each micro's length, so a 14-day micro holds
 /// twice the weekly volume and 7-, 10- and 14-day micros read alike. From `starting` to `peak`:
 /// - **Build micros** climb in equal steps from the starting volume at the first build micro to
-///   the peak at the last one (a single build micro gets the peak).
+///   the peak at the last one (a single build micro gets the peak). Recovery micros between them do
+///   not add a step.
 /// - **Recovery micros** hold ``recoveryLoadFraction`` of the preceding build micro (the first
 ///   build micro for a recovery that comes before any build; the starting volume if there is none).
 /// - **Taper micros** step down linearly from ``taperStartFraction`` to ``taperEndFraction`` of the
 ///   peak (the last build micro's volume); a single taper micro gets the midpoint.
 /// - **The race micro** gets ``raceFraction`` of the peak.
+///
+/// A plan with no build micro has no ramp: recovery micros then hold the fraction of the starting
+/// volume, and taper and race micros the fraction of the peak.
 ///
 /// The curve is the plan before the guardrails: the generator evaluates the plan it makes from it
 /// and lowers micros where the guardrails ask, and reports the volume it reached. It does not
@@ -52,12 +56,14 @@ public struct VolumeCurveBuilder: Sendable, Hashable {
     ///     and at least as large.
     /// - Returns: One target per micro, in date order, in the measure of `starting`. Empty for no micros.
     /// - Throws: ``VolumeCurveError`` for a mismatched measure, a peak below the start, or a
-    ///   fraction that is not positive and finite.
+    ///   fraction that is not in 0...1 (above 0), or a taper that rises (start below end).
     public func targets(for micros: [Microcycle], starting: VolumeTarget, peak: VolumeTarget) throws -> [MicroVolumeTarget] {
         guard starting.measure == peak.measure else { throw VolumeCurveError.mismatchedMeasure }
         guard peak.amount >= starting.amount else { throw VolumeCurveError.peakBelowStart }
         let fractions = [recoveryLoadFraction, taperStartFraction, taperEndFraction, raceFraction]
-        guard fractions.allSatisfy({ $0.isFinite && $0 > 0 }) else { throw VolumeCurveError.invalidFraction }
+        guard fractions.allSatisfy({ $0.isFinite && $0 > 0 && $0 <= 1 }), taperStartFraction >= taperEndFraction else {
+            throw VolumeCurveError.invalidFraction
+        }
 
         let ordered = micros.sorted { $0.dateRange.lowerBound < $1.dateRange.lowerBound }
         let buildCount = ordered.filter { $0.loadRole == .build }.count

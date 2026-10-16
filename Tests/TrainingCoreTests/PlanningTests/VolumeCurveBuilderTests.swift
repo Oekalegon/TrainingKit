@@ -104,6 +104,12 @@ struct VolumeCurveBuilderTests {
             try VolumeCurveBuilder(recoveryLoadFraction: 0).targets(for: micros([.build]), starting: volume(100), peak: volume(200))
         }
         #expect(throws: VolumeCurveError.invalidFraction) {
+            try VolumeCurveBuilder(recoveryLoadFraction: 1.2).targets(for: micros([.build]), starting: volume(100), peak: volume(200))
+        }
+        #expect(throws: VolumeCurveError.invalidFraction) {
+            try VolumeCurveBuilder(taperStartFraction: 0.4, taperEndFraction: 0.6).targets(for: micros([.build]), starting: volume(100), peak: volume(200))
+        }
+        #expect(throws: VolumeCurveError.invalidFraction) {
             try VolumeCurveBuilder(raceFraction: .nan).targets(for: micros([.build]), starting: volume(100), peak: volume(200))
         }
     }

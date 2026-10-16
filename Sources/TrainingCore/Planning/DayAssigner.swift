@@ -82,22 +82,27 @@ public struct DayAssigner: Sendable, Hashable {
         }
 
         for _ in 0..<max(longCount, 0) {
-            let allowing = days.indices.filter { days[$0].capacity > 0 && availability.runTypes(on: days[$0].weekday).contains(.long) }
-            let withSlot = allowing.filter { index in days[index].freeSlots.contains { availability[days[index].weekday, $0].longRunPossible } }
-            let candidates = withSlot.filter { !spacesLong || spacingAllows(days[$0].date) }
-            guard let index = candidates.min(by: { lhs, rhs in
-                let (named0, named1) = (availability.dayRunTypes[days[lhs].weekday]?.contains(.long) == true, availability.dayRunTypes[days[rhs].weekday]?.contains(.long) == true)
+            let withCapacity = days.indices.filter { days[$0].capacity > 0 }
+            let allowing = withCapacity.filter { availability.runTypes(on: days[$0].weekday).contains(.long) }
+            // Each candidate with the part its long run would take.
+            let withSlot: [(index: Int, slot: DaySlot)] = allowing.compactMap { index in
+                days[index].freeSlots.first { availability[days[index].weekday, $0].longRunPossible }.map { (index, $0) }
+            }
+            let candidates = withSlot.filter { !spacesLong || spacingAllows(days[$0.index].date) }
+            let best = candidates.min { lhs, rhs in
+                let (named0, named1) = (availability.dayRunTypes[days[lhs.index].weekday]?.contains(.long) == true, availability.dayRunTypes[days[rhs.index].weekday]?.contains(.long) == true)
                 if named0 != named1 { return named0 }
-                if days[lhs].freeSlots.count != days[rhs].freeSlots.count { return days[lhs].freeSlots.count > days[rhs].freeSlots.count }
-                return days[lhs].date < days[rhs].date
-            }) else {
-                dropped.append(DroppedSession(kind: .long, reason: allowing.isEmpty ? .noFreeDay : withSlot.isEmpty ? .noLongRunSlot : .spacing))
+                if days[lhs.index].freeSlots.count != days[rhs.index].freeSlots.count { return days[lhs.index].freeSlots.count > days[rhs.index].freeSlots.count }
+                return days[lhs.index].date < days[rhs.index].date
+            }
+            guard let best else {
+                let reason: DropReason = withCapacity.isEmpty ? .noFreeDay : allowing.isEmpty ? .runTypeNotAllowed : withSlot.isEmpty ? .noLongRunSlot : .spacing
+                dropped.append(DroppedSession(kind: .long, reason: reason))
                 continue
             }
-            guard let slot = days[index].freeSlots.first(where: { availability[days[index].weekday, $0].longRunPossible }) else { continue }
-            days[index].take(slot)
-            placed.append(DayAssignment(day: days[index].date, slot: slot, runType: .long))
-            if spacesLong { spaced.append(days[index].date) }
+            days[best.index].take(best.slot)
+            placed.append(DayAssignment(day: days[best.index].date, slot: best.slot, runType: .long))
+            if spacesLong { spaced.append(days[best.index].date) }
         }
 
         let hardLimit = paradigm?.maxHardSessionsPerMicro[Self.length(of: micro, calendar: calendar)]
@@ -107,28 +112,26 @@ public struct DayAssigner: Sendable, Hashable {
                 dropped.append(DroppedSession(kind: .hard, reason: .hardLimit))
                 continue
             }
-            let allowing = days.indices.filter { index in
-                days[index].capacity > 0 && hardTypes.contains { availability.runTypes(on: days[index].weekday).contains($0) }
-            }
-            let candidates = allowing.filter { spacingAllows(days[$0].date) }
-            func names(_ index: Int) -> Bool {
+            let withCapacity = days.indices.filter { days[$0].capacity > 0 }
+            // Each candidate day with the type and part its hard session would take.
+            let allowing: [(index: Int, type: RunType, slot: DaySlot, named: Bool)] = withCapacity.compactMap { index in
+                let allowed = availability.runTypes(on: days[index].weekday)
                 let named = availability.dayRunTypes[days[index].weekday] ?? []
-                return hardTypes.contains { named.contains($0) }
+                let namedType = hardTypes.first { named.contains($0) }
+                guard let type = namedType ?? hardTypes.first(where: { allowed.contains($0) }), let slot = days[index].freeSlots.first else { return nil }
+                return (index, type, slot, namedType != nil)
             }
-            guard let index = candidates.min(by: { lhs, rhs in
-                if names(lhs) != names(rhs) { return names(lhs) }
-                return days[lhs].date < days[rhs].date
-            }) else {
-                dropped.append(DroppedSession(kind: .hard, reason: allowing.isEmpty ? .noFreeDay : .spacing))
+            let best = allowing.filter { spacingAllows(days[$0.index].date) }.min { lhs, rhs in
+                if lhs.named != rhs.named { return lhs.named }
+                return days[lhs.index].date < days[rhs.index].date
+            }
+            guard let best else {
+                dropped.append(DroppedSession(kind: .hard, reason: withCapacity.isEmpty ? .noFreeDay : allowing.isEmpty ? .runTypeNotAllowed : .spacing))
                 continue
             }
-            let allowed = availability.runTypes(on: days[index].weekday)
-            let named = availability.dayRunTypes[days[index].weekday] ?? []
-            guard let type = hardTypes.first(where: { named.contains($0) }) ?? hardTypes.first(where: { allowed.contains($0) }),
-                  let slot = days[index].freeSlots.first else { continue }
-            days[index].take(slot)
-            placed.append(DayAssignment(day: days[index].date, slot: slot, runType: type))
-            spaced.append(days[index].date)
+            days[best.index].take(best.slot)
+            placed.append(DayAssignment(day: days[best.index].date, slot: best.slot, runType: best.type))
+            spaced.append(days[best.index].date)
             hardPlaced += 1
         }
 

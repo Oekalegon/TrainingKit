@@ -77,6 +77,15 @@ struct DayAssignerTests {
         #expect(offsets(result, .long).isEmpty)
     }
 
+    @Test("a session no day allows is runTypeNotAllowed, not noFreeDay")
+    func typeNotAllowed() {
+        var avail = availability([.monday])
+        avail.setRunTypes([.long, .interval, .threshold], on: .tuesday)
+        let result = assign(avail, hard: 1, long: 1)
+        #expect(result.dropped == [DroppedSession(kind: .long, reason: .runTypeNotAllowed), DroppedSession(kind: .hard, reason: .runTypeNotAllowed)])
+        #expect(assign(RunAvailability(), hard: 1, long: 1).dropped.allSatisfy { $0.reason == .noFreeDay })
+    }
+
     @Test("a long run is not put on a day that names other run types only")
     func longRespectsNamedTypes() {
         var avail = availability([.monday, .tuesday])

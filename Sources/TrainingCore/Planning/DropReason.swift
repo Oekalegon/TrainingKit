@@ -1,7 +1,10 @@
 /// Why ``DayAssigner`` could not place a requested session.
 public enum DropReason: Sendable, Hashable {
-    /// No day of the micro has a free run left that allows the session's run type.
+    /// No day of the micro has a free run left.
     case noFreeDay
+    /// There are free runs, but no day allows the session's run type, because the athlete named it
+    /// for other weekdays only (or, for a hard session, named every hard type elsewhere).
+    case runTypeNotAllowed
     /// There is a free day for a long run, but none has a free part where a long run is possible
     /// (``SlotOptions/longRunPossible``).
     case noLongRunSlot

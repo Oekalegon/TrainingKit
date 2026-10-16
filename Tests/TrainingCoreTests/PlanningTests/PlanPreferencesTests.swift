@@ -22,15 +22,15 @@ struct PlanPreferencesTests {
         availability[.tuesday] = []
         #expect(availability.slots.isEmpty)
 
-        availability[.friday] = [.morning, .afternoonEvening]
-        #expect(availability[.friday] == [.morning, .afternoonEvening])
+        availability[.friday] = [.morning, .evening]
+        #expect(availability[.friday] == [.morning, .evening])
     }
 
     @Test("round-trips through Codable")
     func roundTrip() throws {
         let preferences = PlanPreferences(runAvailability: RunAvailability(slots: [
             .monday: [.morning],
-            .saturday: [.morning, .afternoonEvening],
+            .saturday: [.morning, .evening],
         ]))
 
         let data = try JSONEncoder().encode(preferences)
@@ -79,13 +79,13 @@ struct PlanPreferencesTests {
 
     @Test("options set on a slot are stored, and assigning the defaults removes them")
     func slotOptionsAreSparse() {
-        var availability = RunAvailability(slots: [.tuesday: [.afternoonEvening]])
+        var availability = RunAvailability(slots: [.tuesday: [.evening]])
 
-        availability[.tuesday, .afternoonEvening] = SlotOptions(longRunPossible: false, trackAvailable: true)
-        #expect(availability[.tuesday, .afternoonEvening].trackAvailable)
-        #expect(!availability[.tuesday, .afternoonEvening].longRunPossible)
+        availability[.tuesday, .evening] = SlotOptions(longRunPossible: false, trackAvailable: true)
+        #expect(availability[.tuesday, .evening].trackAvailable)
+        #expect(!availability[.tuesday, .evening].longRunPossible)
 
-        availability[.tuesday, .afternoonEvening] = .default
+        availability[.tuesday, .evening] = .default
         #expect(availability.slotOptions.isEmpty)
         #expect(RunAvailability(slotOptions: [.monday: [.morning: .default]]).slotOptions.isEmpty)
     }
@@ -93,10 +93,10 @@ struct PlanPreferencesTests {
     @Test("slot options round-trip through Codable")
     func slotOptionsRoundTrip() throws {
         let availability = RunAvailability(
-            slots: [.saturday: [.morning, .afternoonEvening], .tuesday: [.afternoonEvening]],
+            slots: [.saturday: [.morning, .evening], .tuesday: [.evening]],
             slotOptions: [
                 .saturday: [.morning: SlotOptions(longRunPossible: true, trackAvailable: true)],
-                .tuesday: [.afternoonEvening: SlotOptions(longRunPossible: false)],
+                .tuesday: [.evening: SlotOptions(longRunPossible: false)],
             ]
         )
 
@@ -112,7 +112,7 @@ struct PlanPreferencesTests {
 
         let decoded = try JSONDecoder().decode(RunAvailability.self, from: Data(json.utf8))
 
-        #expect(decoded == RunAvailability(slots: [.saturday: [.morning, .afternoonEvening]]))
+        #expect(decoded == RunAvailability(slots: [.saturday: [.morning, .afternoon, .evening]]))
         #expect(decoded[.saturday, .morning] == .default)
     }
 
@@ -124,5 +124,52 @@ struct PlanPreferencesTests {
 
         #expect(decoded[.saturday, .morning] == SlotOptions(longRunPossible: true, trackAvailable: true))
         #expect(decoded.slotOptions.count == 1)
+    }
+
+    @Test("the legacy afternoonEvening slot and options key decode to both afternoon and evening")
+    func legacyAfternoonEveningDecodesToBoth() throws {
+        let json = #"{"slots":{"7":["afternoonEvening"]},"slotOptions":{"7":{"afternoonEvening":{"longRunPossible":false,"trackAvailable":true}}}}"#
+
+        let decoded = try JSONDecoder().decode(RunAvailability.self, from: Data(json.utf8))
+
+        let options = SlotOptions(longRunPossible: false, trackAvailable: true)
+        #expect(decoded[.saturday] == [.afternoon, .evening])
+        #expect(decoded[.saturday, .afternoon] == options)
+        #expect(decoded[.saturday, .evening] == options)
+        #expect(decoded[.saturday, .morning] == .default)
+    }
+
+    @Test("a legacy slot is written again in the new form and round-trips")
+    func legacyRoundTrip() throws {
+        let json = #"{"slots":{"7":["morning","afternoonEvening"]},"slotOptions":{"7":{"afternoonEvening":{"trackAvailable":true}}}}"#
+        let decoded = try JSONDecoder().decode(RunAvailability.self, from: Data(json.utf8))
+
+        let encoded = try JSONEncoder().encode(decoded)
+
+        #expect(!String(decoding: encoded, as: UTF8.self).contains("afternoonEvening"))
+        #expect(try JSONDecoder().decode(RunAvailability.self, from: encoded) == decoded)
+    }
+
+    @Test("a legacy slot alongside a new one adds to it, and options under a new name win over the legacy key")
+    func legacyAlongsideNewKeys() throws {
+        let json = #"{"slots":{"7":["afternoonEvening","evening"],"2":["afternoon"]},"slotOptions":{"7":{"afternoonEvening":{"trackAvailable":true},"evening":{"longRunPossible":false}}}}"#
+
+        let decoded = try JSONDecoder().decode(RunAvailability.self, from: Data(json.utf8))
+
+        #expect(decoded[.saturday] == [.afternoon, .evening])
+        #expect(decoded[.monday] == [.afternoon])
+        #expect(decoded[.saturday, .afternoon] == SlotOptions(longRunPossible: true, trackAvailable: true))
+        #expect(decoded[.saturday, .evening] == SlotOptions(longRunPossible: false, trackAvailable: false))
+    }
+
+    @Test("a legacy options key without a legacy slot is carried onto both slots")
+    func legacyOptionsKeyOnly() throws {
+        let json = #"{"slots":{"7":["evening"]},"slotOptions":{"7":{"afternoonEvening":{"trackAvailable":true}}}}"#
+
+        let decoded = try JSONDecoder().decode(RunAvailability.self, from: Data(json.utf8))
+
+        #expect(decoded[.saturday] == [.evening])
+        #expect(decoded[.saturday, .afternoon].trackAvailable)
+        #expect(decoded[.saturday, .evening].trackAvailable)
     }
 }

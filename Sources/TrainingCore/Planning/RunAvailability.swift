@@ -8,6 +8,11 @@
 ///
 /// Each free slot can also carry ``SlotOptions`` (whether a long run fits, whether a track is
 /// available); a slot without stored options has ``SlotOptions/default``.
+///
+/// A day with any two of the three parts (``DaySlot/morning``, ``DaySlot/afternoon``,
+/// ``DaySlot/evening``) free allows a two-a-day; the generator rule is MVP5-119. Availability stored
+/// with the former combined `afternoonEvening` slot decodes to both ``DaySlot/afternoon`` and
+/// ``DaySlot/evening``, with its options on both, so it keeps its meaning.
 public struct RunAvailability: Sendable, Codable, Hashable {
     /// The free slots per weekday. A weekday never maps to an empty set: empty entries are removed.
     public private(set) var slots: [Weekday: Set<DaySlot>]
@@ -61,15 +66,17 @@ public struct RunAvailability: Sendable, Codable, Hashable {
 
     /// Decodes availability, ignoring weekdays and slots this version does not know (for instance
     /// written by a newer version) and treating a missing `slots` as no availability and a missing
-    /// `slotOptions` as the default options on every slot. Saving it again writes only what was
-    /// understood, so the unknown values are lost.
+    /// `slotOptions` as the default options on every slot. The legacy `afternoonEvening` slot and
+    /// options key stand for both ``DaySlot/afternoon`` and ``DaySlot/evening``; when options are
+    /// stored under the legacy key and under a new name, the new name's options win. Saving it again
+    /// writes only what was understood, in the new form, so the unknown values are lost.
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let raw = try container.decodeIfPresent([String: [String]].self, forKey: .slots) ?? [:]
         var decoded: [Weekday: Set<DaySlot>] = [:]
         for (key, names) in raw {
             guard let rawValue = Int(key), let weekday = Weekday(rawValue: rawValue) else { continue }
-            let known = Set(names.compactMap(DaySlot.init(rawValue:)))
+            let known = Set(names.flatMap(DaySlot.slots(forStoredName:)))
             if !known.isEmpty { decoded[weekday] = known }
         }
         slots = decoded
@@ -78,9 +85,13 @@ public struct RunAvailability: Sendable, Codable, Hashable {
         var decodedOptions: [Weekday: [DaySlot: SlotOptions]] = [:]
         for (key, perSlot) in rawOptions {
             guard let rawValue = Int(key), let weekday = Weekday(rawValue: rawValue) else { continue }
-            for (name, options) in perSlot {
-                guard let slot = DaySlot(rawValue: name) else { continue }
-                decodedOptions[weekday, default: [:]][slot] = options
+            // Legacy entries first so an entry stored under the new name wins over the one carried
+            // from `afternoonEvening`.
+            let ordered = perSlot.sorted { $0.key == DaySlot.legacyAfternoonEvening && $1.key != DaySlot.legacyAfternoonEvening }
+            for (name, options) in ordered {
+                for slot in DaySlot.slots(forStoredName: name) {
+                    decodedOptions[weekday, default: [:]][slot] = options
+                }
             }
         }
         slotOptions = Self.sparse(decodedOptions)

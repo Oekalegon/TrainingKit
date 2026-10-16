@@ -2,8 +2,10 @@ import Foundation
 import Testing
 @testable import TrainingCore
 
-@Suite("RunType and PlanPreferences.dayRunTypes")
+@Suite("RunType and RunAvailability.dayRunTypes")
 struct RunTypeTests {
+    private let allDays: [Weekday: Set<DaySlot>] = Dictionary(uniqueKeysWithValues: Weekday.allCases.map { ($0, [DaySlot.morning]) })
+
     @Test("maps each run type to an intensity category and a session type", arguments: [
         (RunType.recovery, IntensityCategory.veryLow, SessionType.recovery),
         (.easy, .low, .easy),
@@ -22,95 +24,73 @@ struct RunTypeTests {
         #expect(Set(RunType.allCases.map(\.sessionType)).count == 5)
     }
 
-    @Test("defaults to no run types, so every day allows every run type")
+    @Test("defaults to none named, so every running day allows every run type")
     func defaults() {
-        let preferences = PlanPreferences()
-        #expect(preferences.dayRunTypes.isEmpty)
-        #expect(preferences.runTypes(onDay: 3, microLength: 7) == Set(RunType.allCases))
+        let availability = RunAvailability(slots: allDays)
+        #expect(availability.dayRunTypes.isEmpty)
+        #expect(availability.runTypes(on: .monday) == Set(RunType.allCases))
     }
 
     @Test("a day allows the types it names plus the types no day names")
-    func unspecifiedDays() {
-        let preferences = PlanPreferences(dayRunTypes: [6: [.long], 1: [.interval, .easy]])
-        #expect(preferences.runTypes(onDay: 3, microLength: 7) == [.recovery, .threshold])
-        // A named day also gets the free types, but not types named only on other days.
-        #expect(preferences.runTypes(onDay: 6, microLength: 7) == [.long, .recovery, .threshold])
-        #expect(preferences.runTypes(onDay: 1, microLength: 7) == [.interval, .easy, .recovery, .threshold])
-        // The long run on day 6 is beyond a 6-day micro, so it no longer reserves the type.
-        #expect(preferences.runTypes(onDay: 3, microLength: 6) == [.recovery, .threshold, .long])
+    func namedPlusFree() {
+        let availability = RunAvailability(slots: allDays, dayRunTypes: [.sunday: [.long], .thursday: [.interval, .easy]])
+        #expect(availability.runTypes(on: .tuesday) == [.recovery, .threshold])
+        #expect(availability.runTypes(on: .sunday) == [.long, .recovery, .threshold])
+        #expect(availability.runTypes(on: .thursday) == [.interval, .easy, .recovery, .threshold])
     }
 
-    @Test("an unspecified day can end up with no types when every type is named elsewhere")
+    @Test("a type named on two days is allowed on both and nowhere else")
+    func sameTypeOnTwoDays() {
+        let availability = RunAvailability(slots: allDays, dayRunTypes: [.saturday: [.long], .sunday: [.long]])
+        #expect(availability.runTypes(on: .saturday).contains(.long))
+        #expect(availability.runTypes(on: .sunday).contains(.long))
+        #expect(!availability.runTypes(on: .monday).contains(.long))
+    }
+
+    @Test("a day without free slots allows nothing, but its names are kept")
+    func dayWithoutSlots() {
+        var availability = RunAvailability(slots: [.monday: [.morning]], dayRunTypes: [.sunday: [.long]])
+        #expect(availability.runTypes(on: .sunday).isEmpty)
+        // The long run is still reserved for Sunday, so it is not offered on Monday.
+        #expect(!availability.runTypes(on: .monday).contains(.long))
+        availability[.sunday] = [.morning]
+        #expect(availability.runTypes(on: .sunday).contains(.long))
+    }
+
+    @Test("an unnamed day can end up with no types when every type is named elsewhere")
     func fullyNamed() {
-        let preferences = PlanPreferences(dayRunTypes: [0: Set(RunType.allCases)])
-        #expect(preferences.runTypes(onDay: 1, microLength: 7).isEmpty)
+        let availability = RunAvailability(slots: allDays, dayRunTypes: [.monday: Set(RunType.allCases)])
+        #expect(availability.runTypes(on: .tuesday).isEmpty)
     }
 
-    @Test("several types per day, and empty sets and negative days are dropped")
-    func normalisation() {
-        var preferences = PlanPreferences(dayRunTypes: [0: [.easy, .long], 1: [], -1: [.easy]])
-        #expect(preferences.dayRunTypes == [0: [.easy, .long]])
-        #expect(preferences.runTypes(onDay: 0, microLength: 7) == [.easy, .long, .recovery, .threshold, .interval])
-
-        preferences.setRunTypes([.interval], onDay: 2)
-        preferences.setRunTypes([], onDay: 0)
-        preferences.setRunTypes([.easy], onDay: -2)
-        #expect(preferences.dayRunTypes == [2: [.interval]])
+    @Test("an empty set removes the entry")
+    func emptySetRemoves() {
+        var availability = RunAvailability(slots: allDays, dayRunTypes: [.monday: [], .tuesday: [.long]])
+        #expect(availability.dayRunTypes == [.tuesday: [.long]])
+        availability.setRunTypes([], on: .tuesday)
+        #expect(availability.dayRunTypes.isEmpty)
     }
 
-    @Test("a day outside the micro has no run types but is kept; validated drops it")
-    func outOfRangeDay() {
-        let preferences = PlanPreferences(dayRunTypes: [1: [.threshold], 9: [.long]])
-        #expect(preferences.runTypes(onDay: 9, microLength: 7).isEmpty)
-        #expect(preferences.runTypes(onDay: 7, microLength: 7).isEmpty)
-        #expect(preferences.runTypes(onDay: -1, microLength: 7).isEmpty)
-        #expect(preferences.runTypes(onDay: 9, microLength: 10) == [.long, .easy, .recovery, .interval])
-        #expect(preferences.dayRunTypes[9] == [.long])
-
-        #expect(preferences.validated(microLength: 7).dayRunTypes == [1: [.threshold]])
-        #expect(preferences.validated(microLength: 14).dayRunTypes == preferences.dayRunTypes)
-    }
-
-    @Test("a micro of no days has no run types")
-    func emptyMicro() {
-        let preferences = PlanPreferences(dayRunTypes: [0: [.long]])
-        #expect(preferences.runTypes(onDay: 0, microLength: 0).isEmpty)
-        #expect(preferences.runTypes(onDay: 0, microLength: -3).isEmpty)
-    }
-
-    @Test("round-trips through Codable")
+    @Test("round-trips through Codable, also inside the preferences")
     func roundTrip() throws {
-        let preferences = PlanPreferences(
-            runAvailability: RunAvailability(slots: [.monday: [.morning]]),
-            dayRunTypes: [0: [.easy, .recovery], 5: [.long]]
-        )
-        let data = try JSONEncoder().encode(preferences)
-        #expect(try JSONDecoder().decode(PlanPreferences.self, from: data) == preferences)
+        let availability = RunAvailability(slots: allDays, dayRunTypes: [.sunday: [.long], .thursday: [.interval, .threshold]])
+        let data = try JSONEncoder().encode(PlanPreferences(runAvailability: availability))
+        let decoded = try JSONDecoder().decode(PlanPreferences.self, from: data)
+        #expect(decoded.runAvailability == availability)
     }
 
-    @Test("a payload without dayRunTypes decodes to the defaults")
+    @Test("availability stored without dayRunTypes decodes to none named")
     func legacyPayload() throws {
-        let json = #"{"runAvailability":{"slots":{"2":["morning"]}}}"#
-        let decoded = try JSONDecoder().decode(PlanPreferences.self, from: Data(json.utf8))
+        let json = #"{"slots":{"2":["morning"]},"runsPerDay":{"2":2}}"#
+        let decoded = try JSONDecoder().decode(RunAvailability.self, from: Data(json.utf8))
         #expect(decoded.dayRunTypes.isEmpty)
-        #expect(decoded.runAvailability[.monday] == [.morning])
+        #expect(decoded[.monday] == [.morning])
     }
 
-    @Test("unknown run types, bad days and empty entries are ignored on decode")
+    @Test("unknown run types, weekdays and empty entries are ignored on decode")
     func tolerantDecode() throws {
-        let json = #"{"dayRunTypes":{"0":["easy","fartlek"],"1":["fartlek"],"2":[],"-1":["easy"],"x":["easy"],"3":["long"]}}"#
-        let decoded = try JSONDecoder().decode(PlanPreferences.self, from: Data(json.utf8))
-        #expect(decoded.dayRunTypes == [0: [.easy], 3: [.long]])
-    }
-}
-
-@Suite("RunType several per day")
-struct RunTypeSeveralPerDayTests {
-    @Test("several types on one day are all kept, the plan picks one")
-    func several() {
-        let preferences = PlanPreferences(dayRunTypes: [3: [.interval, .threshold], 6: [.long], 0: [.easy, .recovery]])
-        #expect(preferences.runTypes(onDay: 3, microLength: 7) == [.interval, .threshold])
-        #expect(preferences.runTypes(onDay: 6, microLength: 7) == [.long])
-        #expect(preferences.runTypes(onDay: 2, microLength: 7).isEmpty)
+        let json = #"{"dayRunTypes":{"1":["long","fartlek"],"2":["fartlek"],"3":[],"99":["easy"],"x":["easy"]}}"#
+        let decoded = try JSONDecoder().decode(RunAvailability.self, from: Data(json.utf8))
+        #expect(decoded.dayRunTypes == [.sunday: [.long]])
     }
 }

@@ -47,7 +47,7 @@ Run availability (MVP5-104): `RunAvailability` (free `DaySlot`s per `Weekday`, i
 
 Per-slot options (MVP5-127): `SlotOptions` (`longRunPossible`, default true; `trackAvailable`, default false) per weekday and slot on `RunAvailability`, decoding unchanged from stored availability; the generator rules (MVP5-119) and the app toggles (MVP5-128) are still to do.
 
-Run types per micro day (MVP5-110): `RunType` (recovery, easy, long, threshold, interval) maps to an `IntensityCategory` and to the small generic `SessionType`; `PlanPreferences.dayRunTypes` holds the allowed types per 0-based micro day, where a day allows the types it names plus every type no day names (a named type is tied to its days); day assignment (MVP5-119) and the picker (MVP5-112) are still to do.
+Run types per weekday (MVP5-110): `RunType` (recovery, easy, long, threshold, interval) maps to an `IntensityCategory` and to the small generic `SessionType`; `RunAvailability.dayRunTypes` holds the run types the athlete names per `Weekday` on the same athlete calendar as the free parts (a named type is tied to its days, an unnamed type is free on every running day); day assignment (MVP5-119) and the picker (MVP5-112) are still to do.
 
 See design doc §8 and the "Roadmap seams" table (§12) for how this plugs into MVP 1 without reshaping the core.
 

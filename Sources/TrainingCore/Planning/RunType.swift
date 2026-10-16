@@ -1,5 +1,5 @@
 /// The kind of run an athlete wants on a day of a micro-cycle, one element of
-/// ``PlanPreferences/dayRunTypes``.
+/// ``RunAvailability/dayRunTypes``.
 ///
 /// A run type is what the athlete chooses; it maps onto the physiological ``IntensityCategory``
 /// (``intensityCategory``) and onto the generic ``SessionType`` the library's workouts are tagged

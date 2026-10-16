@@ -67,4 +67,62 @@ struct PlanPreferencesTests {
 
         #expect(decoded == RunAvailability(slots: [.monday: [.morning]]))
     }
+
+    @Test("a slot without stored options has the defaults: long run possible, no track")
+    func slotOptionDefaults() {
+        let availability = RunAvailability(slots: [.saturday: [.morning]])
+
+        #expect(availability[.saturday, .morning] == SlotOptions(longRunPossible: true, trackAvailable: false))
+        #expect(availability[.saturday, .morning] == .default)
+        #expect(availability.slotOptions.isEmpty)
+    }
+
+    @Test("options set on a slot are stored, and assigning the defaults removes them")
+    func slotOptionsAreSparse() {
+        var availability = RunAvailability(slots: [.tuesday: [.afternoonEvening]])
+
+        availability[.tuesday, .afternoonEvening] = SlotOptions(longRunPossible: false, trackAvailable: true)
+        #expect(availability[.tuesday, .afternoonEvening].trackAvailable)
+        #expect(!availability[.tuesday, .afternoonEvening].longRunPossible)
+
+        availability[.tuesday, .afternoonEvening] = .default
+        #expect(availability.slotOptions.isEmpty)
+        #expect(RunAvailability(slotOptions: [.monday: [.morning: .default]]).slotOptions.isEmpty)
+    }
+
+    @Test("slot options round-trip through Codable")
+    func slotOptionsRoundTrip() throws {
+        let availability = RunAvailability(
+            slots: [.saturday: [.morning, .afternoonEvening], .tuesday: [.afternoonEvening]],
+            slotOptions: [
+                .saturday: [.morning: SlotOptions(longRunPossible: true, trackAvailable: true)],
+                .tuesday: [.afternoonEvening: SlotOptions(longRunPossible: false)],
+            ]
+        )
+
+        let data = try JSONEncoder().encode(PlanPreferences(runAvailability: availability))
+        let decoded = try JSONDecoder().decode(PlanPreferences.self, from: data)
+
+        #expect(decoded.runAvailability == availability)
+    }
+
+    @Test("availability stored before slot options existed decodes with the default options")
+    func legacyAvailabilityWithoutOptions() throws {
+        let json = #"{"slots":{"7":["morning","afternoonEvening"]}}"#
+
+        let decoded = try JSONDecoder().decode(RunAvailability.self, from: Data(json.utf8))
+
+        #expect(decoded == RunAvailability(slots: [.saturday: [.morning, .afternoonEvening]]))
+        #expect(decoded[.saturday, .morning] == .default)
+    }
+
+    @Test("options missing a field get that field's default; unknown weekdays and slots are ignored")
+    func partialOptions() throws {
+        let json = #"{"slots":{"7":["morning"]},"slotOptions":{"7":{"morning":{"trackAvailable":true},"night":{}},"9":{"morning":{}}}}"#
+
+        let decoded = try JSONDecoder().decode(RunAvailability.self, from: Data(json.utf8))
+
+        #expect(decoded[.saturday, .morning] == SlotOptions(longRunPossible: true, trackAvailable: true))
+        #expect(decoded.slotOptions.count == 1)
+    }
 }

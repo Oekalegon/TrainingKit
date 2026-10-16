@@ -153,6 +153,7 @@ struct AthleteProfileEditingTests {
         #expect(legacy.runAvailability == RunAvailability())
 
         original.runAvailability[.tuesday] = [.morning]
+        original.runAvailability[.tuesday, .morning] = SlotOptions(longRunPossible: false, trackAvailable: true)
         let decoded = try JSONDecoder().decode(AthleteProfile.self, from: JSONEncoder().encode(original))
         #expect(decoded.runAvailability == original.runAvailability)
     }

@@ -12,9 +12,11 @@
 /// How many runs the athlete wants on a day is stated explicitly (``runs(on:)``, default 1), not
 /// inferred from the free parts: two free parts do not by themselves mean a two-a-day. The
 /// generator (MVP5-119) places that many runs on the day, each in its own free part, so a day never
-/// has more runs than free parts. Availability stored
-/// with the former combined `afternoonEvening` slot decodes to both ``DaySlot/afternoon`` and
-/// ``DaySlot/evening``, with its options on both, so it keeps its meaning.
+/// has more runs than free parts. Read the number through ``runs(on:)``,
+/// which applies that cap, rather than ``runsPerDay``.
+///
+/// Availability stored with the former combined `afternoonEvening` slot decodes to both
+/// ``DaySlot/afternoon`` and ``DaySlot/evening``, with its options on both, so it keeps its meaning.
 public struct RunAvailability: Sendable, Codable, Hashable {
     /// The free slots per weekday. A weekday never maps to an empty set: empty entries are removed.
     public private(set) var slots: [Weekday: Set<DaySlot>]

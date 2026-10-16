@@ -78,4 +78,12 @@ struct MaxWeeklyVolumeTests {
 
         #expect(decoded.maxWeeklyVolume[.running]?.amount == 2)
     }
+
+    @Test("a maxWeeklyVolume that is not an array reads as no limit")
+    func wrongShape() throws {
+        for json in [#"{"maxWeeklyVolume":{}}"#, #"{"maxWeeklyVolume":null}"#, #"{"maxWeeklyVolume":5}"#] {
+            let decoded = try JSONDecoder().decode(PlanPreferences.self, from: Data(json.utf8))
+            #expect(decoded.maxWeeklyVolume.isEmpty)
+        }
+    }
 }

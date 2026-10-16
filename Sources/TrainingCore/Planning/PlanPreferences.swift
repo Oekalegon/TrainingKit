@@ -42,15 +42,14 @@ public struct PlanPreferences: Sendable, Codable, Hashable {
     }
 
     /// Decodes preferences, falling back to the default for any missing field so a payload written
-    /// before a field existed still decodes. A limit with an unknown sport or measure, or a
+    /// before a field existed still decodes. A `maxWeeklyVolume` that is not an array reads as no limit. A limit with an unknown sport or measure, or a
     /// non-positive or non-finite amount, is dropped; a repeated sport keeps its last entry.
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         runAvailability = try container.decodeIfPresent(RunAvailability.self, forKey: .runAvailability) ?? RunAvailability()
 
         var limits: [Sport: VolumeTarget] = [:]
-        if container.contains(.maxWeeklyVolume) {
-            var entries = try container.nestedUnkeyedContainer(forKey: .maxWeeklyVolume)
+        if container.contains(.maxWeeklyVolume), var entries = try? container.nestedUnkeyedContainer(forKey: .maxWeeklyVolume) {
             while !entries.isAtEnd {
                 if let limit = try? entries.decode(VolumeLimit.self) {
                     limits[limit.sport] = limit.volume

@@ -79,6 +79,11 @@ See `docs/design/trainingKit-design.md` in the package repository for the full m
 - ``VolumeCurveBuilder``
 - ``MicroVolumeTarget``
 - ``VolumeCurveError``
+- ``DayAssigner``
+- ``DayAssignment``
+- ``DayAssignmentResult``
+- ``DroppedSession``
+- ``DropReason``
 - ``VolumeMeasure``
 - ``RunAvailability``
 - ``RunType``

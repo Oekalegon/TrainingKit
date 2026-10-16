@@ -1,10 +1,11 @@
 /// What a free ``DaySlot`` allows beyond a plain run, one entry of ``RunAvailability``.
 ///
 /// The defaults describe a slot the athlete has not configured: a long run fits, and no track is
-/// at hand. The generator (MVP5-119) reads the options like this:
-/// - It puts a long run only on a slot with ``longRunPossible``.
-/// - It puts a track session only on a slot with ``trackAvailable``, and falls back to another
-///   quality session when there is none. An interval session never requires a track.
+/// at hand. The generator reads the options like this:
+/// - ``DayAssigner`` puts a long run only on a slot with ``longRunPossible``.
+/// - ``trackAvailable`` is stored but not read yet: no run type needs a track (an interval session
+///   never requires one). A track session, once there is one, goes only on such a slot and falls
+///   back to another quality session when there is none.
 ///
 /// Options only matter for slots that are free in ``RunAvailability/slots``. They are kept when a
 /// slot is removed, so re-adding the slot restores them.

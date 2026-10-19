@@ -194,13 +194,14 @@ struct KeyRaceLayoutTests {
     @Test("layout gives the cycle hierarchy with the adjusted roles, targeting only the primary race")
     func cycles() {
         let secondary = race(.secondary, micro: 5)
-        let result = KeyRaceLayout().layout(from: start(days: 7), to: primary(), races: [secondary], macro: macro, meso: meso(days: 7), athlete: athlete)
+        let primary = primary()
+        let result = KeyRaceLayout().layout(from: start(days: 7), to: primary, races: [secondary], macro: macro, meso: meso(days: 7), athlete: athlete)
         let micros = result.cycles.filter { $0.level == .micro }.sorted { $0.dateRange.lowerBound < $1.dateRange.lowerBound }
         #expect(micros.count == 10)
         #expect(micros[5].loadRole == .taper)
         #expect(micros[6].loadRole == .recovery)
         #expect(result.cycles.filter { $0.targetRaceID != nil }.allSatisfy { $0.level != .micro })
-        #expect(result.cycles.first { $0.level == .macro }?.targetRaceID != nil)
+        #expect(result.cycles.first { $0.level == .macro }?.targetRaceID == primary.id)
         #expect(result.adjustments.count == 1)
     }
 
@@ -218,5 +219,32 @@ struct KeyRaceLayoutTests {
         #expect(try JSONDecoder().decode(KeyRaceLayout.self, from: JSONEncoder().encode(config)) == config)
         let adjustment = KeyRaceAdjustment(raceID: UUID(), outcome: .skipped(.insidePrimaryTaper))
         #expect(try JSONDecoder().decode(KeyRaceAdjustment.self, from: JSONEncoder().encode(adjustment)) == adjustment)
+    }
+
+    @Test("a first-day race is found when the micro's bounds are not at midnight")
+    func boundsNotAtMidnight() {
+        let plain = roles([]).micros
+        let shifted = plain.map {
+            Microcycle(dateRange: $0.dateRange.lowerBound.addingTimeInterval(6 * 3600)...$0.dateRange.upperBound.addingTimeInterval(6 * 3600), phase: $0.phase, loadRole: $0.loadRole, mesoBlockIndex: $0.mesoBlockIndex)
+        }
+        let secondary = race(.secondary, micro: 5, day: 0)
+        let result = KeyRaceLayout().apply(to: shifted, primary: primary(), races: [secondary], athlete: athlete)
+        #expect(result.micros[4].loadRole == .taper)
+        #expect(result.micros[5].loadRole == .recovery)
+    }
+
+    @Test("a non-UTC athlete across a daylight-saving change gets the same roles")
+    func timeZoneAndDST() {
+        let amsterdam = AthleteProfile.fixture(timeZoneIdentifier: "Europe/Amsterdam")
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = amsterdam.timeZone
+        // The 10 micros end on 2026-11-01, so they span the 2026-10-25 clock change.
+        let primaryRace = Race(name: "Goal", date: cal.date(from: DateComponents(year: 2026, month: 11, day: 1, hour: 9))!, priority: .primary)
+        let start = cal.date(byAdding: .day, value: -69, to: cal.startOfDay(for: primaryRace.date))!
+        let secondary = Race(name: "Tune-up", date: cal.date(byAdding: .day, value: 5 * 7 + 1, to: start)!, priority: .secondary)
+        let result = KeyRaceLayout().microcycles(from: start, to: primaryRace, races: [secondary], macro: macro, meso: meso(days: 7), athlete: amsterdam)
+        #expect(result.micros.count == 10)
+        #expect(result.micros[5].loadRole == .taper)
+        #expect(result.micros[6].loadRole == .recovery)
     }
 }

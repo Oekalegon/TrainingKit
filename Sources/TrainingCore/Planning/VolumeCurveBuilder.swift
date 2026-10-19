@@ -11,8 +11,9 @@ import Foundation
 ///   build micro for a recovery that comes before any build; the starting volume if there is none).
 /// - **Taper micros** step down linearly from ``taperStartFraction`` to ``taperEndFraction`` of the
 ///   peak (the last build micro's volume); a single taper micro gets the midpoint.
-/// - **The race micro** (role ``MicroLoadRole/race``, which ``CycleLayoutBuilder`` no longer
-///   produces; only stored micros have it) gets ``raceFraction`` of the peak.
+/// - **The race micro**, the last micro when its role is ``MicroLoadRole/taper`` (as
+///   ``CycleLayoutBuilder`` lays it out) or ``MicroLoadRole/race`` (older stored plans), gets
+///   ``raceFraction`` of the peak and is not part of the taper ramp.
 ///
 /// A plan with no build micro has no ramp: recovery micros then hold the fraction of the starting
 /// volume, and taper and race micros the fraction of the peak.
@@ -68,7 +69,10 @@ public struct VolumeCurveBuilder: Sendable, Hashable {
 
         let ordered = micros.sorted { $0.dateRange.lowerBound < $1.dateRange.lowerBound }
         let buildCount = ordered.filter { $0.loadRole == .build }.count
-        let taperCount = ordered.filter { $0.loadRole == .taper }.count
+        // The micro with race day is the last one; layouts give it the taper role, older stored
+        // plans the race role. Either way it gets the race fraction and is not part of the ramp.
+        let raceStart = ordered.last.flatMap { $0.loadRole == .taper || $0.loadRole == .race ? $0.dateRange.lowerBound : nil }
+        let taperCount = ordered.filter { $0.loadRole == .taper && $0.dateRange.lowerBound != raceStart }.count
 
         // The weekly volume of the build micros, in order, so recovery can refer to the last one.
         let buildWeekly = (0..<buildCount).map { index in
@@ -82,7 +86,7 @@ public struct VolumeCurveBuilder: Sendable, Hashable {
         var lastBuildWeekly: Double?
         for micro in ordered {
             let weekly: Double
-            switch micro.loadRole {
+            switch micro.dateRange.lowerBound == raceStart ? .race : micro.loadRole {
             case .build:
                 weekly = buildWeekly[buildIndex]
                 buildIndex += 1

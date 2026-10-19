@@ -49,7 +49,8 @@ public struct KeyRaceLayout: Sendable, Codable, Hashable {
     ///     ``CycleLayoutBuilder/microcycles(from:to:macro:meso:athlete:)``.
     ///   - primary: The race the macro is anchored on. Its priority is not checked.
     ///   - races: The other races of the athlete, in any order. Only ``RacePriority/secondary``
-    ///     races are acted on; the ones outside the laid-out days are reported as skipped.
+    ///     races are acted on (a secondary race outside the laid-out days is reported as skipped);
+    ///     races of other priorities, and the primary race itself, are ignored without a report.
     ///   - macro: The ordered phase/length structure to fill backward from the primary race.
     ///   - meso: The default build/recovery pattern.
     ///   - athlete: Supplies the timezone used for all day-granular boundaries.
@@ -92,7 +93,8 @@ public struct KeyRaceLayout: Sendable, Codable, Hashable {
     ///
     /// - Parameters:
     ///   - micros: The micros, e.g. from ``CycleLayoutBuilder``, oldest first, the last one
-    ///     containing the primary race day.
+    ///     containing the primary race day. Their `dateRange` bounds may fall at any time of day;
+    ///     only the days count.
     ///   - primary: The primary race.
     ///   - races: The other races, in any order.
     ///   - athlete: Supplies the timezone used for all day-granular boundaries.
@@ -103,9 +105,10 @@ public struct KeyRaceLayout: Sendable, Codable, Hashable {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = athlete.timeZone
 
-        let secondaries = races
-            .filter { $0.priority == .secondary && $0.id != primary.id }
-            .sorted { $0.date < $1.date }
+        let secondaries = races.enumerated()
+            .filter { $0.element.priority == .secondary && $0.element.id != primary.id }
+            .sorted { ($0.element.date, $0.offset) < ($1.element.date, $1.offset) }
+            .map(\.element)
         var roles = micros.map(\.loadRole)
         var adjustments: [KeyRaceAdjustment] = []
 
@@ -124,7 +127,7 @@ public struct KeyRaceLayout: Sendable, Codable, Hashable {
 
         for race in secondaries {
             let day = calendar.startOfDay(for: race.date)
-            guard let index = micros.firstIndex(where: { $0.dateRange.contains(day) }) else {
+            guard let index = micros.firstIndex(where: { calendar.startOfDay(for: $0.dateRange.lowerBound) <= day && day <= calendar.startOfDay(for: $0.dateRange.upperBound) }) else {
                 adjustments.append(KeyRaceAdjustment(raceID: race.id, outcome: .skipped(.outsideLayout)))
                 continue
             }
@@ -134,7 +137,7 @@ public struct KeyRaceLayout: Sendable, Codable, Hashable {
             }
             // A race on the first day of a micro starts that micro's recovery; the taper ends the
             // day before.
-            let firstDay = day == micros[index].dateRange.lowerBound
+            let firstDay = day == calendar.startOfDay(for: micros[index].dateRange.lowerBound)
             let taperEnd = firstDay ? index - 1 : index
             let recoveryStart = taperEnd + 1
             guard index > claimedThrough else {
@@ -171,83 +174,5 @@ public struct KeyRaceLayout: Sendable, Codable, Hashable {
         guard let owner = owners.removeValue(forKey: index),
               case .applied(let taper, let recovery) = adjustments[owner].outcome else { return }
         adjustments[owner].outcome = .applied(taperMicros: taper, recoveryMicros: recovery - 1)
-    }
-}
-
-/// Micros laid out around the key races, with what happened to each secondary race.
-public struct KeyRaceMicrocycles: Sendable, Codable, Hashable {
-    /// The micros, oldest first.
-    public var micros: [Microcycle]
-    /// One entry per secondary race, in date order.
-    public var adjustments: [KeyRaceAdjustment]
-
-    /// Creates a result.
-    ///
-    /// - Parameters:
-    ///   - micros: The micros, oldest first.
-    ///   - adjustments: One entry per secondary race, in date order.
-    public init(micros: [Microcycle], adjustments: [KeyRaceAdjustment]) {
-        self.micros = micros
-        self.adjustments = adjustments
-    }
-}
-
-/// Cycles laid out around the key races, with what happened to each secondary race.
-public struct KeyRaceCycles: Sendable, Codable, Hashable {
-    /// The macro, meso and micro cycles, in the order ``CycleLayoutBuilder/layout(from:to:macro:meso:athlete:)`` gives.
-    public var cycles: [TrainingCycle]
-    /// One entry per secondary race, in date order.
-    public var adjustments: [KeyRaceAdjustment]
-
-    /// Creates a result.
-    ///
-    /// - Parameters:
-    ///   - cycles: The macro, meso and micro cycles.
-    ///   - adjustments: One entry per secondary race, in date order.
-    public init(cycles: [TrainingCycle], adjustments: [KeyRaceAdjustment]) {
-        self.cycles = cycles
-        self.adjustments = adjustments
-    }
-}
-
-/// What ``KeyRaceLayout`` did for one secondary race.
-public struct KeyRaceAdjustment: Identifiable, Sendable, Codable, Hashable {
-    /// What happened to the race.
-    public enum Outcome: Sendable, Codable, Hashable {
-        /// The race got a taper and a recovery, in micros; compare with the configured lengths to
-        /// see whether either was shortened (down to 0) by the start of the layout, the primary
-        /// taper or a neighbouring race.
-        case applied(taperMicros: Int, recoveryMicros: Int)
-        /// The race was not placed, for the reason given.
-        case skipped(SkipReason)
-    }
-
-    /// Why a secondary race was not placed.
-    public enum SkipReason: String, Sendable, Codable, Hashable, CaseIterable {
-        /// Race day is before the first micro or after the primary race (which has no micro after
-        /// its day).
-        case outsideLayout
-        /// Race day falls in the primary race's taper.
-        case insidePrimaryTaper
-        /// Race day is in the same micro as an earlier secondary race, or in one the earlier
-        /// race's taper claims.
-        case tooCloseToEarlierRace
-    }
-
-    /// The secondary race's ID.
-    public var id: UUID { raceID }
-    /// The secondary race this entry is about.
-    public var raceID: UUID
-    /// What happened to the race.
-    public var outcome: Outcome
-
-    /// Creates an adjustment.
-    ///
-    /// - Parameters:
-    ///   - raceID: The secondary race this entry is about.
-    ///   - outcome: What happened to the race.
-    public init(raceID: UUID, outcome: Outcome) {
-        self.raceID = raceID
-        self.outcome = outcome
     }
 }

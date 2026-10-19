@@ -13,7 +13,7 @@ public struct TrainingCycle: Identifiable, Sendable, Codable, Hashable {
     public var level: CycleLevel
     /// This cycle's training emphasis.
     public var phase: CyclePhase
-    /// How hard this micro is meant to be (build, recovery, taper or race). Only micro-level cycles
+    /// How hard this micro is meant to be (build, recovery or taper; `race` only on cycles stored before layouts dropped it). Only micro-level cycles
     /// carry one; it is `nil` for macro- and meso-level cycles (any role passed for them is dropped).
     public var loadRole: MicroLoadRole?
     /// A display name, e.g. "Ultra prep 2027", "Meso 3", "Week 11".

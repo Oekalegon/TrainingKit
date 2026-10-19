@@ -58,6 +58,7 @@ public enum SpecificPhaseTarget: Sendable, Codable, Hashable {
         try validate()
     }
 
+    /// Mirrors the public cases so the synthesized Codable can be reused; keep the two lists in step.
     private enum Cases: Codable {
         case pace(secondsPerKilometer: Double)
         case heartRate(beatsPerMinute: ClosedRange<Double>)

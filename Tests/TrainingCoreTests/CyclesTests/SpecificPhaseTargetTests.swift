@@ -49,6 +49,12 @@ struct SpecificPhaseTargetTests {
         #expect(throws: SpecificPhaseTargetError.invalidPerceivedEffort) {
             try decode(SpecificPhaseTarget.self, #"{"perceivedEffort":{"_0":11}}"#)
         }
+        #expect(throws: SpecificPhaseTargetError.invalidHeartRate) {
+            try decode(SpecificPhaseTarget.self, #"{"heartRate":{"beatsPerMinute":[0,150]}}"#)
+        }
+        #expect(throws: DecodingError.self) {
+            try decode(SpecificPhaseTarget.self, #"{"heartRate":{"beatsPerMinute":[170,150]}}"#)
+        }
     }
 
     @Test("a race stored before the target existed decodes to nil")

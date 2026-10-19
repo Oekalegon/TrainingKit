@@ -705,6 +705,28 @@ struct SwiftDataStoreTests {
         #expect(race.specificPhaseTarget == nil)
     }
 
+    @Test("RaceStore keeps a race whose stored target is NaN or of an unknown kind, with no target")
+    func raceStoreDropsInvalidTarget() async throws {
+        let container = try TestContainers.make(cloudKitDatabase: .none, isStoredInMemoryOnly: true)
+        let context = ModelContext(container)
+        var ids: [UUID] = []
+        for target in [#"{"pace":{"secondsPerKilometer":"nan"}}"#, #"{"telepathy":{}}"#] {
+            let id = UUID()
+            ids.append(id)
+            let payload = Data("""
+            {"id":"\(id.uuidString)","name":"R","date":1000,"priority":{"primary":{}},"specificPhaseTarget":\(target)}
+            """.utf8)
+            context.insert(RaceRecord(id: id, payload: payload))
+        }
+        try context.save()
+
+        let store = SwiftDataStore(modelContainer: container)
+        for id in ids {
+            let race = try #require(try await store.race(id: id))
+            #expect(race.name == "R" && race.specificPhaseTarget == nil)
+        }
+    }
+
     @Test("RaceStore delete removes a race")
     func raceStoreDelete() async throws {
         let store = try makeStore()

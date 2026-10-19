@@ -11,7 +11,8 @@ import Foundation
 ///   build micro for a recovery that comes before any build; the starting volume if there is none).
 /// - **Taper micros** step down linearly from ``taperStartFraction`` to ``taperEndFraction`` of the
 ///   peak (the last build micro's volume); a single taper micro gets the midpoint.
-/// - **The race micro** gets ``raceFraction`` of the peak.
+/// - **The race micro** (role ``MicroLoadRole/race``, which ``CycleLayoutBuilder`` no longer
+///   produces; only stored micros have it) gets ``raceFraction`` of the peak.
 ///
 /// A plan with no build micro has no ramp: recovery micros then hold the fraction of the starting
 /// volume, and taper and race micros the fraction of the peak.

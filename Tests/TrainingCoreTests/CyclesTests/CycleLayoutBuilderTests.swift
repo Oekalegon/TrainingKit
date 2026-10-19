@@ -57,10 +57,10 @@ struct CycleLayoutBuilderTests {
             #expect(later.dateRange.lowerBound == expectedNextStart)
         }
 
-        // The last micro overall is always the race micro; the one before it (still within the
+        // The last micro overall holds race day and is a taper micro too; the one before it (also within the
         // taper block) has the taper role rather than cycling the build/recovery pattern. Both stay
         // in the block's own phase.
-        #expect(sortedMicros.last?.loadRole == .race)
+        #expect(sortedMicros.last?.loadRole == .taper)
         #expect(sortedMicros[sortedMicros.count - 2].loadRole == .taper)
         #expect(sortedMicros.suffix(2).allSatisfy { $0.phase == .taper })
 
@@ -115,7 +115,7 @@ struct CycleLayoutBuilderTests {
         let micros = cycles.filter { $0.level == .micro }
         let mesos = cycles.filter { $0.level == .meso }
         #expect(micros.count == 1)
-        #expect(micros.first?.loadRole == .race)
+        #expect(micros.first?.loadRole == .taper)
         #expect(micros.first?.dateRange == start...raceDay)
         #expect(mesos.count == 1)
         #expect(mesos.first?.phase == .taper)
@@ -137,7 +137,7 @@ struct CycleLayoutBuilderTests {
         let micros = cycles.filter { $0.level == .micro }
         #expect(micros.count == 1)
         #expect(micros.first?.dateRange == raceDay...raceDay)
-        #expect(micros.first?.loadRole == .race)
+        #expect(micros.first?.loadRole == .taper)
     }
 
     @Test("a race date before start returns no cycles")
@@ -185,7 +185,7 @@ struct CycleLayoutBuilderTests {
         #expect(micros.map(\.dateRange) == microCycles.map(\.dateRange))
         #expect(micros.map(\.phase) == microCycles.map(\.phase))
         #expect(micros.map(\.loadRole) == microCycles.map(\.loadRole))
-        #expect(micros.last?.loadRole == .race)
+        #expect(micros.last?.loadRole == .taper)
         #expect(micros.map(\.id) == micros.map(\.dateRange.lowerBound))
     }
 
@@ -290,6 +290,6 @@ struct CycleLayoutBuilderTests {
         // Build block has no override, so it falls back to the default 3:1 `meso` parameter.
         #expect(micros[6..<10].map(\.loadRole) == [.build, .build, .build, .recovery])
         // The taper block's one micro is always the forced race micro, regardless of pattern.
-        #expect(micros[10].loadRole == .race)
+        #expect(micros[10].loadRole == .taper)
     }
 }

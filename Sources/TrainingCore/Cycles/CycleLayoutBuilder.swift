@@ -5,9 +5,10 @@ import Foundation
 ///
 /// The algorithm works backwards from `race.date`:
 /// 1. Every micro takes its block's ``CyclePhase``; the load role says how hard it is.
-/// 2. The very last micro (the one covering race day itself) always has role `.race`.
+/// 2. The very last micro (the one covering race day itself, which is its last day) has role
+///    `.taper`: there is no separate race role, the race ends the taper.
 /// 3. Every other micro in a `.taper`- or `.race`-phase ``MacroTemplate/MesoBlock`` has role
-///    `.taper` or `.race` respectively.
+///    `.taper`.
 ///    Taper and race blocks are recognised by the built-in `.taper` and `.race` phases only; a
 ///    paradigm's differently named taper phase is laid out like any other block.
 /// 4. Every micro in any other block cycles through its pattern's `microRoles` (e.g. "3:1"'s
@@ -20,6 +21,8 @@ import Foundation
 ///    that some of the oldest blocks wouldn't fit at all, they're dropped entirely instead of
 ///    producing a negative- or zero-length cycle — e.g. a race one week away with a multi-month
 ///    macro template still lays out cleanly as just the trimmed taper block plus the race micro.
+///
+/// For races besides this one, see ``KeyRaceLayout``.
 ///
 /// In MVP 1 this is invoked directly by the user ("lay out a 3:1 block from today to this race");
 /// MVP 2's plan generator calls the same builder and then fills each micro with `[PlannedActivity]`.
@@ -130,9 +133,8 @@ public struct CycleLayoutBuilder: Sendable {
     }
 
     private func loadRole(forPositionInBlock position: Int, block: MacroTemplate.MesoBlock, meso: MesocycleTemplate, isRaceMicro: Bool) -> MicroLoadRole {
-        guard !isRaceMicro else { return .race }
-        if block.phase == .taper { return .taper }
-        if block.phase == .race { return .race }
+        guard !isRaceMicro else { return .taper }
+        if block.phase == .taper || block.phase == .race { return .taper }
         guard !meso.microRoles.isEmpty else { return .build }
         return meso.microRoles[position % meso.microRoles.count]
     }
@@ -149,7 +151,7 @@ public struct CycleLayoutBuilder: Sendable {
 
     /// Builds the macro/meso/micro `TrainingCycle` hierarchy from the surviving, chronologically
     /// ordered micro-cycles.
-    private func cycles(from micros: [Microcycle], macro: MacroTemplate, race: Race) -> [TrainingCycle] {
+    func cycles(from micros: [Microcycle], macro: MacroTemplate, race: Race) -> [TrainingCycle] {
         let macroID = UUID()
         var result: [TrainingCycle] = []
         var weekNumber = 0

@@ -132,6 +132,8 @@ See `docs/design/trainingKit-design.md` in the package repository for the full m
 - ``CycleLayoutBuilder``
 - ``Race``
 - ``RacePriority``
+- ``SpecificPhaseTarget``
+- ``SpecificPhaseTargetError``
 
 ### Goals
 

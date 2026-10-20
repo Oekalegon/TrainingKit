@@ -208,6 +208,17 @@ struct TrainingModelTests {
         #expect(try await store.race(id: race.id) == race)
     }
 
+    @Test("add(_ race:) refuses a race with an invalid distance and changes nothing (MVP5-138)")
+    func addRaceRejectsInvalidDistance() async throws {
+        let (store, stores) = makeStores()
+        let model = TrainingModel(stores: stores, athlete: AthleteProfile.fixture())
+        try await model.load(in: day(0)...day(13), asOf: day(0))
+        let bad = Race(name: "Bad", date: day(5), priority: .primary, distanceMeters: 0)
+        await #expect(throws: RaceError.invalidDistance) { try await model.add(bad, asOf: day(0)) }
+        #expect(model.races.isEmpty)
+        #expect(try await store.race(id: bad.id) == nil)
+    }
+
     @Test("goals load without a date range, and add(_ goal:) and deleteGoal(id:) keep them in step with the store")
     func goalsLoadAddAndDelete() async throws {
         let store = InMemoryStore()

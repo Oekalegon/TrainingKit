@@ -242,3 +242,55 @@ struct LongRunCeilingTests {
         #expect(!encoded.contains("maxLongRunMeters"))
     }
 }
+
+@Suite("Ultra target edge cases (MVP5-138)")
+struct UltraTargetEdgeTests {
+    private var calendar: Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "Europe/Amsterdam")!
+        return calendar
+    }
+    private var monday: Date { calendar.date(from: DateComponents(year: 2026, month: 10, day: 5))! }
+    private func day(_ offset: Int) -> Date { calendar.date(byAdding: .day, value: offset, to: monday)! }
+    private var ultra: Race { Race(name: "T", date: day(100), priority: .primary, distanceMeters: 100_000) }
+    private var avail: RunAvailability {
+        RunAvailability(slots: Dictionary(uniqueKeysWithValues: Weekday.allCases.map { ($0, [DaySlot.morning]) }))
+    }
+
+    private func longOffsets(_ result: DayAssignmentResult) -> [Int] {
+        result.assignments.filter { $0.runType == .long }.map { calendar.dateComponents([.day], from: monday, to: $0.day).day! }
+    }
+
+    @Test("three long runs against a limit of one pair: the third may not extend the pair")
+    func threeInARow() {
+        var paradigm = TrainingParadigm.polarized8020
+        paradigm.maxBackToBackLongRunPairsPerMicro = [10: 1]
+        let result = DayAssigner(paradigm: paradigm).assign(
+            micro: day(0)...day(9), availability: avail, hardCount: 0, longCount: 3, targetRace: ultra, calendar: calendar
+        )
+        #expect(longOffsets(result) == [0, 1, 3])
+    }
+
+    @Test("a long run next to one just before the micro counts as a pair")
+    func precedingPair() {
+        var paradigm = TrainingParadigm.polarized8020
+        paradigm.maxBackToBackLongRunPairsPerMicro = [7: 0]
+        let result = DayAssigner(paradigm: paradigm).assign(
+            micro: day(0)...day(6), availability: avail, hardCount: 0, longCount: 1,
+            precedingLongRuns: [day(-1)], targetRace: ultra, calendar: calendar
+        )
+        #expect(longOffsets(result) == [1])
+    }
+
+    @Test("invalid ceilings and negative pair limits are cleaned in init and when decoding")
+    func paradigmValidation() throws {
+        for bad in [0.0, -1, .infinity, .nan] {
+            #expect(TrainingParadigm(name: "X", maxLongRunMeters: bad).maxLongRunMeters == nil)
+        }
+        #expect(TrainingParadigm(name: "X", maxBackToBackLongRunPairsPerMicro: [7: -2]).maxBackToBackLongRunPairsPerMicro == [7: 0])
+        let decoded = try JSONDecoder().decode(
+            TrainingParadigm.self, from: Data(#"{"name":"X","maxLongRunMeters":-5,"maxBackToBackLongRunPairsPerMicro":{"7":-1}}"#.utf8)
+        )
+        #expect(decoded.maxLongRunMeters == nil && decoded.maxBackToBackLongRunPairsPerMicro == [7: 0])
+    }
+}

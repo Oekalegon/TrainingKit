@@ -98,8 +98,18 @@ public struct TrainingParadigm: Sendable, Codable, Hashable {
         self.spacesLongRunsAsHard = spacesLongRunsAsHard
         self.minDaysBetweenHardSessions = minDaysBetweenHardSessions
         self.maxHardSessionsPerMicro = maxHardSessionsPerMicro
-        self.maxLongRunMeters = maxLongRunMeters
-        self.maxBackToBackLongRunPairsPerMicro = maxBackToBackLongRunPairsPerMicro
+        self.maxLongRunMeters = Self.validCeiling(maxLongRunMeters)
+        self.maxBackToBackLongRunPairsPerMicro = Self.validPairLimits(maxBackToBackLongRunPairsPerMicro)
+    }
+
+    /// A ceiling that is finite and above zero, otherwise `nil`.
+    private static func validCeiling(_ meters: Double?) -> Double? {
+        meters.flatMap { $0.isFinite && $0 > 0 ? $0 : nil }
+    }
+
+    /// The pair limits with negative values raised to zero.
+    private static func validPairLimits(_ limits: [Int: Int]) -> [Int: Int] {
+        limits.mapValues { max($0, 0) }
     }
 
     /// The paradigm as it applies to a plan aimed at `targetRace`.
@@ -159,9 +169,13 @@ public struct TrainingParadigm: Sendable, Codable, Hashable {
         minDaysBetweenHardSessions = try container.decodeIfPresent(Int.self, forKey: .minDaysBetweenHardSessions)
         let limits = try container.decodeIfPresent([String: Int].self, forKey: .maxHardSessionsPerMicro) ?? [:]
         maxHardSessionsPerMicro = Dictionary(limits.compactMap { key, value in Int(key).map { ($0, value) } }, uniquingKeysWith: { first, _ in first })
-        maxLongRunMeters = try container.decodeIfPresent(Double.self, forKey: .maxLongRunMeters) ?? 35_000
+        if let stored = try container.decodeIfPresent(Double.self, forKey: .maxLongRunMeters) {
+            maxLongRunMeters = Self.validCeiling(stored)
+        } else {
+            maxLongRunMeters = 35_000
+        }
         let pairs = try container.decodeIfPresent([String: Int].self, forKey: .maxBackToBackLongRunPairsPerMicro) ?? [:]
-        maxBackToBackLongRunPairsPerMicro = Dictionary(pairs.compactMap { key, value in Int(key).map { ($0, value) } }, uniquingKeysWith: { first, _ in first })
+        maxBackToBackLongRunPairsPerMicro = Self.validPairLimits(Dictionary(pairs.compactMap { key, value in Int(key).map { ($0, value) } }, uniquingKeysWith: { first, _ in first }))
     }
 
     /// Encodes the paradigm; dictionary keys are written as strings (phase ids, micro lengths).

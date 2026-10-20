@@ -46,6 +46,9 @@ public struct DayAssigner: Sendable, Hashable {
     ///   - longCount: How many long runs the micro should get.
     ///   - preceding: The days of the hard sessions (and long runs, if the paradigm spaces them as
     ///     hard) just before the micro, so spacing holds across its start; defaults to none.
+    ///   - precedingLongRuns: The days of the long runs just before the micro, so a long run on the
+    ///     micro's first day next to one counts as a back-to-back pair; used only for the pair limit of
+    ///     an ultra target, and independent of `preceding`. Defaults to none.
     ///   - targetRace: The race the plan builds towards; for an ultra the paradigm's long runs are not
     ///     spaced and at most ``TrainingParadigm/maxBackToBackLongRunPairsPerMicro`` pairs of long
     ///     runs on consecutive days are placed, see ``TrainingParadigm/resolved(for:)``. Defaults to `nil`.
@@ -58,6 +61,7 @@ public struct DayAssigner: Sendable, Hashable {
         hardCount: Int,
         longCount: Int,
         preceding: [Date] = [],
+        precedingLongRuns: [Date] = [],
         targetRace: Race? = nil,
         calendar: Calendar
     ) -> DayAssignmentResult {
@@ -81,7 +85,7 @@ public struct DayAssigner: Sendable, Hashable {
         let minGap = paradigm?.minDaysBetweenHardSessions
         let spacesLong = paradigm?.spacesLongRunsAsHard ?? false
         let pairLimit = paradigm?.maxBackToBackLongRunPairsPerMicro[Self.length(of: micro, calendar: calendar)]
-        var longDates: [Date] = []
+        var longDates: [Date] = precedingLongRuns
         var pairs = 0
 
         func isNextDay(_ lhs: Date, _ rhs: Date) -> Bool {

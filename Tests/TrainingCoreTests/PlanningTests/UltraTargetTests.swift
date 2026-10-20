@@ -198,3 +198,47 @@ struct UltraTargetTests {
         #expect(result.dropped.map(\.reason) == [.hardLimit])
     }
 }
+
+@Suite("Athlete long-run ceiling (MVP5-138)")
+struct LongRunCeilingTests {
+    private func race(_ meters: Double) -> Race {
+        Race(name: "Target", date: Date(timeIntervalSince1970: 2_000_000_000), priority: .primary, distanceMeters: meters)
+    }
+
+    @Test("the athlete's ceiling wins for an ultra, even above the paradigm's; otherwise the paradigm's applies")
+    func effectiveCeiling() {
+        let ultra = race(100_000)
+        #expect(PlanPreferences(maxLongRunMeters: 25_000).maxLongRun(for: .polarized8020, targetRace: ultra) == 25_000)
+        #expect(PlanPreferences(maxLongRunMeters: 45_000).maxLongRun(for: .polarized8020, targetRace: ultra) == 45_000)
+        #expect(PlanPreferences().maxLongRun(for: .polarized8020, targetRace: ultra) == 35_000)
+        #expect(PlanPreferences().maxLongRun(for: TrainingParadigm(name: "None", maxLongRunMeters: nil), targetRace: ultra) == nil)
+        #expect(PlanPreferences(maxLongRunMeters: 25_000).maxLongRun(for: nil, targetRace: ultra) == 25_000)
+    }
+
+    @Test("a marathon or no target race has no ceiling, whatever the athlete says")
+    func notUltra() {
+        let preferences = PlanPreferences(maxLongRunMeters: 25_000)
+        #expect(preferences.maxLongRun(for: .polarized8020, targetRace: race(42_195)) == nil)
+        #expect(preferences.maxLongRun(for: .polarized8020, targetRace: nil) == nil)
+    }
+
+    @Test("an invalid ceiling is stored as none, in the initializer and when decoding")
+    func invalid() throws {
+        for bad in [0.0, -5, .infinity, .nan] {
+            #expect(PlanPreferences(maxLongRunMeters: bad).maxLongRunMeters == nil)
+        }
+        let decoded = try JSONDecoder().decode(PlanPreferences.self, from: Data(#"{"maxLongRunMeters":-1}"#.utf8))
+        #expect(decoded.maxLongRunMeters == nil)
+        let wrongType = try JSONDecoder().decode(PlanPreferences.self, from: Data(#"{"maxLongRunMeters":"far"}"#.utf8))
+        #expect(wrongType.maxLongRunMeters == nil)
+    }
+
+    @Test("the ceiling round-trips, and a payload without it decodes to none")
+    func codable() throws {
+        let preferences = PlanPreferences(maxLongRunMeters: 30_000)
+        #expect(try JSONDecoder().decode(PlanPreferences.self, from: JSONEncoder().encode(preferences)) == preferences)
+        #expect(try JSONDecoder().decode(PlanPreferences.self, from: Data("{}".utf8)).maxLongRunMeters == nil)
+        let encoded = String(decoding: try JSONEncoder().encode(PlanPreferences()), as: UTF8.self)
+        #expect(!encoded.contains("maxLongRunMeters"))
+    }
+}

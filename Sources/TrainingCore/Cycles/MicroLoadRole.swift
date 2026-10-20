@@ -14,6 +14,9 @@ public enum MicroLoadRole: String, Sendable, Codable, Hashable, CaseIterable {
     /// A micro in the taper into a race.
     case taper
     /// The micro containing race day.
+    ///
+    /// ``CycleLayoutBuilder`` and ``KeyRaceLayout`` no longer produce it: the micro with race day
+    /// is `.taper`, or `.recovery` when race day is its first day. It stays so stored micros decode.
     case race
 
     /// The role a micro stored before load roles existed had, judged from its phase: `build`,

@@ -55,8 +55,8 @@ struct VolumeCurveBuilderTests {
     func taperAndRace() throws {
         let two = try builder.targets(for: micros([.build, .build, .taper, .taper, .race]), starting: volume(100), peak: volume(200))
         #expect(amounts(two) == [100, 200, 140, 100, 60])
-        let three = try builder.targets(for: micros([.build, .taper, .taper, .taper]), starting: volume(100), peak: volume(200))
-        #expect(amounts(three) == [200, 140, 120, 100])
+        let three = try builder.targets(for: micros([.build, .taper, .taper, .taper, .race]), starting: volume(100), peak: volume(200))
+        #expect(amounts(three) == [200, 140, 120, 100, 60])
         let one = try builder.targets(for: micros([.build, .taper, .race]), starting: volume(100), peak: volume(200))
         #expect(amounts(one) == [200, 120, 60])
     }
@@ -123,5 +123,21 @@ struct VolumeCurveBuilderTests {
         let micro = Microcycle(dateRange: start...end, phase: .build, loadRole: .build, mesoBlockIndex: 0)
         let result = try builder.targets(for: [micro], starting: volume(100), peak: volume(100))
         #expect(result[0].lengthDays == 7 && result[0].target.amount == 100)
+    }
+
+    @Test("a laid-out plan ends in a taper micro that gets the race fraction and stays out of the taper ramp")
+    func laidOutRaceMicro() throws {
+        let macro = MacroTemplate(name: "Block", mesoBlocks: [
+            MacroTemplate.MesoBlock(phase: .build, microCount: 4),
+            MacroTemplate.MesoBlock(phase: .taper, microCount: 3),
+        ])
+        let athlete = AthleteProfile.fixture()
+        let raceDay = Date(timeIntervalSince1970: 1_700_000_000)
+        let race = Race(name: "Goal", date: raceDay, priority: .primary)
+        let layout = CycleLayoutBuilder().microcycles(from: raceDay.addingTimeInterval(-60 * 86400), to: race, macro: macro, meso: .linear, athlete: athlete)
+        #expect(layout.map(\.loadRole) == [.build, .build, .build, .build, .taper, .taper, .taper])
+        let result = try builder.targets(for: layout, starting: volume(100), peak: volume(200))
+        // Peak 200: taper ramp 0.7 to 0.5 over the two taper micros before race week, then 0.3.
+        #expect(amounts(result).suffix(3) == [140, 100, 60])
     }
 }

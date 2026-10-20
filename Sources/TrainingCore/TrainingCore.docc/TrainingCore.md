@@ -130,6 +130,10 @@ See `docs/design/trainingKit-design.md` in the package repository for the full m
 - ``MesocycleTemplate``
 - ``MacroTemplate``
 - ``CycleLayoutBuilder``
+- ``KeyRaceLayout``
+- ``KeyRaceMicrocycles``
+- ``KeyRaceCycles``
+- ``KeyRaceAdjustment``
 - ``Race``
 - ``RacePriority``
 - ``SpecificPhaseTarget``

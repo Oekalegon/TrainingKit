@@ -11,7 +11,7 @@ public struct Race: Identifiable, Sendable, Codable, Hashable {
     public var name: String
     /// The calendar day the race takes place, in the athlete's timezone.
     public var date: Date
-    /// How much this race matters to the athlete; not yet acted on (MVP 5).
+    /// How much this race matters to the athlete; see ``KeyRaceLayout``.
     public var priority: RacePriority
     /// The intensity the race's specific-phase work is aimed at, or `nil` for none (MVP5-114).
     ///
@@ -26,7 +26,7 @@ public struct Race: Identifiable, Sendable, Codable, Hashable {
     ///   - id: A stable identifier; defaults to a new random `UUID`.
     ///   - name: The race's display name.
     ///   - date: The calendar day the race takes place, in the athlete's timezone.
-    ///   - priority: How much this race matters to the athlete; not yet acted on (MVP 5).
+    ///   - priority: How much this race matters to the athlete; see ``KeyRaceLayout``.
     ///   - specificPhaseTarget: The intensity the specific-phase work is aimed at; defaults to `nil`, none.
     public init(
         id: UUID = UUID(), name: String, date: Date, priority: RacePriority,

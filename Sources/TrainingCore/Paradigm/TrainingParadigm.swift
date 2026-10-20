@@ -51,6 +51,12 @@ public struct TrainingParadigm: Sendable, Codable, Hashable {
     /// session, and a pair does not count towards ``maxHardSessionsPerMicro``. Only
     /// ``resolved(for:)`` with an ultra race keeps it.
     public var maxBackToBackLongRunPairsPerMicro: [Int: Int]
+
+    /// The phase a short lead time shortens, after any structural phase has been dropped (see
+    /// ``LeadTimeCompromiser``): the race-specific phase, `.specific` for triphasic and `.peak` for
+    /// the polarized paradigm. `nil` (the default) when the paradigm has none, so only the oldest
+    /// phases are cut.
+    public var shortenablePhase: CyclePhase?
     /// The minimum number of days from one hard session to the next (Tuesday to Thursday is 2);
     /// `nil` switches ``PlanRule/hardSessionSpacing`` off.
     public var minDaysBetweenHardSessions: Int?
@@ -74,6 +80,7 @@ public struct TrainingParadigm: Sendable, Codable, Hashable {
     ///   - maxLongRunMeters: The longest a long run may be, in meters, for an ultra target; defaults to 35,000, `nil` for no ceiling.
     ///   - maxBackToBackLongRunPairsPerMicro: The maximum back-to-back long-run pairs per micro for
     ///     an ultra target, by micro length in days; defaults to no limit.
+    ///   - shortenablePhase: The phase a short lead time shortens; defaults to `nil` (none).
     public init(
         name: String,
         phases: [CyclePhase] = [],
@@ -86,7 +93,8 @@ public struct TrainingParadigm: Sendable, Codable, Hashable {
         minDaysBetweenHardSessions: Int? = nil,
         maxHardSessionsPerMicro: [Int: Int] = [:],
         maxLongRunMeters: Double? = 35_000,
-        maxBackToBackLongRunPairsPerMicro: [Int: Int] = [:]
+        maxBackToBackLongRunPairsPerMicro: [Int: Int] = [:],
+        shortenablePhase: CyclePhase? = nil
     ) {
         self.name = name
         self.phases = phases
@@ -100,6 +108,7 @@ public struct TrainingParadigm: Sendable, Codable, Hashable {
         self.maxHardSessionsPerMicro = maxHardSessionsPerMicro
         self.maxLongRunMeters = Self.validCeiling(maxLongRunMeters)
         self.maxBackToBackLongRunPairsPerMicro = Self.validPairLimits(maxBackToBackLongRunPairsPerMicro)
+        self.shortenablePhase = shortenablePhase
     }
 
     /// A ceiling that is finite and above zero, otherwise `nil`.
@@ -151,7 +160,7 @@ public struct TrainingParadigm: Sendable, Codable, Hashable {
 
     private enum CodingKeys: String, CodingKey {
         case name, phases, guardrailOverrides, defaultMix, phaseMixes, hardIntensity, hardSpeed, spacesLongRunsAsHard
-        case minDaysBetweenHardSessions, maxHardSessionsPerMicro, maxLongRunMeters, maxBackToBackLongRunPairsPerMicro
+        case minDaysBetweenHardSessions, maxHardSessionsPerMicro, maxLongRunMeters, maxBackToBackLongRunPairsPerMicro, shortenablePhase
     }
 
     /// Decodes a paradigm; everything but `name` falls back to its default when absent.
@@ -176,6 +185,7 @@ public struct TrainingParadigm: Sendable, Codable, Hashable {
         }
         let pairs = try container.decodeIfPresent([String: Int].self, forKey: .maxBackToBackLongRunPairsPerMicro) ?? [:]
         maxBackToBackLongRunPairsPerMicro = Self.validPairLimits(Dictionary(pairs.compactMap { key, value in Int(key).map { ($0, value) } }, uniquingKeysWith: { first, _ in first }))
+        shortenablePhase = try container.decodeIfPresent(CyclePhase.self, forKey: .shortenablePhase)
     }
 
     /// Encodes the paradigm; dictionary keys are written as strings (phase ids, micro lengths).
@@ -193,5 +203,6 @@ public struct TrainingParadigm: Sendable, Codable, Hashable {
         try container.encode(Dictionary(uniqueKeysWithValues: maxHardSessionsPerMicro.map { (String($0.key), $0.value) }), forKey: .maxHardSessionsPerMicro)
         try container.encodeIfPresent(maxLongRunMeters, forKey: .maxLongRunMeters)
         try container.encode(Dictionary(uniqueKeysWithValues: maxBackToBackLongRunPairsPerMicro.map { (String($0.key), $0.value) }), forKey: .maxBackToBackLongRunPairsPerMicro)
+        try container.encodeIfPresent(shortenablePhase, forKey: .shortenablePhase)
     }
 }

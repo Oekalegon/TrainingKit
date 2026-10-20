@@ -675,6 +675,58 @@ struct SwiftDataStoreTests {
         #expect(stored == [race])
     }
 
+    @Test("RaceStore round-trips a specific-phase target of each kind")
+    func raceStoreRoundTripsSpecificPhaseTarget() async throws {
+        let store = try makeStore()
+        let targets: [SpecificPhaseTarget] = [
+            .pace(secondsPerKilometer: 240), .heartRate(beatsPerMinute: 165...172), .perceivedEffort(8), .predictedFromFitness,
+        ]
+        for (offset, target) in targets.enumerated() {
+            let race = Race(name: "Race \(offset)", date: day(offset), priority: .primary, specificPhaseTarget: target)
+            try await store.upsert([race])
+            #expect(try await store.race(id: race.id) == race)
+        }
+    }
+
+    @Test("RaceStore reads a race record written before the specific-phase target existed")
+    func raceStoreReadsLegacyPayload() async throws {
+        let container = try TestContainers.make(cloudKitDatabase: .none, isStoredInMemoryOnly: true)
+        let id = UUID()
+        let legacy = Data("""
+        {"id":"\(id.uuidString)","name":"Old 10K","date":1000,"priority":{"primary":{}}}
+        """.utf8)
+        let context = ModelContext(container)
+        context.insert(RaceRecord(id: id, payload: legacy))
+        try context.save()
+
+        let race = try #require(try await SwiftDataStore(modelContainer: container).race(id: id))
+
+        #expect(race.name == "Old 10K")
+        #expect(race.specificPhaseTarget == nil)
+    }
+
+    @Test("RaceStore keeps a race whose stored target is NaN or of an unknown kind, with no target")
+    func raceStoreDropsInvalidTarget() async throws {
+        let container = try TestContainers.make(cloudKitDatabase: .none, isStoredInMemoryOnly: true)
+        let context = ModelContext(container)
+        var ids: [UUID] = []
+        for target in [#"{"pace":{"secondsPerKilometer":"nan"}}"#, #"{"telepathy":{}}"#] {
+            let id = UUID()
+            ids.append(id)
+            let payload = Data("""
+            {"id":"\(id.uuidString)","name":"R","date":1000,"priority":{"primary":{}},"specificPhaseTarget":\(target)}
+            """.utf8)
+            context.insert(RaceRecord(id: id, payload: payload))
+        }
+        try context.save()
+
+        let store = SwiftDataStore(modelContainer: container)
+        for id in ids {
+            let race = try #require(try await store.race(id: id))
+            #expect(race.name == "R" && race.specificPhaseTarget == nil)
+        }
+    }
+
     @Test("RaceStore delete removes a race")
     func raceStoreDelete() async throws {
         let store = try makeStore()

@@ -49,6 +49,8 @@ Longest-run rule (MVP5-116): `maxBuildProgressionFraction` and the `buildProgres
 
 Volume curve (MVP5-117): `VolumeCurveBuilder` sets a `MicroVolumeTarget` per micro from a starting and a peak volume per 7 days (scaled by micro length): linear build ramp landing the peak in the last build micro, recovery at 0.6 of the preceding build, taper 0.7 to 0.5 of the peak, race 0.3; the generator (MVP5-120) lowers micros where the guardrails ask.
 
+Specific-phase intensity target (MVP5-114): `SpecificPhaseTarget` (`.pace(secondsPerKilometer:)`, `.heartRate(beatsPerMinute:)`, `.perceivedEffort(_:)`, `.predictedFromFitness` as a placeholder with no model yet) on the optional `Race.specificPhaseTarget`; `validate()` rejects non-finite, non-positive and out-of-range values, and a stored race without the field, or with an unknown or invalid target, decodes to `nil`. Nothing reads it yet (step resolution is MVP5-122).
+
 Day assignment (MVP5-119): `DayAssigner` places a micro's long runs, hard sessions and easy runs on its days and day parts from the availability, run types per weekday, `longRunPossible` and the paradigm's spacing and hard limit, and returns what it could not place as `DroppedSession`s with a reason; the athlete states the number of hard and long sessions, the generator (MVP5-120) reports the drops.
 
 Key races (MVP5-111): `KeyRaceLayout` anchors the macro on the primary race and gives each secondary race a mini-taper and a recovery (whole micros, 1 and 1 by default) by changing micro load roles; tertiary races change nothing; races that do not fit are skipped and reported in `KeyRaceAdjustment`s. Layouts no longer use `MicroLoadRole.race`: the micro with race day is `taper`. The app's key-race picker is MVP5-135.

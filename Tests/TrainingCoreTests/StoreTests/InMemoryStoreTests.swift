@@ -404,6 +404,15 @@ struct InMemoryStoreTests {
         #expect(try await store.race(id: outOfRange.id) == outOfRange)
     }
 
+    @Test("RaceStore keeps a race's specific-phase target")
+    func raceStoreKeepsSpecificPhaseTarget() async throws {
+        let store = InMemoryStore()
+        let race = Race(name: "Local 10K", date: day(5), priority: .primary, specificPhaseTarget: .pace(secondsPerKilometer: 240))
+        try await store.upsert([race])
+
+        #expect(try await store.race(id: race.id)?.specificPhaseTarget == .pace(secondsPerKilometer: 240))
+    }
+
     @Test("RaceStore upsert replaces an existing race matched by id")
     func raceStoreUpsertReplaces() async throws {
         let store = InMemoryStore()

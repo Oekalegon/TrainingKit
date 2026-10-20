@@ -634,6 +634,8 @@ struct PlanPreferences: Sendable, Codable {
     var trainingDays: Set<Weekday>                    // which days the athlete trains; count = sessions/week
     var dayPreferences: [Weekday: DayPreference] = [:] // optional per-day sport/surface/session-type preference
     var maxWeeklyVolume: [Sport: VolumeTarget] = [:]   // shipped (MVP5-133): peak per 7 days; empty = no limit
+    var maxLongRunMeters: Double?                      // shipped (MVP5-138): ultra long-run ceiling; nil = paradigm's
+    var includeConditioning: Bool = false              // shipped (MVP5-115): keep the conditioning phase if there is room
     var startingSessionVolume: VolumeTarget            // week-1 default: distance/duration of a regular
                                                         // (non-long, non-special) session
     var maxSingleSessionDistanceMeters: Double?        // long-run cap; nil = no cap beyond guardrails

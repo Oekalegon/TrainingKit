@@ -175,6 +175,34 @@ struct LeadTimeCompromiserTests {
         }
     }
 
+    @Test("race counts as taper and is never cut")
+    func raceIsTaper() throws {
+        let macro = MacroTemplate(name: "Race", mesoBlocks: [.init(phase: .base, microCount: 4), .init(phase: .taper, microCount: 1), .init(phase: .race, microCount: 1)])
+
+        let result = try adjust(macro, TrainingParadigm(name: "Plain"), micros: 3, preferences: PlanPreferences())
+
+        #expect(counts(result) == ["base": 1, "taper": 1, "race": 1])
+    }
+
+    @Test("two blocks of the shortenable phase are shortened earliest first")
+    func twoShortenableBlocks() throws {
+        let macro = MacroTemplate(name: "Split", mesoBlocks: [.init(phase: .specific, microCount: 3), .init(phase: .base, microCount: 2), .init(phase: .specific, microCount: 3), .init(phase: .taper, microCount: 1)])
+
+        let result = try adjust(macro, micros: 6, preferences: PlanPreferences())
+
+        #expect(result.macro.mesoBlocks.map(\.microCount) == [0, 2, 3, 1].filter { $0 > 0 })
+        #expect(result.macro.mesoBlocks.map(\.phase) == [.base, .specific, .taper])
+        #expect(result.compromises.map(\.action) == [.phaseShortened(.specific, fromMicros: 6, toMicros: 3)])
+    }
+
+    @Test("an empty macro stays empty")
+    func emptyMacro() throws {
+        let result = try adjust(MacroTemplate(name: "Empty", mesoBlocks: []), micros: 0, preferences: PlanPreferences())
+
+        #expect(result.macro.mesoBlocks.isEmpty)
+        #expect(result.compromises.isEmpty)
+    }
+
     @Test("bad inputs throw")
     func invalidInput() {
         #expect(throws: LeadTimeError.invalidMicroLength) {

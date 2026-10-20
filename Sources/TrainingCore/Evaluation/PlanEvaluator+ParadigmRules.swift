@@ -1,7 +1,7 @@
 import Foundation
 
 /// The paradigm rules, split out of the main file since they only run when the caller supplies a
-/// ``TrainingParadigm`` (see ``PlanEvaluator/evaluate(_:races:cycles:guardrails:sessions:paradigm:)``).
+/// ``TrainingParadigm`` (see ``PlanEvaluator/evaluate(_:races:cycles:guardrails:sessions:paradigm:targetRace:)``).
 extension PlanEvaluator {
     private static let secondsPerDay: TimeInterval = 86_400
     /// Slack for comparing shares that are sums of floating-point fractions against a bound.

@@ -201,7 +201,7 @@ struct TrainingModelTests {
         try await model.load(in: day(0)...day(13), asOf: day(0))
         #expect(model.races.isEmpty)
 
-        let race = Race(name: "Local 10K", date: day(5), priority: .secondary)
+        let race = Race(name: "Local 10K", date: day(5), priority: .secondary, distanceMeters: 10_000)
         try await model.add(race, asOf: day(0))
 
         #expect(model.races.map(\.id) == [race.id])
@@ -342,7 +342,7 @@ struct TrainingModelTests {
         let athlete = AthleteProfile.fixture()
         let model = TrainingModel(stores: stores, athlete: athlete)
         try await model.load(in: day(0)...day(13), asOf: day(0))
-        let race = Race(name: "Local 10K", date: day(5), priority: .secondary)
+        let race = Race(name: "Local 10K", date: day(5), priority: .secondary, distanceMeters: 10_000)
         try await model.add(race, asOf: day(0))
 
         try await model.deleteRace(id: race.id, asOf: day(0))

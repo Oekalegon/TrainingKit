@@ -394,8 +394,8 @@ struct InMemoryStoreTests {
     @Test("RaceStore upsert/fetch round-trips and filters by date range")
     func raceStoreRoundTrip() async throws {
         let store = InMemoryStore()
-        let inRange = Race(name: "Local 10K", date: day(5), priority: .secondary)
-        let outOfRange = Race(name: "Marathon", date: day(50), priority: .primary)
+        let inRange = Race(name: "Local 10K", date: day(5), priority: .secondary, distanceMeters: 10_000)
+        let outOfRange = Race(name: "Marathon", date: day(50), priority: .primary, distanceMeters: 10_000)
 
         try await store.upsert([inRange, outOfRange])
 
@@ -407,7 +407,7 @@ struct InMemoryStoreTests {
     @Test("RaceStore keeps a race's specific-phase target")
     func raceStoreKeepsSpecificPhaseTarget() async throws {
         let store = InMemoryStore()
-        let race = Race(name: "Local 10K", date: day(5), priority: .primary, specificPhaseTarget: .pace(secondsPerKilometer: 240))
+        let race = Race(name: "Local 10K", date: day(5), priority: .primary, distanceMeters: 10_000, specificPhaseTarget: .pace(secondsPerKilometer: 240))
         try await store.upsert([race])
 
         #expect(try await store.race(id: race.id)?.specificPhaseTarget == .pace(secondsPerKilometer: 240))
@@ -416,7 +416,7 @@ struct InMemoryStoreTests {
     @Test("RaceStore upsert replaces an existing race matched by id")
     func raceStoreUpsertReplaces() async throws {
         let store = InMemoryStore()
-        var race = Race(name: "Local 10K", date: day(5), priority: .tertiary)
+        var race = Race(name: "Local 10K", date: day(5), priority: .tertiary, distanceMeters: 10_000)
         try await store.upsert([race])
 
         race.name = "Local 10K (renamed)"
@@ -429,7 +429,7 @@ struct InMemoryStoreTests {
     @Test("RaceStore delete removes a race")
     func raceStoreDelete() async throws {
         let store = InMemoryStore()
-        let race = Race(name: "Local 10K", date: day(5), priority: .primary)
+        let race = Race(name: "Local 10K", date: day(5), priority: .primary, distanceMeters: 10_000)
         try await store.upsert([race])
 
         try await store.deleteRace(id: race.id)

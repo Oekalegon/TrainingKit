@@ -424,10 +424,21 @@ public actor SwiftDataStore: ActivityStore, PlanStore, WorkoutLibraryStore, Cycl
     // MARK: RaceStore
 
     /// See `RaceStore/races(in:)`.
+    ///
+    /// A record that can't be decoded, such as a race stored before races had a distance, is skipped
+    /// and logged rather than thrown (MVP5-138), as for goals. It stays in the store untouched.
     public func races(in range: ClosedRange<Date>) async throws -> [Race] {
-        try modelContext.fetch(FetchDescriptor<RaceRecord>())
-            .map { try $0.toRace() }
-            .filter { range.contains($0.date) }
+        try modelContext.fetch(FetchDescriptor<RaceRecord>()).compactMap { record in
+            do {
+                return try record.toRace()
+            } catch {
+                Logging.persistence.error(
+                    "Skipping race \(record.id, privacy: .public) that can't be decoded: \(String(describing: error), privacy: .public)"
+                )
+                return nil
+            }
+        }
+        .filter { range.contains($0.date) }
     }
 
     /// See `RaceStore/race(id:)`.
@@ -437,6 +448,7 @@ public actor SwiftDataStore: ActivityStore, PlanStore, WorkoutLibraryStore, Cycl
 
     /// See `RaceStore/upsert(_:)`.
     public func upsert(_ races: [Race]) async throws {
+        try races.forEach { try $0.validate() }
         var existingRecordsByID: [UUID: RaceRecord] = [:]
         for record in try modelContext.fetch(FetchDescriptor<RaceRecord>()) {
             existingRecordsByID[record.id] = record

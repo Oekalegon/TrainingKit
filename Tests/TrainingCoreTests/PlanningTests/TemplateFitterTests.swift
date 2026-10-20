@@ -27,18 +27,23 @@ struct TemplateAnalysisTests {
     func countsAndDurations() throws {
         let analysis = try BuiltInWorkoutTemplates.longIntervalRun.analysis(athlete: athlete)
         #expect(analysis.workCount == 3...8)
-        #expect(analysis.workSeconds == 3 * 180.0...8 * 300.0)
+        let workSeconds: ClosedRange<TimeInterval> = 540...2400
+        #expect(analysis.workSeconds == workSeconds)
         // 15 minutes of warmup, ramp-in and cooldown around reps x (work + rest).
-        #expect(analysis.duration == 900 + 3 * (180.0 + 120)...900 + 8 * (300.0 + 240))
+        let shortest: TimeInterval = 900 + 3 * 300
+        let longest: TimeInterval = 900 + 8 * 540
+        #expect(analysis.duration == shortest...longest)
     }
 
     @Test("easy and long templates have no hard work; the tempo run's effort is one hard step")
     func easyHasNoHardWork() throws {
         let easy = try BuiltInWorkoutTemplates.easyRun.analysis(athlete: athlete)
         #expect(!easy.hasHardWork && easy.workLength == nil && easy.workCount == 0...0)
-        #expect(easy.duration == (5 + 15 + 5) * 60.0...(5 + 60 + 5) * 60.0)
+        let easyDuration: ClosedRange<TimeInterval> = 1500...4200
+        #expect(easy.duration == easyDuration)
         let tempo = try BuiltInWorkoutTemplates.tempoRun.analysis(athlete: athlete)
-        #expect(tempo.workLength == 15 * 60.0...45 * 60.0 && tempo.workCount == 1...1)
+        let tempoWork: ClosedRange<TimeInterval> = 900...2700
+        #expect(tempo.workLength == tempoWork && tempo.workCount == 1...1)
     }
 
     @Test("an RPE of 7 or more is hard work, a hill repeat is")
@@ -209,8 +214,7 @@ struct TemplateFitterTests {
         b.name = "B easy"
         let picked = try choice(fit(SessionProfile(sessionType: .easy), target: 1800, templates: [b, a]))
         #expect(picked.template.name == "A easy")
-        var c = a
-        c = WorkoutTemplate(id: UUID(uuidString: "00000000-0000-0000-0000-000000000001")!, name: a.name, sport: a.sport, parameters: a.parameters, blocks: a.blocks, sessionType: a.sessionType)
+        let c = WorkoutTemplate(id: UUID(uuidString: "00000000-0000-0000-0000-000000000001")!, name: a.name, sport: a.sport, parameters: a.parameters, blocks: a.blocks, sessionType: a.sessionType)
         #expect(try choice(fit(SessionProfile(sessionType: .easy), target: 1800, templates: [a, c])).template.id == c.id)
     }
 

@@ -25,6 +25,11 @@ public struct WorkoutTemplate: Identifiable, Sendable, Codable, Hashable {
     /// (MVP2-153). Absent from templates saved before this field existed, which decode as
     /// ``WorkoutPurpose/general``.
     public var purpose: WorkoutPurpose
+    /// The broad kind of session workouts made from this template are, or `nil` for an untagged
+    /// template; each instantiated ``StructuredWorkout`` gets it (MVP5-139). A template tagged
+    /// ``SessionType/long`` makes long runs, whatever day they are planned on. Absent from templates
+    /// saved before this field existed, which decode as `nil`; an unknown value also reads as `nil`.
+    public var sessionType: SessionType?
     /// When the athlete deleted this template while plans still used it (MVP2-142), or `nil` for one
     /// in use. An archived template stays in the store so those plans can still open its parameters,
     /// but libraries and pickers don't offer it. Absent from templates saved before this field existed.
@@ -43,6 +48,7 @@ public struct WorkoutTemplate: Identifiable, Sendable, Codable, Hashable {
     ///   - parameters: The parameters this template's blocks may reference.
     ///   - blocks: The ordered blocks making up this template.
     ///   - purpose: What workouts made from it are for; defaults to ``WorkoutPurpose/general``.
+    ///   - sessionType: The broad kind of session it makes; defaults to `nil` (untagged).
     ///   - archivedDate: When the template was archived; defaults to `nil`.
     public init(
         id: UUID = UUID(),
@@ -53,6 +59,7 @@ public struct WorkoutTemplate: Identifiable, Sendable, Codable, Hashable {
         parameters: [WorkoutTemplateParameter],
         blocks: [TemplateBlock],
         purpose: WorkoutPurpose = .general,
+        sessionType: SessionType? = nil,
         archivedDate: Date? = nil
     ) {
         self.id = id
@@ -63,6 +70,7 @@ public struct WorkoutTemplate: Identifiable, Sendable, Codable, Hashable {
         self.parameters = parameters
         self.blocks = blocks
         self.purpose = purpose
+        self.sessionType = sessionType
         self.archivedDate = archivedDate
     }
 }
@@ -153,7 +161,7 @@ extension WorkoutTemplate {
         let resolvedValues = Dictionary(uniqueKeysWithValues: parameters.map { ($0.key, values[$0.key] ?? $0.defaultValue) })
         return StructuredWorkout(
             name: name ?? self.name, sport: sport, venue: resolvedVenue(chosenVenue), blocks: resolvedBlocks,
-            templateID: id, parameterValues: resolvedValues, purpose: purpose
+            templateID: id, parameterValues: resolvedValues, purpose: purpose, sessionType: sessionType
         )
     }
 
@@ -208,12 +216,12 @@ extension TemplateStepGoal {
 
 extension WorkoutTemplate {
     private enum CodingKeys: String, CodingKey {
-        case id, name, titleName, sport, venue, parameters, blocks, purpose, archivedDate
+        case id, name, titleName, sport, venue, parameters, blocks, purpose, sessionType, archivedDate
     }
 
     /// Decodes a template, reading the venue an older version stored inside the sport
     /// (`indoorRunning`/`outdoorRunning`) when there's no `venue` of its own, and treating a missing
-    /// `purpose` as ``WorkoutPurpose/general``.
+    /// `purpose` as ``WorkoutPurpose/general`` and a missing or unknown `sessionType` as `nil`.
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(UUID.self, forKey: .id)
@@ -225,6 +233,7 @@ extension WorkoutTemplate {
         parameters = try container.decode([WorkoutTemplateParameter].self, forKey: .parameters)
         blocks = try container.decode([TemplateBlock].self, forKey: .blocks)
         purpose = try container.decodeIfPresent(WorkoutPurpose.self, forKey: .purpose) ?? .general
+        sessionType = (try? container.decodeIfPresent(SessionType.self, forKey: .sessionType)) ?? nil
         archivedDate = try container.decodeIfPresent(Date.self, forKey: .archivedDate)
     }
 }

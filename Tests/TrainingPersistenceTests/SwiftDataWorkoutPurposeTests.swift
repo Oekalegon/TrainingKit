@@ -20,6 +20,28 @@ struct SwiftDataWorkoutPurposeTests {
     }
 }
 
+@Suite("SessionType tag + SwiftData")
+struct SwiftDataSessionTypeTests {
+    @Test("a workout and a template keep their session type through the records (MVP5-139)")
+    func sessionTypeSurvivesRecords() async throws {
+        let container = try TestContainers.make(cloudKitDatabase: .none, isStoredInMemoryOnly: true)
+        let store = SwiftDataStore(modelContainer: container)
+        let template = WorkoutTemplate(
+            name: "Long run", sport: .running, parameters: [],
+            blocks: [TemplateBlock(steps: [TemplateStep(kind: .work, goal: .time(.fixed(7200)), target: .heartRateZone(2))], repetitions: .fixed(1))],
+            sessionType: .long
+        )
+        let workout = try template.instantiate()
+
+        try await store.upsert([template])
+        try await store.upsert([workout])
+
+        #expect(try await store.template(id: template.id)?.sessionType == .long)
+        let loaded = try #require(try await store.workout(id: workout.id))
+        #expect(loaded.sessionType == .long && loaded.isLongRun)
+    }
+}
+
 @Suite("Field-test sources + SwiftData")
 struct SwiftDataFieldTestSourceTests {
     @Test("an athlete profile keeps the field-test sources of its heart-rate settings (MVP2-154)")

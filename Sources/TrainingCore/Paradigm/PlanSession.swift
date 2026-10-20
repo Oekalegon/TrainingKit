@@ -4,6 +4,10 @@ import Foundation
 ///
 /// The evaluator works on already-described sessions, not on workouts, so it stays a pure function;
 /// ``PlannedIntensityClassifier/session(on:for:athlete:)`` builds one from a ``StructuredWorkout``.
+///
+/// ``isLongRun`` comes from the workout's own tag, ``StructuredWorkout/sessionType`` (MVP5-139), not
+/// from the day it is planned on, so the day assignment of ``DayAssigner`` and the flag only agree when
+/// the generator picks a long-tagged workout for each ``RunType/long`` assignment.
 public struct PlanSession: Sendable, Codable, Hashable {
     private enum CodingKeys: String, CodingKey {
         case day, seconds, intensity, speed, isLongRun
@@ -28,7 +32,7 @@ public struct PlanSession: Sendable, Codable, Hashable {
     public let intensity: IntensityCategory
     /// The session's fastest work, independent of `intensity`.
     public let speed: SpeedLevel
-    /// Whether this is the long run of its micro. It says nothing about intensity: a long run is
+    /// Whether this is a long run: the workout it was made from is tagged ``SessionType/long``. It says nothing about intensity: a long run is
     /// easy by ``intensity`` but may still count towards hard-session spacing, see
     /// ``TrainingParadigm/spacesLongRunsAsHard``.
     public let isLongRun: Bool

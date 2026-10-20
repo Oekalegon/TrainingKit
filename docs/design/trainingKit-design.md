@@ -731,6 +731,8 @@ The rules read `sessions: [PlanSession]` (day, planned seconds, `IntensityCatego
 | Spacing | at least 2 days; long runs are spaced like hard sessions (`spacesLongRunsAsHard`) | same |
 | Hard per micro | 7 d: 2, 10 d: 3, 14 d: 4 | no limit (the athlete sets sessions per micro) |
 
+The polarized numbers were reviewed in MVP5-136 and kept as they are: they are product choices, not taken from a source apart from the 80/20 split (Fitzgerald). Shares are of whole-session planned time under each session's one intensity category, so a hard session's warm-up and cool-down count as hard time; the mix is the same in every phase. `PolarizedNumbersTests` pins every value and its boundary.
+
 Long runs (`PlanSession.isLongRun`) are spaced like hard sessions but do not count towards the per-micro maximum. A paradigm for ultra distances, where full-length long runs are not possible, sets `spacesLongRunsAsHard` to `false`. The structural and specific session profiles (interval work lengths, race-target fractions) are still MVP5-100 and the generator's.
 
 A session is *hard* when its intensity is at least `hardIntensity` (default `.high`) or, if the paradigm sets `hardSpeed`, its speed is at least that, so a paradigm can put max-speed easy runs on the hard days while the distribution still counts their time as easy. The distribution and per-micro rules need `cycles`; spacing does not. `PlanFinding.subject` names the category or level a distribution finding is about (`"intensity.high"`, `"speed.max"`). Boundaries pass (a share exactly at the tolerance, a count exactly at the maximum). The built-in paradigms (80/20 polarized, triphasic) are MVP5-103.

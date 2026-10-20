@@ -45,6 +45,8 @@ Training paradigms (MVP5-102): `TrainingParadigm` (named phases in order, `PlanG
 
 Built-in paradigms (MVP5-103): `TrainingParadigm.polarized8020` and `.triphasic` (`builtIn` lists them), rules data only. Triphasic encodes its phases, the easy-only conditioning and base mixes, max-speed sprints as hard for placement, and 2-day spacing; the structural/specific session profiles wait for MVP5-100, and layout (micro length, meso pattern, phase lengths) for the generator.
 
+Polarized numbers (MVP5-136): reviewed and kept (high 0.2, medium 0, tolerance 0.05, 2 days between hard sessions, 2/3/4 hard sessions per 7/10/14-day micro, long runs spaced as hard, same mix in every phase); `PolarizedNumbersTests` pins them and their boundaries.
+
 Longest-run rule (MVP5-116): `maxBuildProgressionFraction` and the `buildProgression` rule are gone; `PlanRule.longestRun` (a risk) flags a run more than `maxLongestRunIncreaseFraction` (10 %) longer than the longest planned run of the previous 28 days, by duration, any run type, from the `sessions` passed to the evaluator. `PlanGuardrails` now decodes tolerantly.
 
 Volume curve (MVP5-117): `VolumeCurveBuilder` sets a `MicroVolumeTarget` per micro from a starting and a peak volume per 7 days (scaled by micro length): linear build ramp landing the peak in the last build micro, recovery at 0.6 of the preceding build, taper 0.7 to 0.5 of the peak, race 0.3; the generator (MVP5-120) lowers micros where the guardrails ask.

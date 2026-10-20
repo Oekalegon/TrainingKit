@@ -3,7 +3,7 @@ import Foundation
 /// What the athlete wants from a generated plan: the generator's soft inputs.
 ///
 /// Preferences are honoured where possible but never override ``PlanGuardrails``. For now this
-/// carries ``runAvailability`` and ``maxWeeklyVolume``; training days, starting volumes and ramp are
+/// carries ``runAvailability``, ``maxWeeklyVolume`` and ``maxLongRunMeters``; training days, starting volumes and ramp are
 /// added by later tickets (design doc §8.1).
 public struct PlanPreferences: Sendable, Codable, Hashable {
     /// When the athlete can run. Seeded from the athlete's global availability setting, which does
@@ -19,21 +19,46 @@ public struct PlanPreferences: Sendable, Codable, Hashable {
     /// target to reach, and the volume curve (MVP5-117) reads it.
     public var maxWeeklyVolume: [Sport: VolumeTarget]
 
+    /// The longest single run the athlete is willing to do, in meters, for a plan aimed at an
+    /// ultra (``Race/isUltra``); `nil` (the default) when the athlete gave none, in which case the
+    /// paradigm's ``TrainingParadigm/maxLongRunMeters`` applies. Finite and above zero; read it
+    /// through ``maxLongRun(for:targetRace:)``. The generator (MVP5-117/118) reads it; no rule checks it yet.
+    public var maxLongRunMeters: Double?
+
+    /// The ceiling on a long run for a plan aimed at `targetRace`, in meters.
+    ///
+    /// Only an ultra target has one: `nil` for any other race, or none. For an ultra it is the
+    /// athlete's ``maxLongRunMeters`` when set (even if higher than the paradigm's), otherwise the
+    /// paradigm's ``TrainingParadigm/maxLongRunMeters``, which is `nil` for no ceiling.
+    ///
+    /// - Parameters:
+    ///   - paradigm: The plan's paradigm, if any.
+    ///   - targetRace: The race the plan builds towards, if any.
+    public func maxLongRun(for paradigm: TrainingParadigm?, targetRace: Race?) -> Double? {
+        guard targetRace?.isUltra == true else { return nil }
+        return maxLongRunMeters ?? paradigm?.maxLongRunMeters
+    }
+
     /// Creates plan preferences.
     ///
     /// - Parameters:
     ///   - runAvailability: When the athlete can run. Defaults to no availability.
     ///   - maxWeeklyVolume: The peak volume per 7 days for each sport. Defaults to no limit.
+    ///   - maxLongRunMeters: The longest run the athlete will do, in meters, for an ultra target;
+    ///     defaults to `nil` (the paradigm's ceiling applies). A value that is not finite or not
+    ///     above zero is stored as `nil`.
     public init(
         runAvailability: RunAvailability = RunAvailability(),
-        maxWeeklyVolume: [Sport: VolumeTarget] = [:]
+        maxWeeklyVolume: [Sport: VolumeTarget] = [:],
+        maxLongRunMeters: Double? = nil
     ) {
+        self.maxLongRunMeters = maxLongRunMeters.flatMap { $0.isFinite && $0 > 0 ? $0 : nil }
         self.runAvailability = runAvailability
         self.maxWeeklyVolume = maxWeeklyVolume
     }
 
     private enum CodingKeys: String, CodingKey {
-        case runAvailability, maxWeeklyVolume
+        case runAvailability, maxWeeklyVolume, maxLongRunMeters
     }
 
     /// One sport's limit, as stored: `Sport` encodes as an object, so a dictionary keyed by it
@@ -61,12 +86,14 @@ public struct PlanPreferences: Sendable, Codable, Hashable {
             }
         }
         maxWeeklyVolume = limits
+        maxLongRunMeters = (try? container.decodeIfPresent(Double.self, forKey: .maxLongRunMeters)).flatMap { $0.isFinite && $0 > 0 ? $0 : nil }
     }
 
-    /// Encodes the preferences; an empty ``maxWeeklyVolume`` is left out.
+    /// Encodes the preferences; an empty ``maxWeeklyVolume`` and a `nil` ``maxLongRunMeters`` are left out.
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(runAvailability, forKey: .runAvailability)
+        try container.encodeIfPresent(maxLongRunMeters, forKey: .maxLongRunMeters)
         if !maxWeeklyVolume.isEmpty {
             let sorter = JSONEncoder()
             sorter.outputFormatting = JSONEncoder.OutputFormatting.sortedKeys

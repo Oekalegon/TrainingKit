@@ -135,6 +135,7 @@ See `docs/design/trainingKit-design.md` in the package repository for the full m
 - ``KeyRaceCycles``
 - ``KeyRaceAdjustment``
 - ``Race``
+- ``RaceError``
 - ``RacePriority``
 - ``SpecificPhaseTarget``
 - ``SpecificPhaseTargetError``

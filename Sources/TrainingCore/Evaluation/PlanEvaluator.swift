@@ -11,7 +11,7 @@ import Foundation
 /// rule runs on whatever `sessions` it is given. The three
 /// paradigm rules (intensity distribution, hard-session spacing, hard sessions per micro) run
 /// when a ``TrainingParadigm`` is supplied; see
-/// ``evaluate(_:races:cycles:guardrails:sessions:paradigm:)``.
+/// ``evaluate(_:races:cycles:guardrails:sessions:paradigm:targetRace:)``.
 public struct PlanEvaluator: Sendable {
     /// Creates a plan evaluator.
     public init() {}
@@ -34,6 +34,8 @@ public struct PlanEvaluator: Sendable {
     ///     so a plan's first weeks have a longest run to compare with.
     ///   - paradigm: The training paradigm to check the plan against. Without one, the three
     ///     paradigm rules are skipped and the result is exactly as before paradigms existed.
+    ///   - targetRace: The race the plan builds towards. For an ultra the paradigm's long runs are not
+    ///     spaced like hard sessions, see ``TrainingParadigm/resolved(for:)``; defaults to `nil`.
     /// - Returns: Every finding from every rule that could run, in chronological order.
     public func evaluate(
         _ metrics: [FitnessMetrics],
@@ -41,8 +43,10 @@ public struct PlanEvaluator: Sendable {
         cycles: [TrainingCycle] = [],
         guardrails: PlanGuardrails = PlanGuardrails(),
         sessions: [PlanSession] = [],
-        paradigm: TrainingParadigm? = nil
+        paradigm: TrainingParadigm? = nil,
+        targetRace: Race? = nil
     ) -> PlanEvaluation {
+        let paradigm = paradigm?.resolved(for: targetRace)
         let guardrails = paradigm.map { $0.guardrailOverrides.applied(to: guardrails) } ?? guardrails
 
         // `uniquingKeysWith` rather than `uniqueKeysWithValues:` — the latter traps if `metrics`

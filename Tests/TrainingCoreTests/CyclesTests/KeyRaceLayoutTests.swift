@@ -25,7 +25,7 @@ struct KeyRaceLayoutTests {
         MesocycleTemplate(name: "3:1", microRoles: [.build, .build, .build, .recovery], microLengthDays: days)
     }
 
-    private func primary() -> Race { Race(name: "Goal", date: primaryDate, priority: .primary) }
+    private func primary() -> Race { Race(name: "Goal", date: primaryDate, priority: .primary, distanceMeters: 10_000) }
 
     private func start(days: Int) -> Date {
         calendar.date(byAdding: .day, value: -(10 * days - 1), to: calendar.startOfDay(for: primaryDate))!
@@ -34,7 +34,7 @@ struct KeyRaceLayoutTests {
     /// A race `offset` days into micro `index` of the exact 10-micro layout.
     private func race(_ priority: RacePriority, micro index: Int, day offset: Int = 1, days: Int = 7) -> Race {
         let date = calendar.date(byAdding: .day, value: index * days + offset, to: start(days: days))!
-        return Race(name: "Race \(index)", date: date, priority: priority)
+        return Race(name: "Race \(index)", date: date, priority: priority, distanceMeters: 10_000)
     }
 
     private func roles(_ races: [Race], days: Int = 7, config: KeyRaceLayout = KeyRaceLayout()) -> KeyRaceMicrocycles {
@@ -158,7 +158,7 @@ struct KeyRaceLayoutTests {
     @Test("a race in the primary taper is skipped, and a recovery does not run into it")
     func primaryTaper() {
         let inTaper = race(.secondary, micro: 8)
-        let onPrimaryDay = Race(name: "Same day", date: primaryDate, priority: .secondary)
+        let onPrimaryDay = Race(name: "Same day", date: primaryDate, priority: .secondary, distanceMeters: 10_000)
         let before = race(.secondary, micro: 7)
         let result = roles([inTaper, onPrimaryDay, before])
         #expect(result.adjustments.map(\.outcome) == [.applied(taperMicros: 1, recoveryMicros: 0), .skipped(.insidePrimaryTaper), .skipped(.insidePrimaryTaper)])
@@ -168,8 +168,8 @@ struct KeyRaceLayoutTests {
 
     @Test("races before the start or after the primary race are skipped")
     func outsideWindow() {
-        let early = Race(name: "Early", date: calendar.date(byAdding: .day, value: -3, to: start(days: 7))!, priority: .secondary)
-        let late = Race(name: "Late", date: calendar.date(byAdding: .day, value: 3, to: primaryDate)!, priority: .secondary)
+        let early = Race(name: "Early", date: calendar.date(byAdding: .day, value: -3, to: start(days: 7))!, priority: .secondary, distanceMeters: 10_000)
+        let late = Race(name: "Late", date: calendar.date(byAdding: .day, value: 3, to: primaryDate)!, priority: .secondary, distanceMeters: 10_000)
         let result = roles([early, late])
         #expect(result.micros.map(\.loadRole) == base)
         #expect(result.adjustments.map(\.outcome) == [.skipped(.outsideLayout), .skipped(.outsideLayout)])
@@ -239,9 +239,9 @@ struct KeyRaceLayoutTests {
         var cal = Calendar(identifier: .gregorian)
         cal.timeZone = amsterdam.timeZone
         // The 10 micros end on 2026-11-01, so they span the 2026-10-25 clock change.
-        let primaryRace = Race(name: "Goal", date: cal.date(from: DateComponents(year: 2026, month: 11, day: 1, hour: 9))!, priority: .primary)
+        let primaryRace = Race(name: "Goal", date: cal.date(from: DateComponents(year: 2026, month: 11, day: 1, hour: 9))!, priority: .primary, distanceMeters: 10_000)
         let start = cal.date(byAdding: .day, value: -69, to: cal.startOfDay(for: primaryRace.date))!
-        let secondary = Race(name: "Tune-up", date: cal.date(byAdding: .day, value: 5 * 7 + 1, to: start)!, priority: .secondary)
+        let secondary = Race(name: "Tune-up", date: cal.date(byAdding: .day, value: 5 * 7 + 1, to: start)!, priority: .secondary, distanceMeters: 10_000)
         let result = KeyRaceLayout().microcycles(from: start, to: primaryRace, races: [secondary], macro: macro, meso: meso(days: 7), athlete: amsterdam)
         #expect(result.micros.count == 10)
         #expect(result.micros[5].loadRole == .taper)

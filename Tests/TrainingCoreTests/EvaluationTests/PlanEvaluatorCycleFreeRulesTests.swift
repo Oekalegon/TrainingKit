@@ -139,9 +139,9 @@ struct PlanEvaluatorCycleFreeRulesTests {
             metric(2, tsb: 15), // within range
         ]
         let races = [
-            Race(name: "Undertapered", date: day(0), priority: .primary),
-            Race(name: "Overtapered", date: day(1), priority: .primary),
-            Race(name: "Just right", date: day(2), priority: .primary),
+            Race(name: "Undertapered", date: day(0), priority: .primary, distanceMeters: 10_000),
+            Race(name: "Overtapered", date: day(1), priority: .primary, distanceMeters: 10_000),
+            Race(name: "Just right", date: day(2), priority: .primary, distanceMeters: 10_000),
         ]
 
         let evaluation = evaluator.evaluate(metrics, races: races)
@@ -159,8 +159,8 @@ struct PlanEvaluatorCycleFreeRulesTests {
             metric(1, tsb: 25), // exactly the default max
         ]
         let races = [
-            Race(name: "Exactly at min", date: day(0), priority: .primary),
-            Race(name: "Exactly at max", date: day(1), priority: .primary),
+            Race(name: "Exactly at min", date: day(0), priority: .primary, distanceMeters: 10_000),
+            Race(name: "Exactly at max", date: day(1), priority: .primary, distanceMeters: 10_000),
         ]
 
         let evaluation = evaluator.evaluate(metrics, races: races)
@@ -171,7 +171,7 @@ struct PlanEvaluatorCycleFreeRulesTests {
     @Test("a race date with no matching metrics day is skipped")
     func raceDayTSBSkipsUnmatchedDate() {
         let metrics = [metric(0, tsb: 15)]
-        let races = [Race(name: "Far future race", date: day(100), priority: .primary)]
+        let races = [Race(name: "Far future race", date: day(100), priority: .primary, distanceMeters: 10_000)]
 
         let evaluation = evaluator.evaluate(metrics, races: races)
 

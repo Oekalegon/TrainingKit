@@ -133,7 +133,7 @@ struct VolumeCurveBuilderTests {
         ])
         let athlete = AthleteProfile.fixture()
         let raceDay = Date(timeIntervalSince1970: 1_700_000_000)
-        let race = Race(name: "Goal", date: raceDay, priority: .primary)
+        let race = Race(name: "Goal", date: raceDay, priority: .primary, distanceMeters: 10_000)
         let layout = CycleLayoutBuilder().microcycles(from: raceDay.addingTimeInterval(-60 * 86400), to: race, macro: macro, meso: .linear, athlete: athlete)
         #expect(layout.map(\.loadRole) == [.build, .build, .build, .build, .taper, .taper, .taper])
         let result = try builder.targets(for: layout, starting: volume(100), peak: volume(200))

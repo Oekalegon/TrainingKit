@@ -19,7 +19,7 @@ struct SpecificPhaseTargetTests {
         for target in targets {
             try target.validate()
             #expect(try JSONDecoder().decode(SpecificPhaseTarget.self, from: JSONEncoder().encode(target)) == target)
-            let race = Race(name: "10K", date: date, priority: .primary, specificPhaseTarget: target)
+            let race = Race(name: "10K", date: date, priority: .primary, distanceMeters: 10_000, specificPhaseTarget: target)
             #expect(try JSONDecoder().decode(Race.self, from: JSONEncoder().encode(race)) == race)
         }
     }
@@ -60,7 +60,7 @@ struct SpecificPhaseTargetTests {
     @Test("a race stored before the target existed decodes to nil")
     func legacyRace() throws {
         let id = UUID()
-        let race = try decode(Race.self, #"{"id":"\#(id.uuidString)","name":"Old","date":1000,"priority":{"primary":{}}}"#)
+        let race = try decode(Race.self, #"{"id":"\#(id.uuidString)","name":"Old","date":1000,"priority":{"primary":{}},"distanceMeters":10000}"#)
         #expect(race.specificPhaseTarget == nil && race.id == id)
     }
 
@@ -69,7 +69,7 @@ struct SpecificPhaseTargetTests {
         let id = UUID()
         for target in [#"{"telepathy":{}}"#, #"{"pace":{"secondsPerKilometer":0}}"#] {
             let race = try decode(
-                Race.self, #"{"id":"\#(id.uuidString)","name":"New","date":1000,"priority":{"primary":{}},"specificPhaseTarget":\#(target)}"#
+                Race.self, #"{"id":"\#(id.uuidString)","name":"New","date":1000,"priority":{"primary":{}},"distanceMeters":10000,"specificPhaseTarget":\#(target)}"#
             )
             #expect(race.name == "New" && race.specificPhaseTarget == nil)
         }

@@ -13,7 +13,7 @@ import Foundation
 /// 3. **Easy runs** (or recovery) in every free run left.
 ///
 /// A day allows a run type when ``RunAvailability/runTypes(on:)`` contains it. Hard sessions, and
-/// long runs when ``TrainingParadigm/spacesLongRunsAsHard`` is set, keep at least
+/// long runs when ``TrainingParadigm/spacesLongRunsAsHard`` is set (not for an ultra target), keep at least
 /// ``TrainingParadigm/minDaysBetweenHardSessions`` days from each other and from the sessions of
 /// the preceding micro. A micro never gets more hard sessions than
 /// ``TrainingParadigm/maxHardSessionsPerMicro`` allows for its length. Within a day, a run takes
@@ -46,6 +46,12 @@ public struct DayAssigner: Sendable, Hashable {
     ///   - longCount: How many long runs the micro should get.
     ///   - preceding: The days of the hard sessions (and long runs, if the paradigm spaces them as
     ///     hard) just before the micro, so spacing holds across its start; defaults to none.
+    ///   - precedingLongRuns: The days of the long runs just before the micro, so a long run on the
+    ///     micro's first day next to one counts as a back-to-back pair; used only for the pair limit of
+    ///     an ultra target, and independent of `preceding`. Defaults to none.
+    ///   - targetRace: The race the plan builds towards; for an ultra the paradigm's long runs are not
+    ///     spaced and at most ``TrainingParadigm/maxBackToBackLongRunPairsPerMicro`` pairs of long
+    ///     runs on consecutive days are placed, see ``TrainingParadigm/resolved(for:)``. Defaults to `nil`.
     ///   - calendar: The athlete's calendar, which maps days to weekdays.
     /// - Returns: The placed runs and the sessions that could not be placed. A day without free
     ///   runs, or outside the availability, gets nothing.
@@ -55,8 +61,11 @@ public struct DayAssigner: Sendable, Hashable {
         hardCount: Int,
         longCount: Int,
         preceding: [Date] = [],
+        precedingLongRuns: [Date] = [],
+        targetRace: Race? = nil,
         calendar: Calendar
     ) -> DayAssignmentResult {
+        let paradigm = paradigm?.resolved(for: targetRace)
         var days: [Day] = []
         var cursor = micro.lowerBound
         while cursor <= micro.upperBound {
@@ -75,6 +84,14 @@ public struct DayAssigner: Sendable, Hashable {
         var dropped: [DroppedSession] = []
         let minGap = paradigm?.minDaysBetweenHardSessions
         let spacesLong = paradigm?.spacesLongRunsAsHard ?? false
+        let pairLimit = paradigm?.maxBackToBackLongRunPairsPerMicro[Self.length(of: micro, calendar: calendar)]
+        var longDates: [Date] = precedingLongRuns
+        var pairs = 0
+
+        func isNextDay(_ lhs: Date, _ rhs: Date) -> Bool {
+            abs(calendar.dateComponents([.day], from: lhs, to: rhs).day ?? Int.max) == 1
+        }
+        func newPairs(on date: Date) -> Int { longDates.filter { isNextDay($0, date) }.count }
 
         func spacingAllows(_ date: Date) -> Bool {
             guard let minGap else { return true }
@@ -88,7 +105,10 @@ public struct DayAssigner: Sendable, Hashable {
             let withSlot: [(index: Int, slot: DaySlot)] = allowing.compactMap { index in
                 days[index].freeSlots.first { availability[days[index].weekday, $0].longRunPossible }.map { (index, $0) }
             }
-            let candidates = withSlot.filter { !spacesLong || spacingAllows(days[$0.index].date) }
+            let candidates = withSlot.filter { candidate in
+                let date = days[candidate.index].date
+                return (!spacesLong || spacingAllows(date)) && pairs + newPairs(on: date) <= (pairLimit ?? Int.max)
+            }
             let best = candidates.min { lhs, rhs in
                 let (named0, named1) = (availability.dayRunTypes[days[lhs.index].weekday]?.contains(.long) == true, availability.dayRunTypes[days[rhs.index].weekday]?.contains(.long) == true)
                 if named0 != named1 { return named0 }
@@ -103,6 +123,8 @@ public struct DayAssigner: Sendable, Hashable {
             days[best.index].take(best.slot)
             placed.append(DayAssignment(day: days[best.index].date, slot: best.slot, runType: .long))
             if spacesLong { spaced.append(days[best.index].date) }
+            pairs += newPairs(on: days[best.index].date)
+            longDates.append(days[best.index].date)
         }
 
         let hardLimit = paradigm?.maxHardSessionsPerMicro[Self.length(of: micro, calendar: calendar)]

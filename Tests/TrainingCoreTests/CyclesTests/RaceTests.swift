@@ -11,7 +11,7 @@ struct RaceTests {
 
     @Test("A race round-trips through Codable with its priority")
     func codableRoundTrip() throws {
-        let race = Race(name: "City 10K", date: Date(timeIntervalSince1970: 1_800_000_000), priority: .secondary)
+        let race = Race(name: "City 10K", date: Date(timeIntervalSince1970: 1_800_000_000), priority: .secondary, distanceMeters: 10_000)
         let decoded = try JSONDecoder().decode(Race.self, from: JSONEncoder().encode(race))
         #expect(decoded == race)
     }

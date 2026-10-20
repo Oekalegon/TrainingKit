@@ -1,7 +1,7 @@
 /// Which guardrail a ``PlanFinding`` came from.
 ///
 /// The first four run on `[FitnessMetrics]` alone; ``longestRun`` reads the `sessions`
-/// parameter of ``PlanEvaluator/evaluate(_:races:cycles:guardrails:sessions:paradigm:)`` and finds
+/// parameter of ``PlanEvaluator/evaluate(_:races:cycles:guardrails:sessions:paradigm:targetRace:)`` and finds
 /// nothing without them. The last three are the paradigm rules: they run only when a
 /// ``TrainingParadigm`` is supplied, and the two that read micros also need `cycles`.
 public enum PlanRule: Sendable, Codable, Hashable {

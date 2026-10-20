@@ -651,8 +651,8 @@ struct SwiftDataStoreTests {
     @Test("RaceStore upsert/fetch round-trips and filters by date range")
     func raceStoreRoundTrip() async throws {
         let store = try makeStore()
-        let inRange = Race(name: "Local 10K", date: day(5), priority: .secondary)
-        let outOfRange = Race(name: "Marathon", date: day(50), priority: .primary)
+        let inRange = Race(name: "Local 10K", date: day(5), priority: .secondary, distanceMeters: 10_000)
+        let outOfRange = Race(name: "Marathon", date: day(50), priority: .primary, distanceMeters: 10_000)
 
         try await store.upsert([inRange, outOfRange])
 
@@ -664,7 +664,7 @@ struct SwiftDataStoreTests {
     @Test("RaceStore upsert replaces an existing race matched by id rather than duplicating")
     func raceStoreUpsertReplaces() async throws {
         let store = try makeStore()
-        var race = Race(name: "Local 10K", date: day(5), priority: .tertiary)
+        var race = Race(name: "Local 10K", date: day(5), priority: .tertiary, distanceMeters: 10_000)
         try await store.upsert([race])
 
         race.name = "Local 10K (renamed)"
@@ -682,7 +682,7 @@ struct SwiftDataStoreTests {
             .pace(secondsPerKilometer: 240), .heartRate(beatsPerMinute: 165...172), .perceivedEffort(8), .predictedFromFitness,
         ]
         for (offset, target) in targets.enumerated() {
-            let race = Race(name: "Race \(offset)", date: day(offset), priority: .primary, specificPhaseTarget: target)
+            let race = Race(name: "Race \(offset)", date: day(offset), priority: .primary, distanceMeters: 10_000, specificPhaseTarget: target)
             try await store.upsert([race])
             #expect(try await store.race(id: race.id) == race)
         }
@@ -693,7 +693,7 @@ struct SwiftDataStoreTests {
         let container = try TestContainers.make(cloudKitDatabase: .none, isStoredInMemoryOnly: true)
         let id = UUID()
         let legacy = Data("""
-        {"id":"\(id.uuidString)","name":"Old 10K","date":1000,"priority":{"primary":{}}}
+        {"id":"\(id.uuidString)","name":"Old 10K","date":1000,"priority":{"primary":{}},"distanceMeters":10000}
         """.utf8)
         let context = ModelContext(container)
         context.insert(RaceRecord(id: id, payload: legacy))
@@ -705,6 +705,24 @@ struct SwiftDataStoreTests {
         #expect(race.specificPhaseTarget == nil)
     }
 
+    @Test("RaceStore skips a race record with no distance and keeps the others (MVP5-138)")
+    func raceStoreSkipsRaceWithoutDistance() async throws {
+        let container = try TestContainers.make(cloudKitDatabase: .none, isStoredInMemoryOnly: true)
+        let context = ModelContext(container)
+        let oldID = UUID()
+        let old = Data("""
+        {"id":"\(oldID.uuidString)","name":"No distance","date":1000,"priority":{"primary":{}}}
+        """.utf8)
+        context.insert(RaceRecord(id: oldID, payload: old))
+        let keep = Race(name: "Ultra", date: Date(timeIntervalSince1970: 2000), priority: .primary, distanceMeters: 100_000)
+        context.insert(try RaceRecord(race: keep))
+        try context.save()
+
+        let store = SwiftDataStore(modelContainer: container)
+        #expect(try await store.races(in: Date(timeIntervalSince1970: 0)...Date(timeIntervalSince1970: 5000)) == [keep])
+        await #expect(throws: (any Error).self) { try await store.upsert([Race(name: "Bad", date: .now, priority: .primary, distanceMeters: 0)]) }
+    }
+
     @Test("RaceStore keeps a race whose stored target is NaN or of an unknown kind, with no target")
     func raceStoreDropsInvalidTarget() async throws {
         let container = try TestContainers.make(cloudKitDatabase: .none, isStoredInMemoryOnly: true)
@@ -714,7 +732,7 @@ struct SwiftDataStoreTests {
             let id = UUID()
             ids.append(id)
             let payload = Data("""
-            {"id":"\(id.uuidString)","name":"R","date":1000,"priority":{"primary":{}},"specificPhaseTarget":\(target)}
+            {"id":"\(id.uuidString)","name":"R","date":1000,"priority":{"primary":{}},"distanceMeters":10000,"specificPhaseTarget":\(target)}
             """.utf8)
             context.insert(RaceRecord(id: id, payload: payload))
         }
@@ -730,7 +748,7 @@ struct SwiftDataStoreTests {
     @Test("RaceStore delete removes a race")
     func raceStoreDelete() async throws {
         let store = try makeStore()
-        let race = Race(name: "Local 10K", date: day(5), priority: .primary)
+        let race = Race(name: "Local 10K", date: day(5), priority: .primary, distanceMeters: 10_000)
         try await store.upsert([race])
 
         try await store.deleteRace(id: race.id)

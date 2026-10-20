@@ -294,6 +294,7 @@ public actor InMemoryStore: ActivityStore, PlanStore, WorkoutLibraryStore, Worko
 
     /// See ``RaceStore/upsert(_:)``.
     public func upsert(_ races: [Race]) async throws {
+        try races.forEach { try $0.validate() }
         for race in races {
             racesByID[race.id] = race
         }

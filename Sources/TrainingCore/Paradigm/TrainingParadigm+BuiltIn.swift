@@ -27,7 +27,8 @@ extension TrainingParadigm {
         hardIntensity: .high,
         spacesLongRunsAsHard: true,
         minDaysBetweenHardSessions: 2,
-        maxHardSessionsPerMicro: [7: 2, 10: 3, 14: 4]
+        maxHardSessionsPerMicro: [7: 2, 10: 3, 14: 4],
+        maxBackToBackLongRunPairsPerMicro: [7: 1, 10: 1, 14: 2]
     )
 
     /// Triphasic training (Andrew Snow, *Run Elite*): conditioning, base, structural, specific and
@@ -63,7 +64,8 @@ extension TrainingParadigm {
         hardIntensity: .high,
         hardSpeed: .max,
         spacesLongRunsAsHard: true,
-        minDaysBetweenHardSessions: 2
+        minDaysBetweenHardSessions: 2,
+        maxBackToBackLongRunPairsPerMicro: [7: 1, 10: 1, 14: 2]
     )
 
     /// The built-in paradigms: ``polarized8020`` and ``triphasic``.

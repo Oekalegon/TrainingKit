@@ -32,6 +32,19 @@ public struct StructuredWorkout: Identifiable, Sendable, Codable, Hashable {
     /// which read as ``WorkoutPurpose/general``. Absent from workouts saved before this field
     /// existed, which decode the same way. A value this version doesn't know fails to decode.
     public var purpose: WorkoutPurpose
+    /// The broad kind of session this workout is, or `nil` for an untagged one. Taken from the
+    /// template when instantiated, like ``purpose``, and fixed from then on. It is what decides
+    /// ``isLongRun``, and so whether the paradigm rules of ``PlanEvaluator`` treat the workout as a
+    /// long run. `nil` is not a kind of its own: an untagged workout is never a long run. Absent from
+    /// workouts saved before this field existed, which decode as `nil`; a value this version doesn't
+    /// know also reads as `nil` rather than failing the workout.
+    public var sessionType: SessionType?
+    /// Whether this is a long run: ``sessionType`` is ``SessionType/long``.
+    ///
+    /// This, and nothing about the day the workout is planned on or how long it is, is where
+    /// ``PlanSession/isLongRun`` comes from (MVP5-139): see
+    /// ``PlannedIntensityClassifier/session(on:for:athlete:)``.
+    public var isLongRun: Bool { sessionType == .long }
 
     /// Creates a structured workout.
     ///
@@ -45,6 +58,7 @@ public struct StructuredWorkout: Identifiable, Sendable, Codable, Hashable {
     ///   - templateID: The template this workout was instantiated from, if any.
     ///   - parameterValues: The resolved parameter values it was instantiated with, if any.
     ///   - purpose: What the workout is for; defaults to ``WorkoutPurpose/general``.
+    ///   - sessionType: The broad kind of session; defaults to `nil` (untagged, so not a long run).
     public init(
         id: UUID = UUID(),
         name: String,
@@ -54,7 +68,8 @@ public struct StructuredWorkout: Identifiable, Sendable, Codable, Hashable {
         workoutKitID: UUID? = nil,
         templateID: UUID? = nil,
         parameterValues: [String: Double]? = nil,
-        purpose: WorkoutPurpose = .general
+        purpose: WorkoutPurpose = .general,
+        sessionType: SessionType? = nil
     ) {
         self.id = id
         self.name = name
@@ -65,17 +80,18 @@ public struct StructuredWorkout: Identifiable, Sendable, Codable, Hashable {
         self.templateID = templateID
         self.parameterValues = parameterValues
         self.purpose = purpose
+        self.sessionType = sessionType
     }
 }
 
 extension StructuredWorkout {
     private enum CodingKeys: String, CodingKey {
-        case id, name, sport, venue, blocks, workoutKitID, templateID, parameterValues, purpose
+        case id, name, sport, venue, blocks, workoutKitID, templateID, parameterValues, purpose, sessionType
     }
 
     /// Decodes a workout, reading the venue an older version stored inside the sport
     /// (`indoorRunning`/`outdoorRunning`) when there's no `venue` of its own, and treating a missing
-    /// `purpose` as ``WorkoutPurpose/general``.
+    /// `purpose` as ``WorkoutPurpose/general`` and a missing or unknown `sessionType` as `nil`.
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(UUID.self, forKey: .id)
@@ -88,5 +104,6 @@ extension StructuredWorkout {
         templateID = try container.decodeIfPresent(UUID.self, forKey: .templateID)
         parameterValues = try container.decodeIfPresent([String: Double].self, forKey: .parameterValues)
         purpose = try container.decodeIfPresent(WorkoutPurpose.self, forKey: .purpose) ?? .general
+        sessionType = (try? container.decodeIfPresent(SessionType.self, forKey: .sessionType)) ?? nil
     }
 }

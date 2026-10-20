@@ -717,7 +717,7 @@ The rules read `sessions: [PlanSession]` (day, planned seconds, `IntensityCatego
 
 | Rule | Signal | Check | Severity |
 |---|---|---|---|
-| `intensityDistribution` | per micro, share of planned time per intensity category and per speed level | each *listed* share within `tolerance` of its target in the phase's `IntensityMix` (`phaseMixes[phase]`, else `defaultMix`); polarized 80/20 is `[.low: 0.8, .high: 0.2]`, a base phase of easy runs lists `.medium`/`.high` at 0 | warning |
+| `intensityDistribution` | per micro, share of planned time per intensity category and per speed level | each *listed* share within `tolerance` of its target in the phase's `IntensityMix` (`phaseMixes[phase]`, else `defaultMix`); polarized 80/20 lists `.high: 0.2` (build 0.22, peak 0.25) and `.medium: 0`, leaving `.low`/`.veryLow` as the easy remainder; a base phase of easy runs lists `.medium`/`.high` at 0 | warning |
 | `hardSessionSpacing` | days between consecutive hard sessions | at least `minDaysBetweenHardSessions` (Tue to Thu is 2; `nil` = off) | risk |
 | `hardSessionsPerMicro` | hard sessions in a micro | at most `maxHardSessionsPerMicro[length in days]`; a length with no entry is not checked, so 7-, 10- and 14-day micros are set independently | risk |
 

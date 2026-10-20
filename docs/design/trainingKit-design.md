@@ -726,12 +726,12 @@ The rules read `sessions: [PlanSession]` (day, planned seconds, `IntensityCatego
 | | `polarized8020` | `triphasic` |
 |---|---|---|
 | Phases | base, build, peak, taper | conditioning, base, structural, specific, taper (`CyclePhase.conditioning/.structural/.specific`) |
-| Distribution (per micro, ±0.05) | `high` 0.2, `medium` 0; `low` and `veryLow` unlisted, so both are the easy remainder | conditioning: `medium`/`high` 0, speed `moderate`/`fast`/`max` 0; base: `medium`/`high` 0, speed `moderate`/`fast` 0 (slow running and max-speed sprints allowed); later phases: none yet |
+| Distribution (per micro, ±0.05) | `high` 0.2 (build 0.22, peak 0.25), `medium` 0; `low` and `veryLow` unlisted, so both are the easy remainder | conditioning: `medium`/`high` 0, speed `moderate`/`fast`/`max` 0; base: `medium`/`high` 0, speed `moderate`/`fast` 0 (slow running and max-speed sprints allowed); later phases: none yet |
 | Hard | intensity ≥ `high` | intensity ≥ `high` or speed `max` (so 8 s sprints are placed like a hard day) |
 | Spacing | at least 2 days; long runs are spaced like hard sessions (`spacesLongRunsAsHard`) | same |
 | Hard per micro | 7 d: 2, 10 d: 3, 14 d: 4 | no limit (the athlete sets sessions per micro) |
 
-The polarized numbers were reviewed in MVP5-136 and kept as they are: they are product choices, not taken from a source apart from the 80/20 split (Fitzgerald). Shares are of whole-session planned time under each session's one intensity category, so a hard session's warm-up and cool-down count as hard time; the mix is the same in every phase. `PolarizedNumbersTests` pins every value and its boundary.
+The polarized numbers were reviewed in MVP5-136, kept except the build and peak `high` targets: they are product choices, not taken from a source apart from the 80/20 split (Fitzgerald). Shares are of whole-session planned time under each session's one intensity category, so a hard session's warm-up and cool-down count as hard time; build and peak allow more hard time (0.22, 0.25), set in MVP5-136. `PolarizedNumbersTests` pins every value and its boundary.
 
 Long runs (`PlanSession.isLongRun`) are spaced like hard sessions but do not count towards the per-micro maximum. A paradigm for ultra distances, where full-length long runs are not possible, sets `spacesLongRunsAsHard` to `false`. The structural and specific session profiles (interval work lengths, race-target fractions) are still MVP5-100 and the generator's.
 

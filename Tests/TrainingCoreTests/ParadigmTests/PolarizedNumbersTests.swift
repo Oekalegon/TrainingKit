@@ -12,7 +12,7 @@ struct PolarizedNumbersTests {
         Date(timeIntervalSince1970: 1_700_000_000 + Double(offset) * 86400)
     }
 
-    private func findings(_ sessions: [PlanSession], length: Int = 7, phase: CyclePhase = .build) -> [PlanFinding] {
+    private func findings(_ sessions: [PlanSession], length: Int = 7, phase: CyclePhase = .base) -> [PlanFinding] {
         let micro = TrainingCycle(level: .micro, phase: phase, loadRole: .build, name: "Micro", dateRange: day(0)...day(length - 1), parentID: UUID())
         return evaluator.evaluate([], races: [], cycles: [micro], sessions: sessions, paradigm: paradigm).findings
     }
@@ -36,33 +36,35 @@ struct PolarizedNumbersTests {
         #expect(paradigm.spacesLongRunsAsHard)
     }
 
-    @Test("the mix is the same in every phase (no per-phase variants)")
-    func samePhases() {
-        #expect(paradigm.phaseMixes.isEmpty)
-        let sessions = [session(0, .low, minutes: 70), session(3, .high, minutes: 30)]
-        for phase in paradigm.phases {
-            #expect(findings(sessions, phase: phase).contains { $0.rule == .intensityDistribution })
-        }
+    @Test("high target by phase: base and taper 0.20, build 0.22, peak 0.25 (all +-0.05, medium 0)")
+    func phaseTargets() {
+        #expect(paradigm.phaseMixes[.build] == IntensityMix(intensityShares: [.high: 0.22, .medium: 0], tolerance: 0.05))
+        #expect(paradigm.phaseMixes[.peak] == IntensityMix(intensityShares: [.high: 0.25, .medium: 0], tolerance: 0.05))
+        #expect(paradigm.phaseMixes[.base] == nil && paradigm.phaseMixes[.taper] == nil)
     }
 
-    @Test("tolerance 0.05: high up to 25 % passes, above warns")
+    /// A micro of 100 planned minutes with `high` minutes of hard time, the rest easy.
+    private func highShare(_ high: Double, phase: CyclePhase) -> [PlanFinding] {
+        findings([session(0, .low, minutes: 100 - high), session(3, .high, minutes: high)], phase: phase).filter { $0.subject == "intensity.high" }
+    }
+
+    @Test("tolerance 0.05 around each phase's target: base/taper 15-25 %, build 17-27 %, peak 20-30 %")
     func highTolerance() {
-        let atLimit = [session(0, .low, minutes: 75), session(3, .high, minutes: 25)]
-        #expect(findings(atLimit).isEmpty)
-        let over = [session(0, .low, minutes: 74), session(3, .high, minutes: 26)]
-        #expect(findings(over).contains { $0.subject == "intensity.high" && $0.severity == .warning })
-        let under = [session(0, .low, minutes: 85), session(3, .high, minutes: 15)]
-        #expect(findings(under).isEmpty)
-        let tooLittle = [session(0, .low, minutes: 86), session(3, .high, minutes: 14)]
-        #expect(findings(tooLittle).contains { $0.subject == "intensity.high" })
+        for (phase, low, high) in [(CyclePhase.base, 15.0, 25.0), (.taper, 15, 25), (.build, 17, 27), (.peak, 20, 30)] {
+            #expect(highShare(low, phase: phase).isEmpty, "\(phase) at \(low) %")
+            #expect(highShare(high, phase: phase).isEmpty, "\(phase) at \(high) %")
+            #expect(highShare(low - 1, phase: phase).count == 1, "\(phase) at \(low - 1) %")
+            #expect(highShare(high + 1, phase: phase).count == 1 && highShare(high + 1, phase: phase)[0].severity == .warning, "\(phase) at \(high + 1) %")
+        }
     }
 
     @Test("medium target 0: up to 5 % medium passes, above warns")
     func mediumTarget() {
         let atLimit = [session(0, .low, minutes: 75), session(2, .medium, minutes: 5), session(4, .high, minutes: 20)]
-        #expect(findings(atLimit).isEmpty)
+        #expect(findings(atLimit, phase: .base).isEmpty)
         let over = [session(0, .low, minutes: 74), session(2, .medium, minutes: 6), session(4, .high, minutes: 20)]
-        #expect(findings(over).contains { $0.subject == "intensity.medium" })
+        #expect(findings(over, phase: .base).contains { $0.subject == "intensity.medium" })
+        #expect(findings(over, phase: .peak).contains { $0.subject == "intensity.medium" })
     }
 
     @Test("hard sessions per micro: 2 in 7 days, 3 in 10, 4 in 14; one more is a risk")

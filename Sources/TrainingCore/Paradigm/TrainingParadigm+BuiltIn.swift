@@ -3,22 +3,27 @@ extension TrainingParadigm {
     /// about 20 % hard, with little in between.
     ///
     /// - Phases: base, build, peak, taper.
-    /// - Distribution (every phase, per micro): ``IntensityCategory/high`` 0.2 and
-    ///   ``IntensityCategory/medium`` 0, tolerance 0.05. ``IntensityCategory/low`` and
+    /// - Distribution (per micro): ``IntensityCategory/high`` 0.2 and ``IntensityCategory/medium`` 0,
+    ///   tolerance 0.05, except build (`high` 0.22) and peak (`high` 0.25), which allow a little
+    ///   and more hard time. ``IntensityCategory/low`` and
     ///   ``IntensityCategory/veryLow`` are left unlisted, so both count as the easy remainder.
     /// - Hard: intensity of ``IntensityCategory/high`` or more; speed is ignored.
     /// - Spacing: at least 2 days between hard sessions, so never on consecutive days. Long runs
     ///   are spaced like hard sessions (``spacesLongRunsAsHard``).
     /// - Hard sessions per micro: at most 2 in a 7-day micro, 3 in 10 days, 4 in 14 days.
     ///
-    /// These numbers were reviewed and confirmed (MVP5-136): they are the product's own choices,
-    /// not taken from a source, apart from the 80/20 split itself. A micro's shares count each
+    /// These numbers were reviewed and set (MVP5-136): they are the product's own choices, not
+    /// taken from a source, apart from the 80/20 split itself. A micro's shares count each
     /// session's whole planned time under its one intensity category, so a hard session's warm-up
-    /// and cool-down count as hard time. The mix is the same in every phase.
+    /// and cool-down count as hard time.
     public static let polarized8020 = TrainingParadigm(
         name: "80/20 polarized",
         phases: [.base, .build, .peak, .taper],
         defaultMix: IntensityMix(intensityShares: [.high: 0.2, .medium: 0], tolerance: 0.05),
+        phaseMixes: [
+            .build: IntensityMix(intensityShares: [.high: 0.22, .medium: 0], tolerance: 0.05),
+            .peak: IntensityMix(intensityShares: [.high: 0.25, .medium: 0], tolerance: 0.05),
+        ],
         hardIntensity: .high,
         spacesLongRunsAsHard: true,
         minDaysBetweenHardSessions: 2,

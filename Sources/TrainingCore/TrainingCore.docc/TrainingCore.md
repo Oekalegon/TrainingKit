@@ -79,6 +79,10 @@ See `docs/design/trainingKit-design.md` in the package repository for the full m
 - ``VolumeCurveBuilder``
 - ``MicroVolumeTarget``
 - ``VolumeCurveError``
+- ``LeadTimeCompromiser``
+- ``LeadTimeAdjustment``
+- ``LeadTimeCompromise``
+- ``LeadTimeError``
 - ``DayAssigner``
 - ``DayAssignment``
 - ``DayAssignmentResult``

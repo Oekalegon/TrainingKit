@@ -3,7 +3,7 @@ import Foundation
 /// What the athlete wants from a generated plan: the generator's soft inputs.
 ///
 /// Preferences are honoured where possible but never override ``PlanGuardrails``. For now this
-/// carries ``runAvailability``, ``maxWeeklyVolume`` and ``maxLongRunMeters``; training days, starting volumes and ramp are
+/// carries ``runAvailability``, ``maxWeeklyVolume``, ``maxLongRunMeters`` and ``includeConditioning``; training days, starting volumes and ramp are
 /// added by later tickets (design doc §8.1).
 public struct PlanPreferences: Sendable, Codable, Hashable {
     /// When the athlete can run. Seeded from the athlete's global availability setting, which does
@@ -24,6 +24,12 @@ public struct PlanPreferences: Sendable, Codable, Hashable {
     /// paradigm's ``TrainingParadigm/maxLongRunMeters`` applies. Finite and above zero; read it
     /// through ``maxLongRun(for:targetRace:)``. The generator (MVP5-117/118) reads it; no rule checks it yet.
     public var maxLongRunMeters: Double?
+
+    /// Whether the athlete wants the paradigm's conditioning phase (``CyclePhase/conditioning``)
+    /// before the base phase. `false` by default: conditioning is left out of the plan. When `true`
+    /// it is included only while the lead time has room for it; ``LeadTimeCompromiser`` drops it
+    /// otherwise and reports that the preference was overridden.
+    public var includeConditioning: Bool
 
     /// The ceiling on a long run for a plan aimed at `targetRace`, in meters.
     ///
@@ -47,18 +53,21 @@ public struct PlanPreferences: Sendable, Codable, Hashable {
     ///   - maxLongRunMeters: The longest run the athlete will do, in meters, for an ultra target;
     ///     defaults to `nil` (the paradigm's ceiling applies). A value that is not finite or not
     ///     above zero is stored as `nil`.
+    ///   - includeConditioning: Whether the athlete wants a conditioning phase; defaults to `false`.
     public init(
         runAvailability: RunAvailability = RunAvailability(),
         maxWeeklyVolume: [Sport: VolumeTarget] = [:],
-        maxLongRunMeters: Double? = nil
+        maxLongRunMeters: Double? = nil,
+        includeConditioning: Bool = false
     ) {
+        self.includeConditioning = includeConditioning
         self.maxLongRunMeters = maxLongRunMeters.flatMap { $0.isFinite && $0 > 0 ? $0 : nil }
         self.runAvailability = runAvailability
         self.maxWeeklyVolume = maxWeeklyVolume
     }
 
     private enum CodingKeys: String, CodingKey {
-        case runAvailability, maxWeeklyVolume, maxLongRunMeters
+        case runAvailability, maxWeeklyVolume, maxLongRunMeters, includeConditioning
     }
 
     /// One sport's limit, as stored: `Sport` encodes as an object, so a dictionary keyed by it
@@ -87,13 +96,15 @@ public struct PlanPreferences: Sendable, Codable, Hashable {
         }
         maxWeeklyVolume = limits
         maxLongRunMeters = (try? container.decodeIfPresent(Double.self, forKey: .maxLongRunMeters)).flatMap { $0.isFinite && $0 > 0 ? $0 : nil }
+        includeConditioning = (try? container.decodeIfPresent(Bool.self, forKey: .includeConditioning)) ?? false
     }
 
-    /// Encodes the preferences; an empty ``maxWeeklyVolume`` and a `nil` ``maxLongRunMeters`` are left out.
+    /// Encodes the preferences; an empty ``maxWeeklyVolume``, a `nil` ``maxLongRunMeters`` and a `false` ``includeConditioning`` are left out.
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(runAvailability, forKey: .runAvailability)
         try container.encodeIfPresent(maxLongRunMeters, forKey: .maxLongRunMeters)
+        if includeConditioning { try container.encode(true, forKey: .includeConditioning) }
         if !maxWeeklyVolume.isEmpty {
             let sorter = JSONEncoder()
             sorter.outputFormatting = JSONEncoder.OutputFormatting.sortedKeys

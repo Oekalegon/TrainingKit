@@ -16,7 +16,7 @@ import Foundation
 /// ``IntensityMix`` still counts its time as easy.
 ///
 /// A plan aimed at an ultra race (``Race/isUltra``) uses ``resolved(for:)``: long runs are no
-/// longer spaced like hard sessions, and ``maxLongRunSeconds`` and
+/// longer spaced like hard sessions, and ``maxLongRunMeters`` and
 /// ``maxBackToBackLongRunPairsPerMicro`` apply (MVP5-138).
 ///
 /// Decoding is tolerant: every field but `name` is optional, and an unknown or missing key falls
@@ -41,10 +41,10 @@ public struct TrainingParadigm: Sendable, Codable, Hashable {
     /// for an ultra target, where long runs of full length are not possible, ``resolved(for:)``
     /// sets this to `false`. Defaults to `false`.
     public var spacesLongRunsAsHard: Bool
-    /// The longest a long run may take, in seconds, for a plan with an ultra target; `nil` (the
-    /// default) for no ceiling. Full-length long runs are not possible for an ultra, so the
+    /// The longest a long run may be, in meters, for a plan with an ultra target; defaults to
+    /// 35 km, `nil` for no ceiling. Full-length long runs are not possible for an ultra, so the
     /// generator stops short of the race distance. Only ``resolved(for:)`` with an ultra race keeps it.
-    public var maxLongRunSeconds: TimeInterval?
+    public var maxLongRunMeters: Double?
     /// The maximum number of back-to-back long-run pairs (long runs on two consecutive days) in a
     /// micro, by the micro's length in days (e.g. `[7: 1, 14: 2]`), for a plan with an ultra target.
     /// A micro whose length has no entry is not limited. The second run of a pair is not a hard
@@ -71,7 +71,7 @@ public struct TrainingParadigm: Sendable, Codable, Hashable {
     ///   - spacesLongRunsAsHard: Whether long runs are spaced like hard sessions; defaults to `false`.
     ///   - minDaysBetweenHardSessions: The minimum days between hard sessions; `nil` for no check.
     ///   - maxHardSessionsPerMicro: The maximum hard sessions per micro, by micro length in days.
-    ///   - maxLongRunSeconds: The longest a long run may take for an ultra target; defaults to `nil` (no ceiling).
+    ///   - maxLongRunMeters: The longest a long run may be, in meters, for an ultra target; defaults to 35,000, `nil` for no ceiling.
     ///   - maxBackToBackLongRunPairsPerMicro: The maximum back-to-back long-run pairs per micro for
     ///     an ultra target, by micro length in days; defaults to no limit.
     public init(
@@ -85,7 +85,7 @@ public struct TrainingParadigm: Sendable, Codable, Hashable {
         spacesLongRunsAsHard: Bool = false,
         minDaysBetweenHardSessions: Int? = nil,
         maxHardSessionsPerMicro: [Int: Int] = [:],
-        maxLongRunSeconds: TimeInterval? = nil,
+        maxLongRunMeters: Double? = 35_000,
         maxBackToBackLongRunPairsPerMicro: [Int: Int] = [:]
     ) {
         self.name = name
@@ -98,14 +98,14 @@ public struct TrainingParadigm: Sendable, Codable, Hashable {
         self.spacesLongRunsAsHard = spacesLongRunsAsHard
         self.minDaysBetweenHardSessions = minDaysBetweenHardSessions
         self.maxHardSessionsPerMicro = maxHardSessionsPerMicro
-        self.maxLongRunSeconds = maxLongRunSeconds
+        self.maxLongRunMeters = maxLongRunMeters
         self.maxBackToBackLongRunPairsPerMicro = maxBackToBackLongRunPairsPerMicro
     }
 
     /// The paradigm as it applies to a plan aimed at `targetRace`.
     ///
     /// For an ultra (``Race/isUltra``) long runs are not spaced like hard sessions, so
-    /// ``spacesLongRunsAsHard`` is `false`, and ``maxLongRunSeconds`` and
+    /// ``spacesLongRunsAsHard`` is `false`, and ``maxLongRunMeters`` and
     /// ``maxBackToBackLongRunPairsPerMicro`` stay. For any other race, or none, the two ultra
     /// settings are dropped and everything else is unchanged. ``DayAssigner`` and
     /// ``PlanEvaluator`` call this with their `targetRace`.
@@ -116,7 +116,7 @@ public struct TrainingParadigm: Sendable, Codable, Hashable {
         if targetRace?.isUltra == true {
             result.spacesLongRunsAsHard = false
         } else {
-            result.maxLongRunSeconds = nil
+            result.maxLongRunMeters = nil
             result.maxBackToBackLongRunPairsPerMicro = [:]
         }
         return result
@@ -141,7 +141,7 @@ public struct TrainingParadigm: Sendable, Codable, Hashable {
 
     private enum CodingKeys: String, CodingKey {
         case name, phases, guardrailOverrides, defaultMix, phaseMixes, hardIntensity, hardSpeed, spacesLongRunsAsHard
-        case minDaysBetweenHardSessions, maxHardSessionsPerMicro, maxLongRunSeconds, maxBackToBackLongRunPairsPerMicro
+        case minDaysBetweenHardSessions, maxHardSessionsPerMicro, maxLongRunMeters, maxBackToBackLongRunPairsPerMicro
     }
 
     /// Decodes a paradigm; everything but `name` falls back to its default when absent.
@@ -159,7 +159,7 @@ public struct TrainingParadigm: Sendable, Codable, Hashable {
         minDaysBetweenHardSessions = try container.decodeIfPresent(Int.self, forKey: .minDaysBetweenHardSessions)
         let limits = try container.decodeIfPresent([String: Int].self, forKey: .maxHardSessionsPerMicro) ?? [:]
         maxHardSessionsPerMicro = Dictionary(limits.compactMap { key, value in Int(key).map { ($0, value) } }, uniquingKeysWith: { first, _ in first })
-        maxLongRunSeconds = try container.decodeIfPresent(TimeInterval.self, forKey: .maxLongRunSeconds)
+        maxLongRunMeters = try container.decodeIfPresent(Double.self, forKey: .maxLongRunMeters) ?? 35_000
         let pairs = try container.decodeIfPresent([String: Int].self, forKey: .maxBackToBackLongRunPairsPerMicro) ?? [:]
         maxBackToBackLongRunPairsPerMicro = Dictionary(pairs.compactMap { key, value in Int(key).map { ($0, value) } }, uniquingKeysWith: { first, _ in first })
     }
@@ -177,7 +177,7 @@ public struct TrainingParadigm: Sendable, Codable, Hashable {
         try container.encode(spacesLongRunsAsHard, forKey: .spacesLongRunsAsHard)
         try container.encodeIfPresent(minDaysBetweenHardSessions, forKey: .minDaysBetweenHardSessions)
         try container.encode(Dictionary(uniqueKeysWithValues: maxHardSessionsPerMicro.map { (String($0.key), $0.value) }), forKey: .maxHardSessionsPerMicro)
-        try container.encodeIfPresent(maxLongRunSeconds, forKey: .maxLongRunSeconds)
+        try container.encodeIfPresent(maxLongRunMeters, forKey: .maxLongRunMeters)
         try container.encode(Dictionary(uniqueKeysWithValues: maxBackToBackLongRunPairsPerMicro.map { (String($0.key), $0.value) }), forKey: .maxBackToBackLongRunPairsPerMicro)
     }
 }

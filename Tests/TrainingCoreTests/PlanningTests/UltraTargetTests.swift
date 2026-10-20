@@ -74,11 +74,11 @@ struct UltraTargetTests {
     @Test("resolving for an ultra turns long-run spacing off and keeps the ultra settings")
     func resolvedUltra() {
         var base = TrainingParadigm.polarized8020
-        base.maxLongRunSeconds = 4 * 3600
+        base.maxLongRunMeters = 40_000
         base.maxBackToBackLongRunPairsPerMicro = [7: 1]
         let resolved = base.resolved(for: race(ultra))
         #expect(!resolved.spacesLongRunsAsHard)
-        #expect(resolved.maxLongRunSeconds == 4 * 3600 && resolved.maxBackToBackLongRunPairsPerMicro == [7: 1])
+        #expect(resolved.maxLongRunMeters == 40_000 && resolved.maxBackToBackLongRunPairsPerMicro == [7: 1])
         #expect(resolved.minDaysBetweenHardSessions == base.minDaysBetweenHardSessions)
         #expect(resolved.phaseMixes == base.phaseMixes && resolved.maxHardSessionsPerMicro == base.maxHardSessionsPerMicro)
     }
@@ -86,24 +86,37 @@ struct UltraTargetTests {
     @Test("with a marathon or no target race the paradigm is unchanged except the ultra settings are dropped")
     func resolvedOther() {
         var base = TrainingParadigm.polarized8020
-        base.maxLongRunSeconds = 4 * 3600
+        base.maxLongRunMeters = 40_000
         base.maxBackToBackLongRunPairsPerMicro = [7: 1]
         for target in [race(marathon), nil] {
             let resolved = base.resolved(for: target)
             #expect(resolved.spacesLongRunsAsHard)
-            #expect(resolved.maxLongRunSeconds == nil && resolved.maxBackToBackLongRunPairsPerMicro.isEmpty)
+            #expect(resolved.maxLongRunMeters == nil && resolved.maxBackToBackLongRunPairsPerMicro.isEmpty)
         }
-        #expect(TrainingParadigm.polarized8020.resolved(for: nil) == .polarized8020)
+        var expected = TrainingParadigm.polarized8020
+        expected.maxLongRunMeters = nil
+        expected.maxBackToBackLongRunPairsPerMicro = [:]
+        #expect(TrainingParadigm.polarized8020.resolved(for: nil) == expected)
+    }
+
+    @Test("both built-ins allow 35 km and 1, 1 and 2 back-to-back pairs per 7-, 10- and 14-day micro")
+    func builtInNumbers() {
+        for paradigm in TrainingParadigm.builtIn {
+            #expect(paradigm.maxLongRunMeters == 35_000)
+            #expect(paradigm.maxBackToBackLongRunPairsPerMicro == [7: 1, 10: 1, 14: 2])
+            #expect(paradigm.resolved(for: race(ultra)).maxLongRunMeters == 35_000)
+            #expect(paradigm.resolved(for: nil).maxLongRunMeters == nil)
+        }
     }
 
     @Test("the ultra settings round-trip, and a payload without them decodes to none")
     func codableSettings() throws {
         var paradigm = TrainingParadigm(name: "X")
-        paradigm.maxLongRunSeconds = 14_400
+        paradigm.maxLongRunMeters = 40_000
         paradigm.maxBackToBackLongRunPairsPerMicro = [7: 1, 14: 2]
         #expect(try JSONDecoder().decode(TrainingParadigm.self, from: JSONEncoder().encode(paradigm)) == paradigm)
         let legacy = try JSONDecoder().decode(TrainingParadigm.self, from: Data(#"{"name":"Old"}"#.utf8))
-        #expect(legacy.maxLongRunSeconds == nil && legacy.maxBackToBackLongRunPairsPerMicro.isEmpty)
+        #expect(legacy.maxLongRunMeters == 35_000 && legacy.maxBackToBackLongRunPairsPerMicro.isEmpty)
     }
 
     // MARK: Spacing rule

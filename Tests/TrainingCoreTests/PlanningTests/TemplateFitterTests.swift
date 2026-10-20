@@ -230,11 +230,17 @@ struct TemplateFitterTests {
         // Alone, the previous template is used again.
         #expect(try choice(fit(intervals, templates: [long], previous: [long.id])).template.id == long.id)
         // A previous template that fits far better stays when the other is more than 10 points worse.
-        let tiny = try choice(fit(intervals, target: 900, templates: templates))
-        let again = try choice(fit(intervals, target: 900, templates: templates, previous: [tiny.template.id]))
-        let others = templates.filter { $0.id != tiny.template.id }
-        #expect(others.count == 1)
-        if again.template.id != tiny.template.id { #expect(again.error <= tiny.error + TemplateFitter.rotationTolerance) }
+        let flexible = BuiltInWorkoutTemplates.easyRun
+        let fixed = WorkoutTemplate(
+            name: "Fixed two hours", sport: .running, parameters: [],
+            blocks: [TemplateBlock(steps: [TemplateStep(kind: .work, goal: .time(.fixed(7200)), target: .heartRateZone(2))])],
+            sessionType: .easy
+        )
+        let easy = SessionProfile(sessionType: .easy)
+        #expect(try choice(fit(easy, target: 3600, templates: [flexible, fixed], previous: [flexible.id])).template.id == flexible.id)
+        // When both fit equally badly, the previous one gives way.
+        let tie = try choice(fit(easy, target: 3600, templates: [flexible, fixed], previous: [fixed.id]))
+        #expect(tie.template.id == flexible.id)
     }
 
     @Test("progression steps the work length across the micros of a phase, for 7, 10 and 14-day micros")

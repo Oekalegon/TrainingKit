@@ -209,6 +209,24 @@ struct CalendarExportTests {
         #expect(steps[9].goal == "open" && steps[9].target?.rpe == 2)
     }
 
+    @Test("a step's companion target is exported, and a file without one reads as nil")
+    func companionTargetExported() throws {
+        let workout = StructuredWorkout(name: "Z4", sport: .running, blocks: [WorkoutBlock(steps: [
+            WorkoutStep(kind: .work, goal: .time(600), target: .heartRateRange(162, 176), companionTarget: .pace(230...250)),
+            WorkoutStep(kind: .cooldown, goal: .time(300), target: .rpe(2)),
+        ])])
+        let export = build(plans: [PlannedActivity(workoutID: workout.id, date: day(4))], workouts: [workout])
+        let steps = try #require(export.days[4].activities.first).steps
+        let companion = try #require(steps[0].companionTarget)
+        #expect(CalendarImportPlanner.target(from: companion) == .pace(230...250))
+        #expect(steps[1].companionTarget == nil)
+        let data = try JSONEncoder().encode(steps[1])
+        var object = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        object["companionTarget"] = nil
+        let old = try JSONDecoder().decode(CalendarExport.Step.self, from: JSONSerialization.data(withJSONObject: object))
+        #expect(old.companionTarget == nil)
+    }
+
     @Test("step durations and distances add up to the entry's totals")
     func stepTotals() throws {
         let workout = intervals()

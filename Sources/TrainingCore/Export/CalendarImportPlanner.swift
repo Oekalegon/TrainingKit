@@ -313,7 +313,10 @@ public struct CalendarImportPlanner: Sendable {
         case "open": goal = .open
         default: return nil
         }
-        return WorkoutStep(kind: kind, goal: goal, target: step.target.flatMap(Self.target(from:)))
+        return WorkoutStep(
+            kind: kind, goal: goal, target: step.target.flatMap(Self.target(from:)),
+            companionTarget: step.companionTarget.flatMap(Self.target(from:))
+        )
     }
 
     static func target(from target: CalendarExport.Target) -> IntensityTarget? {

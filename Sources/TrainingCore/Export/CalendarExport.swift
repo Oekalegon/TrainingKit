@@ -166,6 +166,9 @@ public struct CalendarExport: Sendable, Codable, Hashable {
         public let distanceMeters: Double?
         /// The intensity the step targets, if any.
         public let target: Target?
+        /// The second target shown alongside ``target`` (``WorkoutStep/companionTarget``), if any;
+        /// absent from files written before it existed.
+        public let companionTarget: Target?
     }
 
     /// The intensity a ``Step`` targets.
@@ -356,7 +359,7 @@ extension CalendarExport.PlannedValues {
 }
 
 extension CalendarExport.Step {
-    private enum CodingKeys: String, CodingKey { case kind, block, repetition, goal, durationSeconds, distanceMeters, target }
+    private enum CodingKeys: String, CodingKey { case kind, block, repetition, goal, durationSeconds, distanceMeters, target, companionTarget }
 
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
@@ -367,6 +370,7 @@ extension CalendarExport.Step {
         try container.encode(durationSeconds, forKey: .durationSeconds)
         try container.encode(distanceMeters, forKey: .distanceMeters)
         try container.encode(target, forKey: .target)
+        try container.encode(companionTarget, forKey: .companionTarget)
     }
 }
 

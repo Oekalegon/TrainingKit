@@ -22,6 +22,9 @@ import Foundation
 ///
 /// A fraction scales *speed*: pace is the race pace divided by the fraction, so 1.05 is 5 % faster
 /// than race pace and 0.9 is slower.
+///
+/// Resolving keeps a heart-rate range it wrote earlier, so after the zones change a re-plan must
+/// resolve the template's workout again, not a stored resolved one.
 public enum StepTargetResolver {
     /// Half-width of the pace range written for a fraction of the race pace, as a fraction of that
     /// pace (0.02 is plus and minus 2 %).
@@ -94,7 +97,8 @@ public enum StepTargetResolver {
     /// The pace range, in seconds per kilometer, of heart-rate zone `zone` in `paceModel`: the zone's
     /// own pace (threshold pace times its multiplier) with the bounds halfway to the neighbouring
     /// zones' paces. The outer zones extend by the same distance their inner neighbour does.
-    /// `nil` for a zone outside 1...5.
+    /// `nil` for a zone outside 1...5. Assumes the multipliers get smaller from zone 1 to zone 5; for a
+    /// table that does not, the bounds are still ordered but not meaningful.
     ///
     /// - Parameters:
     ///   - zone: The zone, 1...5.

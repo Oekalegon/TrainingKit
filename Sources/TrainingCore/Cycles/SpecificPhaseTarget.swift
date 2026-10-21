@@ -3,9 +3,9 @@ import Foundation
 /// The intensity a race's specific-phase work is aimed at (MVP5-114): usually the pace the athlete
 /// wants to hold on race day.
 ///
-/// It is stored on ``Race/specificPhaseTarget``. Nothing reads it yet: resolving it into the
-/// intensity of a step (MVP5-122) and the generator that uses it come later. A race without a target
-/// is stored as `nil`.
+/// It is stored on ``Race/specificPhaseTarget``. ``StepTargetResolver`` turns a `.pace` target into
+/// step paces (MVP5-122); the generator that passes it in comes later. A race without a target is
+/// stored as `nil`.
 ///
 /// Build a value with the cases, then call ``validate()`` to reject nonsense; decoding validates too.
 public enum SpecificPhaseTarget: Sendable, Codable, Hashable {

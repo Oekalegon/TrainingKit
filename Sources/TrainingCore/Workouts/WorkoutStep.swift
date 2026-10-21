@@ -6,6 +6,11 @@ public struct WorkoutStep: Sendable, Codable, Hashable {
     public var goal: StepGoal
     /// The intensity this step targets, if any.
     public var target: IntensityTarget?
+    /// A second target shown alongside ``target`` (MVP5-122), or `nil`. ``StepTargetResolver`` sets it
+    /// to the pace to run for a heart-rate step, so the athlete sees both. Planning load, durations
+    /// and the WorkoutKit alert read ``target`` only. Absent from steps saved before this field
+    /// existed, which decode as `nil`.
+    public var companionTarget: IntensityTarget?
 
     /// Creates a workout step.
     ///
@@ -13,9 +18,11 @@ public struct WorkoutStep: Sendable, Codable, Hashable {
     ///   - kind: The role this step plays within its block.
     ///   - goal: What ends this step.
     ///   - target: The intensity this step targets, if any.
-    public init(kind: StepKind, goal: StepGoal, target: IntensityTarget? = nil) {
+    ///   - companionTarget: A second target shown alongside `target`; defaults to `nil`.
+    public init(kind: StepKind, goal: StepGoal, target: IntensityTarget? = nil, companionTarget: IntensityTarget? = nil) {
         self.kind = kind
         self.goal = goal
         self.target = target
+        self.companionTarget = companionTarget
     }
 }

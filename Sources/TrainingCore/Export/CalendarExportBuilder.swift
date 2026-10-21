@@ -249,7 +249,8 @@ public struct CalendarExportBuilder: Sendable {
                 goal: goal,
                 durationSeconds: Self.finite(projection.duration) ?? 0,
                 distanceMeters: projection.distanceMeters.flatMap(Self.finite),
-                target: projection.step.target.map(Self.target)
+                target: projection.step.target.map(Self.target),
+                companionTarget: projection.step.companionTarget.map(Self.target)
             )
         }
     }

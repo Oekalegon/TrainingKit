@@ -57,6 +57,11 @@ public struct TrainingParadigm: Sendable, Codable, Hashable {
     /// the polarized paradigm. `nil` (the default) when the paradigm has none, so only the oldest
     /// phases are cut.
     public var shortenablePhase: CyclePhase?
+    /// What each phase asks of its sessions (MVP5-118), for example one interval profile and a long
+    /// run for a build phase; ``TemplateFitter`` matches each to a library template. A phase with no
+    /// entry asks nothing. Empty for the built-in paradigms until their numbers are written down
+    /// (MVP5-100).
+    public var sessionProfiles: [CyclePhase: [SessionProfile]]
     /// The minimum number of days from one hard session to the next (Tuesday to Thursday is 2);
     /// `nil` switches ``PlanRule/hardSessionSpacing`` off.
     public var minDaysBetweenHardSessions: Int?
@@ -81,6 +86,7 @@ public struct TrainingParadigm: Sendable, Codable, Hashable {
     ///   - maxBackToBackLongRunPairsPerMicro: The maximum back-to-back long-run pairs per micro for
     ///     an ultra target, by micro length in days; defaults to no limit.
     ///   - shortenablePhase: The phase a short lead time shortens; defaults to `nil` (none).
+    ///   - sessionProfiles: What each phase asks of its sessions; defaults to none.
     public init(
         name: String,
         phases: [CyclePhase] = [],
@@ -94,7 +100,8 @@ public struct TrainingParadigm: Sendable, Codable, Hashable {
         maxHardSessionsPerMicro: [Int: Int] = [:],
         maxLongRunMeters: Double? = 35_000,
         maxBackToBackLongRunPairsPerMicro: [Int: Int] = [:],
-        shortenablePhase: CyclePhase? = nil
+        shortenablePhase: CyclePhase? = nil,
+        sessionProfiles: [CyclePhase: [SessionProfile]] = [:]
     ) {
         self.name = name
         self.phases = phases
@@ -109,6 +116,7 @@ public struct TrainingParadigm: Sendable, Codable, Hashable {
         self.maxLongRunMeters = Self.validCeiling(maxLongRunMeters)
         self.maxBackToBackLongRunPairsPerMicro = Self.validPairLimits(maxBackToBackLongRunPairsPerMicro)
         self.shortenablePhase = shortenablePhase
+        self.sessionProfiles = sessionProfiles
     }
 
     /// A ceiling that is finite and above zero, otherwise `nil`.
@@ -160,7 +168,7 @@ public struct TrainingParadigm: Sendable, Codable, Hashable {
 
     private enum CodingKeys: String, CodingKey {
         case name, phases, guardrailOverrides, defaultMix, phaseMixes, hardIntensity, hardSpeed, spacesLongRunsAsHard
-        case minDaysBetweenHardSessions, maxHardSessionsPerMicro, maxLongRunMeters, maxBackToBackLongRunPairsPerMicro, shortenablePhase
+        case minDaysBetweenHardSessions, maxHardSessionsPerMicro, maxLongRunMeters, maxBackToBackLongRunPairsPerMicro, shortenablePhase, sessionProfiles
     }
 
     /// Decodes a paradigm; everything but `name` falls back to its default when absent.
@@ -186,6 +194,17 @@ public struct TrainingParadigm: Sendable, Codable, Hashable {
         let pairs = try container.decodeIfPresent([String: Int].self, forKey: .maxBackToBackLongRunPairsPerMicro) ?? [:]
         maxBackToBackLongRunPairsPerMicro = Self.validPairLimits(Dictionary(pairs.compactMap { key, value in Int(key).map { ($0, value) } }, uniquingKeysWith: { first, _ in first }))
         shortenablePhase = try container.decodeIfPresent(CyclePhase.self, forKey: .shortenablePhase)
+        let profiles = try container.decodeIfPresent([String: [LossyProfile]].self, forKey: .sessionProfiles) ?? [:]
+        sessionProfiles = Dictionary(profiles.map { (CyclePhase($0.key), $0.value.compactMap(\.profile)) }, uniquingKeysWith: { first, _ in first })
+    }
+
+    /// A profile that reads as `nil` when it cannot be decoded (an unknown session type), so one bad entry does not fail the paradigm.
+    private struct LossyProfile: Decodable {
+        let profile: SessionProfile?
+
+        init(from decoder: Decoder) throws {
+            profile = try? SessionProfile(from: decoder)
+        }
     }
 
     /// Encodes the paradigm; dictionary keys are written as strings (phase ids, micro lengths).
@@ -204,5 +223,6 @@ public struct TrainingParadigm: Sendable, Codable, Hashable {
         try container.encodeIfPresent(maxLongRunMeters, forKey: .maxLongRunMeters)
         try container.encode(Dictionary(uniqueKeysWithValues: maxBackToBackLongRunPairsPerMicro.map { (String($0.key), $0.value) }), forKey: .maxBackToBackLongRunPairsPerMicro)
         try container.encodeIfPresent(shortenablePhase, forKey: .shortenablePhase)
+        try container.encode(Dictionary(uniqueKeysWithValues: sessionProfiles.map { ($0.key.id, $0.value) }), forKey: .sessionProfiles)
     }
 }

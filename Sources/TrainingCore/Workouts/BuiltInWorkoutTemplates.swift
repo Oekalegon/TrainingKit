@@ -17,7 +17,8 @@ public enum BuiltInWorkoutTemplates {
             TemplateBlock(steps: [
                 TemplateStep(kind: .work, goal: .time(.parameter("duration")), target: .heartRateZone(1)),
             ]),
-        ]
+        ],
+        sessionType: .recovery
     )
 
     /// A Zone 2 run bracketed by a fixed 5-minute Zone 1 warmup and cooldown, with the main
@@ -41,7 +42,8 @@ public enum BuiltInWorkoutTemplates {
             TemplateBlock(steps: [
                 TemplateStep(kind: .cooldown, goal: .time(.fixed(5 * 60)), target: .heartRateZone(1)),
             ]),
-        ]
+        ],
+        sessionType: .easy
     )
 
     /// A Zone 2 run bracketed by a fixed 5-minute Zone 1 warmup and cooldown, with the main
@@ -65,7 +67,8 @@ public enum BuiltInWorkoutTemplates {
             TemplateBlock(steps: [
                 TemplateStep(kind: .cooldown, goal: .time(.fixed(5 * 60)), target: .heartRateZone(1)),
             ]),
-        ]
+        ],
+        sessionType: .long
     )
 
     /// A Zone 3 tempo effort ramped into and out of via fixed Zone 1/Zone 2 segments, with the
@@ -102,7 +105,8 @@ public enum BuiltInWorkoutTemplates {
             TemplateBlock(steps: [
                 TemplateStep(kind: .cooldown, goal: .time(.fixed(5 * 60)), target: .heartRateZone(1)),
             ]),
-        ]
+        ],
+        sessionType: .tempo
     )
 
     /// Base Full-out hill sprints (MVP2-105): short, maximal uphill sprints with long, easy recoveries, run
@@ -155,7 +159,8 @@ public enum BuiltInWorkoutTemplates {
             TemplateBlock(steps: [
                 TemplateStep(kind: .cooldown, goal: .time(.fixed(5 * 60)), target: .heartRateZone(1)),
             ]),
-        ]
+        ],
+        sessionType: .hillRepeats
     )
 
     /// Short interval run (MVP2-105): Zone 5 efforts of 30 seconds to 2 minutes with short Zone 1
@@ -192,7 +197,8 @@ public enum BuiltInWorkoutTemplates {
             TemplateBlock(steps: [
                 TemplateStep(kind: .cooldown, goal: .time(.fixed(5 * 60)), target: .heartRateZone(1)),
             ]),
-        ]
+        ],
+        sessionType: .interval
     )
 
     /// Short interval run, track version (MVP2-105): Zone 5 efforts of 50 to 800 meters with Zone 2
@@ -229,7 +235,8 @@ public enum BuiltInWorkoutTemplates {
             TemplateBlock(steps: [
                 TemplateStep(kind: .cooldown, goal: .time(.fixed(5 * 60)), target: .heartRateZone(1)),
             ]),
-        ]
+        ],
+        sessionType: .interval
     )
 
     /// The maximum-heart-rate field test (MVP2-153), purpose ``WorkoutPurpose/maxHRTest``.
@@ -348,7 +355,8 @@ public enum BuiltInWorkoutTemplates {
             TemplateBlock(steps: [
                 TemplateStep(kind: .work, goal: .time(.parameter("finish")), target: .heartRateZone(3)),
             ]),
-        ]
+        ],
+        sessionType: .interval
     )
 
     /// Cruise Interval Runs (MVP2-106): Zone 3 intervals of 5 to 15 minutes with short Zone 1 recoveries.
@@ -388,7 +396,8 @@ public enum BuiltInWorkoutTemplates {
             TemplateBlock(steps: [
                 TemplateStep(kind: .cooldown, goal: .time(.fixed(5 * 60)), target: .heartRateZone(1)),
             ]),
-        ]
+        ],
+        sessionType: .tempo
     )
 
     /// Long run with speed play, a long fartlek (MVP2-106): a long run broken up by short Zone 3 surges.
@@ -421,7 +430,8 @@ public enum BuiltInWorkoutTemplates {
             TemplateBlock(steps: [
                 TemplateStep(kind: .cooldown, goal: .time(.fixed(5 * 60)), target: .heartRateZone(1)),
             ]),
-        ]
+        ],
+        sessionType: .long
     )
 
     /// Long run with fast finish (MVP2-106): a long Zone 2 run that ends with a Zone 3 stretch.
@@ -450,7 +460,8 @@ public enum BuiltInWorkoutTemplates {
             TemplateBlock(steps: [
                 TemplateStep(kind: .work, goal: .distance(.parameter("finish")), target: .heartRateZone(3)),
             ]),
-        ]
+        ],
+        sessionType: .long
     )
 
     /// Fartlek, Zone 4 (MVP2-106): short Zone 4 efforts with 2-minute Zone 1 recoveries.
@@ -496,7 +507,8 @@ public enum BuiltInWorkoutTemplates {
                 TemplateBlock(steps: [
                     TemplateStep(kind: .cooldown, goal: .time(.fixed(5 * 60)), target: .heartRateZone(1)),
                 ]),
-            ]
+            ],
+            sessionType: .interval
         )
     }
 
@@ -541,7 +553,8 @@ public enum BuiltInWorkoutTemplates {
                 TemplateBlock(steps: [
                     TemplateStep(kind: .cooldown, goal: .time(.fixed(5 * 60)), target: .heartRateZone(1)),
                 ]),
-            ]
+            ],
+            sessionType: .hillRepeats
         )
     }
 
@@ -581,7 +594,8 @@ public enum BuiltInWorkoutTemplates {
             TemplateBlock(steps: [
                 TemplateStep(kind: .cooldown, goal: .time(.fixed(5 * 60)), target: .heartRateZone(1)),
             ]),
-        ]
+        ],
+        sessionType: .interval
     )
 
     /// Mixed interval runs (MVP2-106): a ladder of Zone 5 and Zone 4 efforts around a 10-minute Zone 3 block.
@@ -625,7 +639,8 @@ public enum BuiltInWorkoutTemplates {
             TemplateBlock(steps: [
                 TemplateStep(kind: .cooldown, goal: .time(.fixed(5 * 60)), target: .heartRateZone(1)),
             ]),
-        ]
+        ],
+        sessionType: .interval
     )
 
     private static let zone5Block = TemplateBlock(

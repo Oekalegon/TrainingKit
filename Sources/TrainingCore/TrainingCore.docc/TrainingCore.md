@@ -66,6 +66,7 @@ See `docs/design/trainingKit-design.md` in the package repository for the full m
 - ``WorkoutBlock``
 - ``WorkoutStep``
 - ``StepKind``
+- ``TemplateAnalysis``
 - ``StepGoal``
 - ``IntensityTarget``
 
@@ -83,6 +84,9 @@ See `docs/design/trainingKit-design.md` in the package repository for the full m
 - ``LeadTimeAdjustment``
 - ``LeadTimeCompromise``
 - ``LeadTimeError``
+- ``TemplateFitter``
+- ``TemplateFit``
+- ``TemplateChoice``
 - ``DayAssigner``
 - ``DayAssignment``
 - ``DayAssignmentResult``
@@ -166,6 +170,7 @@ See `docs/design/trainingKit-design.md` in the package repository for the full m
 - ``PlanGuardrails/Overrides``
 - ``IntensityMix``
 - ``PlanSession``
+- ``SessionProfile``
 - ``SpeedLevel``
 
 ### Stores

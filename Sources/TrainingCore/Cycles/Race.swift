@@ -19,7 +19,7 @@ public struct Race: Identifiable, Sendable, Codable, Hashable {
     public var distanceMeters: Double
     /// The intensity the race's specific-phase work is aimed at, or `nil` for none (MVP5-114).
     ///
-    /// Nothing reads it yet. A stored race without the field decodes to `nil`, and so does one whose
+    /// Only ``StepTargetResolver`` reads it so far (MVP5-122). A stored race without the field decodes to `nil`, and so does one whose
     /// target is of a kind this version doesn't know or fails ``SpecificPhaseTarget/validate()``,
     /// so a newer device's data never loses the race.
     public var specificPhaseTarget: SpecificPhaseTarget?

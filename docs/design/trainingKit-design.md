@@ -794,6 +794,15 @@ Time in zone is integrated from `Activity.heartRate` using the same trapezoid se
 
 > **Note (pending, not yet built):** `ActivitySummary`/`TimeInZone` should gain a pace/speed equivalent alongside the HR one — `Activity.speed` (added when the model gained device-recorded streams; see §2.2) is the raw stream to integrate the same way, once a pace/speed zone model exists to bucket it against. On the "computed on demand, cache is a later optimisation" line above: recomputing time-in-zone for e.g. 30 activities in a calendar view is not expected to be a real cost (trapezoidal integration over a few hundred–low-thousand samples per activity is sub-millisecond total), so if caching is ever needed it belongs at the app/view-model layer (keyed on activity ID, invalidated on data change), not inside `StatisticsCalculator` itself.
 
+
+#### Step targets (MVP5-122)
+
+`StepTargetResolver.resolve(_:on:athlete:raceTarget:raceTargetFraction:)` turns a template's intensities into numbers for one athlete on one date. It is a pure function; the caller stores the returned workout in the plan, so a workout sent to a watch does not move when zones are edited, and a re-plan (MVP5-123) resolves again.
+
+Worked example: rest 50, max 190 bpm (Karvonen), threshold pace 4:00/km, race pace 4:00/km, phase fraction 0.98. A work step at `.heartRateZone(4)` becomes `.heartRateRange(162, 176)`; zone 4's pace range is 230.4...249.6 s/km (240 s/km times 1.0, bounds halfway to the zone 3 and zone 5 paces). The phase pace is 240 / 0.98 = 244.9 s/km, inside that range, so the `companionTarget` is `.pace` of 244.9 ±2 %. A fraction scales speed: 1.05 gives 228.6 s/km, which is a zone 5 pace, so the same step is reported as `paceOutsideZone(zone: 4, paceZone: 5)`: the phase asks for a different workout than this template. The step then keeps the zone's own pace as companion.
+
+Rules: the primary `target` stays what the device alerts on and what `TRIMPPlanEstimator` and `WorkoutDurationEstimator` read; the resolved range has the zone's midpoint ratio, so they see the same zone as before. Warmup, recovery and cooldown steps get the zone's pace, never the phase pace. A work step with no target gets `.pace` from the fraction. Explicit pace, power, heart-rate range and RPE targets are kept. Only a `.pace` race target is turned into a pace; a missing race target, a heart-rate, effort or predicted target, no zone settings, and a zone with no bpm range (zone outside 1...5, or lactate threshold without a threshold heart rate) are reported in `unresolved` and leave the step as it was. The tolerances (zone bounds halfway between neighbouring zone paces, ±2 % around the phase pace) are fixed. Not done: the fitter does not yet use `paceOutsideZone` to reject a template, and the generator does not call the resolver yet (MVP5-120).
+
 #### Polarized (80/20) intensity split
 
 ```swift

@@ -87,6 +87,10 @@ See `docs/design/trainingKit-design.md` in the package repository for the full m
 - ``TemplateFitter``
 - ``TemplateFit``
 - ``TemplateChoice``
+- ``StepTargetResolver``
+- ``StepTargetResolution``
+- ``UnresolvedStep``
+- ``UnresolvedReason``
 - ``DayAssigner``
 - ``DayAssignment``
 - ``DayAssignmentResult``

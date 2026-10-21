@@ -19,7 +19,7 @@ public struct SessionProfile: Sendable, Codable, Hashable {
     /// ``TemplateAnalysis/workCount`` overlaps it.
     public var workCount: ClosedRange<Int>?
     /// The intensity of the work as a fraction of the race target (race pace, say), or `nil`. Data
-    /// only: it is not used for matching; resolving it into step targets is a later step (MVP5-122).
+    /// only: it is not used for matching; ``StepTargetResolver`` turns it into step targets (MVP5-122).
     public var raceTargetFraction: Double?
 
     /// Creates a profile.

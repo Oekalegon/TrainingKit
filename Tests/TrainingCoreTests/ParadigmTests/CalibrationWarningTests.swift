@@ -106,3 +106,14 @@ struct CalibrationWarningTests {
         #expect(legacy.isAcceptable)
     }
 }
+
+@Suite("Calibration warning in the preview (MVP5-143)")
+struct CalibrationWarningPreviewTests {
+    @Test("the preview exposes the proposal's warning")
+    func previewPassesThrough() async throws {
+        let race = Race(name: "R", date: FlatProvider.start.addingTimeInterval(6 * 86400), priority: .primary, distanceMeters: 10_000)
+        let proposal = try await PlanAdjuster(paradigm: .triphasic, targetRace: race).propose(using: FlatProvider(), today: FlatProvider.start)
+        let preview = PlanPreview(proposal: proposal, replacedPlan: nil, replacedActivities: [], replacedPlanIsFollowed: false)
+        #expect(preview.calibrationWarning == CalibrationWarning(raceDistanceMeters: 10_000, calibratedDistanceMeters: 42_195))
+    }
+}

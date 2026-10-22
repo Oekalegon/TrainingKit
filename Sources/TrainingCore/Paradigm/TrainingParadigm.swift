@@ -120,15 +120,15 @@ public struct TrainingParadigm: Sendable, Codable, Hashable {
         self.spacesLongRunsAsHard = spacesLongRunsAsHard
         self.minDaysBetweenHardSessions = minDaysBetweenHardSessions
         self.maxHardSessionsPerMicro = maxHardSessionsPerMicro
-        self.maxLongRunMeters = Self.validCeiling(maxLongRunMeters)
+        self.maxLongRunMeters = Self.validPositive(maxLongRunMeters)
         self.maxBackToBackLongRunPairsPerMicro = Self.validPairLimits(maxBackToBackLongRunPairsPerMicro)
         self.shortenablePhase = shortenablePhase
         self.sessionProfiles = sessionProfiles
-        self.calibratedDistanceMeters = Self.validCeiling(calibratedDistanceMeters)
+        self.calibratedDistanceMeters = Self.validPositive(calibratedDistanceMeters)
     }
 
     /// A ceiling that is finite and above zero, otherwise `nil`.
-    private static func validCeiling(_ meters: Double?) -> Double? {
+    private static func validPositive(_ meters: Double?) -> Double? {
         meters.flatMap { $0.isFinite && $0 > 0 ? $0 : nil }
     }
 
@@ -210,7 +210,7 @@ public struct TrainingParadigm: Sendable, Codable, Hashable {
         let limits = try container.decodeIfPresent([String: Int].self, forKey: .maxHardSessionsPerMicro) ?? [:]
         maxHardSessionsPerMicro = Dictionary(limits.compactMap { key, value in Int(key).map { ($0, value) } }, uniquingKeysWith: { first, _ in first })
         if let stored = try container.decodeIfPresent(Double.self, forKey: .maxLongRunMeters) {
-            maxLongRunMeters = Self.validCeiling(stored)
+            maxLongRunMeters = Self.validPositive(stored)
         } else {
             maxLongRunMeters = 35_000
         }
@@ -219,7 +219,7 @@ public struct TrainingParadigm: Sendable, Codable, Hashable {
         shortenablePhase = try container.decodeIfPresent(CyclePhase.self, forKey: .shortenablePhase)
         let profiles = try container.decodeIfPresent([String: [LossyProfile]].self, forKey: .sessionProfiles) ?? [:]
         sessionProfiles = Dictionary(profiles.map { (CyclePhase($0.key), $0.value.compactMap(\.profile)) }, uniquingKeysWith: { first, _ in first })
-        calibratedDistanceMeters = Self.validCeiling(try container.decodeIfPresent(Double.self, forKey: .calibratedDistanceMeters))
+        calibratedDistanceMeters = Self.validPositive(try container.decodeIfPresent(Double.self, forKey: .calibratedDistanceMeters))
     }
 
     /// A profile that reads as `nil` when it cannot be decoded (an unknown session type), so one bad entry does not fail the paradigm.

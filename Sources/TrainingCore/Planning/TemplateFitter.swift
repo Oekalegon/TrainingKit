@@ -96,7 +96,7 @@ public enum TemplateFitter {
                 case .open: nil
                 }
                 guard let goalKey else { continue }
-                if step.isHardWork { workKeys[goalKey] = step } else { volumeKeys.append(goalKey) }
+                if step.isHardWork(in: block) { workKeys[goalKey] = step } else { volumeKeys.append(goalKey) }
             }
         }
         volumeKeys.removeAll { workKeys[$0] != nil }
@@ -121,7 +121,9 @@ public enum TemplateFitter {
         func measure(_ values: [String: Double]) -> (seconds: TimeInterval, count: Int)? {
             guard let workout = try? template.instantiate(values: values) else { return nil }
             let seconds = estimator.duration(for: workout, athlete: athlete)
-            let count = workout.blocks.reduce(0) { $0 + $1.repetitions * $1.steps.filter(\.isHardWork).count }
+            let count = zip(workout.blocks, template.blocks).reduce(0) { total, pair in
+                total + pair.0.repetitions * pair.0.steps.filter { $0.isHardWork(in: pair.1) }.count
+            }
             return (seconds, count)
         }
 

@@ -4,8 +4,12 @@ import Foundation
 /// (MVP5-118).
 ///
 /// A *hard work step* is a ``StepKind/work`` step aimed at heart-rate zone 3 or higher, or at an RPE of
-/// 7 or more. Steps with another target (pace, power, a heart-rate range) or none are not counted
-/// as hard. Every range is over the values the template's parameters can take: a parameter's own
+/// 7 or more, or a work step aimed at zone 2 in an *interval set*: a repeated block (a repetition
+/// count that is a parameter or above 1) that also has a ``StepKind/recovery`` step, such as
+/// 6 x 1 mile at zone 2 with a short recovery. Without that, the body of an easy run, which is a
+/// zone 2 work step too, could not be told from an interval. Steps with another target (pace, power, a
+/// heart-rate range) or none are not counted as hard, so the strides of a stride set, which have no target,
+/// are not. Every range is over the values the template's parameters can take: a parameter's own
 /// `range`, or its default when it has none. A distance step is timed with the athlete's pace model,
 /// an open step with the default open-step duration, see ``WorkoutDurationEstimator``.
 ///
@@ -86,11 +90,11 @@ extension WorkoutTemplate {
         func measure(_ values: [String: Double]) throws(WorkoutTemplateError) -> Measure {
             let workout = try instantiate(values: values)
             var result = Measure()
-            for block in workout.blocks {
+            for (block, templateBlock) in zip(workout.blocks, blocks) {
                 for step in block.steps {
                     let seconds = estimator.duration(for: step, athlete: athlete)
                     result.duration += seconds * Double(block.repetitions)
-                    if step.isHardWork {
+                    if step.isHardWork(in: templateBlock) {
                         result.lengths.append(seconds)
                         result.count += block.repetitions
                         result.workSeconds += seconds * Double(block.repetitions)
@@ -123,11 +127,34 @@ extension IntensityTarget? {
 }
 
 extension WorkoutStep {
-    /// Whether this is a hard work step, see ``TemplateAnalysis``.
-    var isHardWork: Bool { kind == .work && target.isHardEffort }
+    /// Whether this is a hard work step of `block`, the template block it was made from, see
+    /// ``TemplateAnalysis``.
+    func isHardWork(in block: TemplateBlock) -> Bool {
+        kind == .work && (target.isHardEffort || (block.isIntervalSet && target.isIntervalEffort))
+    }
 }
 
 extension TemplateStep {
-    /// Whether this is a hard work step, see ``TemplateAnalysis``.
-    var isHardWork: Bool { kind == .work && target.isHardEffort }
+    /// Whether this is a hard work step of `block`, see ``TemplateAnalysis``.
+    func isHardWork(in block: TemplateBlock) -> Bool {
+        kind == .work && (target.isHardEffort || (block.isIntervalSet && target.isIntervalEffort))
+    }
+}
+
+extension TemplateBlock {
+    /// Whether the block is repeated and has a recovery step: its work steps are intervals.
+    var isIntervalSet: Bool {
+        let repeated: Bool = switch repetitions {
+        case .parameter: true
+        case .fixed(let count): count > 1
+        }
+        return repeated && steps.contains { $0.kind == .recovery }
+    }
+}
+
+extension IntensityTarget? {
+    /// Whether the target is easy enough to be an interval only inside an interval set: heart-rate zone 2.
+    var isIntervalEffort: Bool {
+        if case .heartRateZone(let zone) = self { zone == 2 } else { false }
+    }
 }

@@ -62,6 +62,10 @@ public struct TrainingParadigm: Sendable, Codable, Hashable {
     /// entry asks nothing. Empty for the built-in paradigms until their numbers are written down
     /// (MVP5-100).
     public var sessionProfiles: [CyclePhase: [SessionProfile]]
+    /// The race distance, in meters, the paradigm's percentages and zone mapping were calibrated for
+    /// (42,195 for ``triphasic``); `nil` (the default) when it makes no claim. A plan aimed at a
+    /// shorter race gets a ``CalibrationWarning`` (MVP5-143): see ``calibrationWarning(for:)``.
+    public var calibratedDistanceMeters: Double?
     /// The minimum number of days from one hard session to the next (Tuesday to Thursday is 2);
     /// `nil` switches ``PlanRule/hardSessionSpacing`` off.
     public var minDaysBetweenHardSessions: Int?
@@ -87,6 +91,8 @@ public struct TrainingParadigm: Sendable, Codable, Hashable {
     ///     an ultra target, by micro length in days; defaults to no limit.
     ///   - shortenablePhase: The phase a short lead time shortens; defaults to `nil` (none).
     ///   - sessionProfiles: What each phase asks of its sessions; defaults to none.
+    ///   - calibratedDistanceMeters: The race distance the numbers were calibrated for; defaults to
+    ///     `nil` (none). A value that is not finite or not above zero becomes `nil`.
     public init(
         name: String,
         phases: [CyclePhase] = [],
@@ -101,7 +107,8 @@ public struct TrainingParadigm: Sendable, Codable, Hashable {
         maxLongRunMeters: Double? = 35_000,
         maxBackToBackLongRunPairsPerMicro: [Int: Int] = [:],
         shortenablePhase: CyclePhase? = nil,
-        sessionProfiles: [CyclePhase: [SessionProfile]] = [:]
+        sessionProfiles: [CyclePhase: [SessionProfile]] = [:],
+        calibratedDistanceMeters: Double? = nil
     ) {
         self.name = name
         self.phases = phases
@@ -117,6 +124,7 @@ public struct TrainingParadigm: Sendable, Codable, Hashable {
         self.maxBackToBackLongRunPairsPerMicro = Self.validPairLimits(maxBackToBackLongRunPairsPerMicro)
         self.shortenablePhase = shortenablePhase
         self.sessionProfiles = sessionProfiles
+        self.calibratedDistanceMeters = Self.validCeiling(calibratedDistanceMeters)
     }
 
     /// A ceiling that is finite and above zero, otherwise `nil`.
@@ -149,6 +157,21 @@ public struct TrainingParadigm: Sendable, Codable, Hashable {
         return result
     }
 
+    /// The warning for a plan aimed at `targetRace`, if the race is not the distance the paradigm is
+    /// calibrated for (MVP5-143).
+    ///
+    /// `nil` when ``calibratedDistanceMeters`` is `nil`, when there is no race, when the race is an
+    /// ultra (``Race/isUltra``; the paradigm's ultra settings cover it, ``resolved(for:)``), or when
+    /// its distance is within ``CalibrationWarning/tolerance`` of the calibration distance.
+    ///
+    /// - Parameter targetRace: The race the plan builds towards, if any.
+    public func calibrationWarning(for targetRace: Race?) -> CalibrationWarning? {
+        guard let calibrated = calibratedDistanceMeters, let race = targetRace, !race.isUltra else { return nil }
+        let distance = race.distanceMeters
+        guard distance.isFinite, abs(distance - calibrated) > calibrated * CalibrationWarning.tolerance else { return nil }
+        return CalibrationWarning(raceDistanceMeters: distance, calibratedDistanceMeters: calibrated)
+    }
+
     /// Whether `session` counts as hard under this paradigm.
     ///
     /// - Parameter session: The session to judge.
@@ -168,7 +191,7 @@ public struct TrainingParadigm: Sendable, Codable, Hashable {
 
     private enum CodingKeys: String, CodingKey {
         case name, phases, guardrailOverrides, defaultMix, phaseMixes, hardIntensity, hardSpeed, spacesLongRunsAsHard
-        case minDaysBetweenHardSessions, maxHardSessionsPerMicro, maxLongRunMeters, maxBackToBackLongRunPairsPerMicro, shortenablePhase, sessionProfiles
+        case minDaysBetweenHardSessions, maxHardSessionsPerMicro, maxLongRunMeters, maxBackToBackLongRunPairsPerMicro, shortenablePhase, sessionProfiles, calibratedDistanceMeters
     }
 
     /// Decodes a paradigm; everything but `name` falls back to its default when absent.
@@ -196,6 +219,7 @@ public struct TrainingParadigm: Sendable, Codable, Hashable {
         shortenablePhase = try container.decodeIfPresent(CyclePhase.self, forKey: .shortenablePhase)
         let profiles = try container.decodeIfPresent([String: [LossyProfile]].self, forKey: .sessionProfiles) ?? [:]
         sessionProfiles = Dictionary(profiles.map { (CyclePhase($0.key), $0.value.compactMap(\.profile)) }, uniquingKeysWith: { first, _ in first })
+        calibratedDistanceMeters = Self.validCeiling(try container.decodeIfPresent(Double.self, forKey: .calibratedDistanceMeters))
     }
 
     /// A profile that reads as `nil` when it cannot be decoded (an unknown session type), so one bad entry does not fail the paradigm.
@@ -224,5 +248,6 @@ public struct TrainingParadigm: Sendable, Codable, Hashable {
         try container.encode(Dictionary(uniqueKeysWithValues: maxBackToBackLongRunPairsPerMicro.map { (String($0.key), $0.value) }), forKey: .maxBackToBackLongRunPairsPerMicro)
         try container.encodeIfPresent(shortenablePhase, forKey: .shortenablePhase)
         try container.encode(Dictionary(uniqueKeysWithValues: sessionProfiles.map { ($0.key.id, $0.value) }), forKey: .sessionProfiles)
+        try container.encodeIfPresent(calibratedDistanceMeters, forKey: .calibratedDistanceMeters)
     }
 }

@@ -38,6 +38,8 @@ extension TrainingParadigm {
     /// The mixes, tolerances and spacing were reviewed with the user and set on 2026-10-22
     /// (MVP5-137) against the Run Elite skills (`docs/design/triphasic-design.md`); the per-phase
     /// session profiles (interval work lengths, race-target fractions) are the generator's.
+    /// Its numbers are calibrated for a marathon (``TrainingParadigm/calibratedDistanceMeters``), so a
+    /// shorter target race gets a ``CalibrationWarning`` (MVP5-143).
     /// - Phases: ``CyclePhase/conditioning``, ``CyclePhase/base``, ``CyclePhase/structural``,
     ///   ``CyclePhase/specific``, ``CyclePhase/taper``.
     /// - Distribution: conditioning and base have only easy running, so `medium` and `high`
@@ -83,7 +85,8 @@ extension TrainingParadigm {
         spacesLongRunsAsHard: true,
         minDaysBetweenHardSessions: 3,
         maxBackToBackLongRunPairsPerMicro: [7: 1, 10: 1, 14: 2],
-        shortenablePhase: .specific
+        shortenablePhase: .specific,
+        calibratedDistanceMeters: Race.marathonDistanceMeters
     )
 
     /// The mix of specific and taper: `medium` and `high` intensity and `moderate` and `fast` speed

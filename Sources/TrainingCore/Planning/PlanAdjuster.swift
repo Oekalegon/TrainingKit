@@ -111,7 +111,8 @@ public struct PlanAdjuster: Sendable {
             history: history,
             outcome: outcome,
             today: today,
-            targetRaceID: targetRace?.id
+            targetRaceID: targetRace?.id,
+            calibrationWarning: paradigm?.calibrationWarning(for: targetRace)
         )
     }
 

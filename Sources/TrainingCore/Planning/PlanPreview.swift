@@ -48,6 +48,9 @@ public struct PlanPreview: Sendable, Hashable {
     public var risks: [PlanFinding] { proposal.risks }
     /// The ``Severity/warning`` findings; shown, never blocking.
     public var warnings: [PlanFinding] { proposal.warnings }
+    /// The notice that the paradigm's numbers are not calibrated for the target race's distance, if any
+    /// (MVP5-143); see ``PlanProposal/calibrationWarning``.
+    public var calibrationWarning: CalibrationWarning? { proposal.calibrationWarning }
     /// Whether the proposal has no risk.
     public var isAcceptable: Bool { proposal.isAcceptable }
 }

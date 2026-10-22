@@ -33,6 +33,10 @@ public struct PlanProposal: Sendable, Codable, Hashable {
     public var today: Date
     /// The race the plan builds towards, if any.
     public var targetRaceID: UUID?
+    /// Set when the paradigm's numbers are not calibrated for the target race's distance (MVP5-143);
+    /// `nil` otherwise. A notice for the app to show next to ``warnings``; it never affects
+    /// ``isAcceptable``.
+    public var calibrationWarning: CalibrationWarning?
 
     /// Creates a proposal.
     ///
@@ -45,6 +49,7 @@ public struct PlanProposal: Sendable, Codable, Hashable {
     ///   - outcome: Why the loop stopped.
     ///   - today: The current day.
     ///   - targetRaceID: The race the plan builds towards; defaults to `nil`.
+    ///   - calibrationWarning: The warning that the numbers are not calibrated for the race; defaults to `nil`.
     public init(
         candidate: PlanCandidate,
         evaluation: PlanEvaluation,
@@ -53,7 +58,8 @@ public struct PlanProposal: Sendable, Codable, Hashable {
         history: [PlanIteration] = [],
         outcome: Outcome,
         today: Date,
-        targetRaceID: UUID? = nil
+        targetRaceID: UUID? = nil,
+        calibrationWarning: CalibrationWarning? = nil
     ) {
         self.candidate = candidate
         self.evaluation = evaluation
@@ -63,6 +69,7 @@ public struct PlanProposal: Sendable, Codable, Hashable {
         self.outcome = outcome
         self.today = today
         self.targetRaceID = targetRaceID
+        self.calibrationWarning = calibrationWarning
     }
 
     /// `false` when any finding is a ``Severity/risk``; warnings never make a proposal unacceptable.

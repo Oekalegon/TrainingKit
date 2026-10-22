@@ -391,4 +391,51 @@ struct BuiltInWorkoutTemplatesTests {
 
         #expect(ids.count == BuiltInWorkoutTemplates.all.count)
     }
+
+    @Test("the Run Elite templates offer the notes' ranges, with defaults inside them")
+    func runEliteParameterRanges() throws {
+        let expected: [(WorkoutTemplate, [String: ClosedRange<Double>])] = [
+            (BuiltInWorkoutTemplates.alternationRun, ["build": 10_000...20_000, "reps": 4...10]),
+            (BuiltInWorkoutTemplates.enduranceRepeats, ["reps": 2...30, "distance": 400...6_400, "rest": 20...60]),
+            (BuiltInWorkoutTemplates.speedEnduranceRepeats, ["reps": 6...30, "distance": 200...1_000, "rest": 100...1_000]),
+            (BuiltInWorkoutTemplates.longRunEnduranceIntervals, ["reps": 2...4, "distance": 3_000...8_000, "rest": 60...300, "easy": 1_000...8_000]),
+            (BuiltInWorkoutTemplates.longRunSpeedIntervals, ["easy": 10_000...25_000, "reps": 4...10, "distance": 400...2_000, "rest": 60...300]),
+            (BuiltInWorkoutTemplates.glycogenStoreRun, ["warmup": 1_000...3_000, "strides": 3...6]),
+        ]
+
+        for (template, ranges) in expected {
+            #expect(Set(template.parameters.map(\.key)) == Set(ranges.keys), "\(template.name)")
+            for parameter in template.parameters {
+                #expect(parameter.range == ranges[parameter.key], "\(template.name) \(parameter.key)")
+                #expect(parameter.range?.contains(parameter.defaultValue) == true, "\(template.name) \(parameter.key)")
+            }
+            _ = try template.instantiate()
+        }
+    }
+
+    @Test("the notes' example sessions come out at their stated size with the defaults")
+    func runEliteExamples() throws {
+        // 15 km build, then 8 pairs of 1 km.
+        let alternation = try BuiltInWorkoutTemplates.alternationRun.instantiate()
+        let alternationDistance = alternation.blocks.flatMap { block in
+            Array(repeating: block.steps, count: block.repetitions).flatMap { $0 }
+        }.reduce(0.0) { total, step in
+            if case .distance(let meters) = step.goal { total + meters } else { total }
+        }
+        #expect(alternationDistance == 15_000 + 16_000)
+
+        // 20 km: 2 x 2.5 km easy and 3 x 5 km.
+        let longRun = try BuiltInWorkoutTemplates.longRunEnduranceIntervals.instantiate()
+        let longRunDistance = longRun.blocks.flatMap { block in
+            Array(repeating: block.steps, count: block.repetitions).flatMap { $0 }
+        }.reduce(0.0) { total, step in
+            if case .distance(let meters) = step.goal { total + meters } else { total }
+        }
+        #expect(longRunDistance == 20_000)
+
+        // One 90 s interval at the end, in Zone 5.
+        let store = try BuiltInWorkoutTemplates.glycogenStoreRun.instantiate()
+        let last = try #require(store.blocks.last?.steps.last)
+        #expect(last.goal == .time(90) && last.target == .heartRateZone(5))
+    }
 }

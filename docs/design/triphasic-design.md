@@ -2,7 +2,7 @@
 
 This document writes down the triphasic training method of Andrew Snow's *Run Elite* as the user's own
 Run Elite skill states it, phase by phase, and sets it against the code that exists today. It is input for
-MVP5-137 (dial in the triphasic numbers) and MVP5-138 (ultra). **It changes no code and no number.** Where
+MVP5-137 (dial in the triphasic numbers) and MVP5-138 (ultra). **It changes no triphasic number.** The same PR adds six built-in workout templates for the structures in the notes (§7.3); the paradigm and its numbers are untouched. Where
 the skills disagree, are silent or give a range, the point is listed in [§9](#9-questions-for-the-user)
 and not decided here.
 
@@ -388,6 +388,8 @@ Built-in templates against the skills' numbers (`BuiltInWorkoutTemplates.swift`)
 | Long run with speed play (Long Fartlek) | reps 8-20 | Fartlek is named but not specified |
 
 This table says only whether a skill example could be produced; it does not say the library should change.
+
+This PR adds six templates for the notes' structures (zones follow the user's HR mapping; the notes' examples are the defaults): *Alternation Run* (15 km build + 8 × 1 km Z4 / 1 km Z3), *Muscular Endurance Repeats* (reps 2-30, 400 m-6.4 km, recovery 20-60 s; covers 6 × 1 mile, 2 × 4 miles, 30 × 400 m), *Speed Endurance Repeats* (reps 6-30, 200 m-1 km, distance recovery; covers the 200 m and 400 m examples), *Long run with endurance intervals* (3 × 5 km, 20 km), *Long run with speed intervals* (20 km + 6 × 1000 m) and *Glycogen Store Run*. So the rows above for the 20-30 rep examples, the 1-mile and 4-mile reps, the alternation run and the glycogen store run are now producible. Choices the notes do not give are marked in the doc comments (recoveries of the two long runs, easy-first order, the 100 m stride jog). Special blocks (two sessions in a day) and the undefined very long run are not templates.
 
 ### 7.4 Step targets (MVP5-122)
 

@@ -35,17 +35,26 @@ extension TrainingParadigm {
     /// Triphasic training (Andrew Snow, *Run Elite*): conditioning, base, structural, specific and
     /// taper phases.
     ///
-    /// Only what is settled is encoded; the per-phase session profiles (interval work lengths,
-    /// race-target fractions) are MVP5-100 and the generator's.
+    /// The mixes, tolerances and spacing were reviewed with the user and set on 2026-10-22
+    /// (MVP5-137) against the Run Elite skills (`docs/design/triphasic-design.md`); the per-phase
+    /// session profiles (interval work lengths, race-target fractions) are the generator's.
     /// - Phases: ``CyclePhase/conditioning``, ``CyclePhase/base``, ``CyclePhase/structural``,
     ///   ``CyclePhase/specific``, ``CyclePhase/taper``.
     /// - Distribution: conditioning and base have only easy running, so `medium` and `high`
     ///   intensity are 0 (tolerance 0.05). Conditioning also allows no `moderate`, `fast` or
     ///   `max` speed; base allows slow running and max-speed sprints, but no `moderate` or `fast`
-    ///   work. Structural, specific and taper have no target yet.
+    ///   work (0, tolerance 0.05, so at least 95 % at the two extremes). A max-speed sprint session
+    ///   has no ceiling in base: the skills give none.
+    ///   Structural: `high` 0.10, `medium` 0, speed `fast` 0.10, `moderate` 0, tolerance 0.10, so
+    ///   at most 20 % `high` or `fast` (the skills: at least 80 % at easy pace) and at most 10 %
+    ///   `medium` or `moderate` (no race pace); `max` is unlisted, so sprints in easy runs are
+    ///   allowed. Specific and taper: `medium` and `high` 0.25 and speed `moderate` and `fast` 0.25,
+    ///   tolerance 0.25, so each is at most 50 % (the skills: most miles very easy); the taper keeps
+    ///   the specific mix because the skills only say to keep intensity.
     /// - Hard: intensity of ``IntensityCategory/high`` or more, or ``SpeedLevel/max`` speed, so an
     ///   easy session of maximal 8-second sprints is placed like a hard day.
-    /// - Spacing: at least 2 days between hard sessions; long runs are spaced like hard sessions.
+    /// - Spacing: at least 3 days between hard sessions (Tuesday to Friday: two days in between);
+    ///   long runs are spaced like hard sessions.
     /// - Hard sessions per micro: no limit; the athlete sets the number of sessions per micro.
     public static let triphasic = TrainingParadigm(
         name: "Triphasic",
@@ -61,13 +70,28 @@ extension TrainingParadigm {
                 speedShares: [.moderate: 0, .fast: 0],
                 tolerance: 0.05
             ),
+            .structural: IntensityMix(
+                intensityShares: [.medium: 0, .high: 0.10],
+                speedShares: [.moderate: 0, .fast: 0.10],
+                tolerance: 0.10
+            ),
+            .specific: Self.triphasicKeyWorkoutMix,
+            .taper: Self.triphasicKeyWorkoutMix,
         ],
         hardIntensity: .high,
         hardSpeed: .max,
         spacesLongRunsAsHard: true,
-        minDaysBetweenHardSessions: 2,
+        minDaysBetweenHardSessions: 3,
         maxBackToBackLongRunPairsPerMicro: [7: 1, 10: 1, 14: 2],
         shortenablePhase: .specific
+    )
+
+    /// The mix of specific and taper: `medium` and `high` intensity and `moderate` and `fast` speed
+    /// each 0.25 ± 0.25, so none is more than half the time.
+    private static let triphasicKeyWorkoutMix = IntensityMix(
+        intensityShares: [.medium: 0.25, .high: 0.25],
+        speedShares: [.moderate: 0.25, .fast: 0.25],
+        tolerance: 0.25
     )
 
     /// The built-in paradigms: ``polarized8020`` and ``triphasic``.

@@ -2,7 +2,7 @@
 
 This document writes down the triphasic training method of Andrew Snow's *Run Elite* as the user's own
 Run Elite skill states it, phase by phase, and sets it against the code that exists today. It is input for
-MVP5-137 (dial in the triphasic numbers) and MVP5-138 (ultra). **It changes no triphasic number.** The same PR adds six built-in workout templates for the structures in the notes (§7.3); the paradigm and its numbers are untouched. Where
+MVP5-137 (dial in the triphasic numbers) and MVP5-138 (ultra). **It changes no triphasic number** (the numbers were dialled afterwards, MVP5-137: [§10](#10-the-numbers-as-decided-mvp5-137)). The same PR adds six built-in workout templates for the structures in the notes (§7.3); the paradigm and its numbers are untouched. Where
 the skills disagree, are silent or give a range, the point is listed in [§9](#9-questions-for-the-user)
 and not decided here.
 
@@ -500,3 +500,22 @@ numbers), or **138** (ultra). Each gives the skills, the code and the options, w
 **Questions that block this document:** none. Every point above is listed here and not decided, and the
 description of the skills in §3-§5 stands without an answer. The ones that most shape MVP5-137 are Q1 and Q2
 (profile numbers), Q4 (what is hard) and Q7-Q9 (phase lengths and dropping).
+
+## 10. The numbers as decided (MVP5-137)
+
+Decided with the user on **2026-10-22**, one question per number. Each is a data value in `TrainingParadigm.triphasic`, using the existing `IntensityMix`; no rule was added. A mix lists target ± tolerance, so "at most 20 %" is 0.10 ± 0.10. Categories are checked separately. The evaluator counts a session's whole planned time under its one intensity and speed level, so a hill-sprint session counts entirely as `speed.max`.
+
+| Number | Old | New | Reason |
+|---|---|---|---|
+| Base `medium`, `high`, `moderate`, `fast` | 0 ± 0.05 | **unchanged** (decided) | User: at least 95 % at the two extremes, very easy or very fast and short (skills: at least 80 %, `DIR D-08`; Q6) |
+| Base ceiling on `max` time | none | **none** (decided) | Skills give none; sprints are a few seconds of a session |
+| Structural intensity | none | `high` 0.10, `medium` 0, ±0.10 | Skills: at least 80 % easy, never race pace (`DIR D-15`, `D-17`); suggestion accepted. **Question 3 got no separate answer: confirm** |
+| Structural speed | none | `fast` 0.10, `moderate` 0, ±0.10; `max` unlisted | Fast quality is Z4; sprints on easy days allowed (`DIR D-58`); user answered A |
+| Specific intensity and speed | none | `medium`, `high`, `moderate`, `fast` each 0.25 ± 0.25 (none above 50 %) | Skills: most miles very easy, default more than 50 % (`DIR D-61`); user answered A |
+| Taper intensity and speed | none | same as specific | Skills only say to keep intensity (`DIR D-33`, `D-62`); user answered A |
+| Tolerance | 0.05 | 0.05 where a target is exact (conditioning, base); 0.10 structural; 0.25 specific and taper | The tolerance sets the width of the "at most" ranges |
+| `minDaysBetweenHardSessions` | 2 | **3** | "At least a couple of days between" key workouts (`DIR D-60`), read literally: Tue to Fri |
+| `maxHardSessionsPerMicro` | none | **none** (decided) | Skills cap quality sessions, not the code's "hard" |
+| `hardIntensity`, `hardSpeed` | `.high`, `.max` | **unchanged** (decided) | |
+
+Not decided here (still open in §9): the profile numbers (Q1-Q3), phase lengths and dropping (Q7-Q10), the volume curve (Q14), conditioning content (Q13).

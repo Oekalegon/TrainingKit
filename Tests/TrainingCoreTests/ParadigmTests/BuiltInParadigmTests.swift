@@ -88,13 +88,13 @@ struct BuiltInParadigmTests {
         #expect(findings(.triphasic, [session(0, .low, minutes: 50), session(2, .low, speed: .max, minutes: 10)], phase: .conditioning).contains { $0.subject == "speed.max" })
     }
 
-    @Test("triphasic: a max-speed easy session is hard for spacing; no per-micro limit and no mix in later phases")
+    @Test("triphasic: a max-speed easy session is hard for spacing; no per-micro limit")
     func triphasicHard() {
         let sprints = session(0, .low, speed: .max, minutes: 20)
         let close = [sprints, session(1, .high, speed: .fast, minutes: 30)]
         #expect(findings(.triphasic, close, phase: .base).contains { $0.rule == .hardSessionSpacing })
 
         let many = (0..<5).map { session($0 * 2, .high, speed: .fast, minutes: 30) }
-        #expect(findings(.triphasic, many, length: 14, phase: .structural).isEmpty)
+        #expect(!findings(.triphasic, many, length: 14, phase: .structural).contains { $0.rule == .hardSessionsPerMicro })
     }
 }

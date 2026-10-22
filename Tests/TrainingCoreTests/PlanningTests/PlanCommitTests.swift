@@ -99,12 +99,13 @@ struct PlanCommitTests {
     @Test("a preview of an unfollowed plan says it will not be cancelled")
     func previewUnfollowed() async throws {
         let (store, model) = makeModel()
-        _ = try await addActivePlan(model, store: store, followed: false)
-        // The completed workout on day 4 still makes it followed; remove that signal for this case.
-        let all = try await store.plans(in: Date.distantPast...Date.distantFuture)
-        for plan in all where plan.completedActivityID != nil { try await store.deletePlan(id: plan.id) }
+        let old = try await model.createTrainingPlan(named: "Old", status: .active, asOf: day(0))
+        let w = workout("Old workout")
+        try await store.upsert([w])
+        try await store.upsert([PlannedActivity(workoutID: w.id, date: day(2), planID: old.id)])
         let preview = try await model.preview(proposal(), asOf: day(0))
         #expect(!preview.replacedPlanIsFollowed)
+        #expect(preview.replacedActivities.count == 1)
     }
 
     @Test("committing saves a draft with stamped cycles and workouts and leaves the active plan alone")
@@ -118,8 +119,10 @@ struct PlanCommitTests {
         #expect(model.activeTrainingPlan?.id == old.id)
         #expect(model.trainingPlans.contains { $0.id == plan.id })
         let cycles = try await model.cycles(ofPlan: plan.id, in: day(-30)...day(30))
-        #expect(cycles.map(\.id) == seen.candidate.cycles.map(\.id))
+        #expect(cycles.count == 1)
+        #expect(cycles.first?.id != seen.candidate.cycles[0].id)
         #expect(plan.macroCycleID == cycles.first?.id)
+        #expect(try await model.trainingPlans.first { $0.id == plan.id }?.macroCycleID == cycles.first?.id)
         let stored = try await model.plannedActivities(ofPlan: plan.id, in: day(-30)...day(30))
         #expect(stored.map(\.date).sorted() == [day(1), day(3)])
         #expect(try await store.workout(id: seen.candidate.workouts[0].id) != nil)
@@ -134,7 +137,9 @@ struct PlanCommitTests {
         #expect(model.activeTrainingPlan?.id == first.id)
         #expect(first.status == .active)
         #expect(model.trainingPlans.first { $0.id == followedPlan.id }?.status == .cancelled)
-        #expect(model.trainingPlans.first { $0.id == followedPlan.id }?.cancelledDate != nil)
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = model.athlete.timeZone
+        #expect(model.trainingPlans.first { $0.id == followedPlan.id }?.cancelledDate == calendar.startOfDay(for: day(5)))
         #expect(try await model.plannedActivities(ofPlan: followedPlan.id, in: day(-30)...day(30)).count == 4)
 
         let second = try await model.commit(proposal(), named: "Newer", activate: true, asOf: day(6))
@@ -191,5 +196,88 @@ struct PlanCommitTests {
         await #expect(throws: TrainingPlanError.notConfigured) {
             try await model.commit(proposal(), named: "X", asOf: day(0))
         }
+    }
+
+    @Test("committing the same proposal twice makes two independent plans")
+    func doubleCommit() async throws {
+        let (_, model) = makeModel()
+        let seen = proposal()
+        let first = try await model.commit(seen, named: "One", asOf: day(0))
+        let second = try await model.commit(seen, named: "Two", asOf: day(0))
+        for plan in [first, second] {
+            #expect(try await model.cycles(ofPlan: plan.id, in: day(-30)...day(30)).count == 1)
+            #expect(try await model.plannedActivities(ofPlan: plan.id, in: day(-30)...day(30)).count == 2)
+        }
+        let ids = try await model.plannedActivities(ofPlan: first.id, in: day(-30)...day(30)) + model.plannedActivities(ofPlan: second.id, in: day(-30)...day(30))
+        #expect(Set(ids.map(\.id)).count == 4)
+    }
+
+    @Test("cycle references and parents follow the new ids")
+    func remapsReferences() async throws {
+        let (_, model) = makeModel()
+        let w = workout("Proposed")
+        let macro = TrainingCycle(level: .macro, phase: .base, name: "Macro", dateRange: day(0)...day(13))
+        let micro = TrainingCycle(level: .micro, phase: .base, loadRole: .build, name: "Micro", dateRange: day(0)...day(6), parentID: macro.id)
+        let candidate = PlanCandidate(
+            cycles: [macro, micro], plannedActivities: [PlannedActivity(workoutID: w.id, date: day(1), cycleID: micro.id)],
+            workouts: [w], sessions: [], metrics: []
+        )
+        let seen = PlanProposal(candidate: candidate, evaluation: PlanEvaluation(findings: []), compromises: [], levers: .none, outcome: .acceptable, today: day(0))
+        let plan = try await model.commit(seen, named: "Remap", asOf: day(0))
+        let cycles = try await model.cycles(ofPlan: plan.id, in: day(-30)...day(30))
+        let newMacro = try #require(cycles.first { $0.level == .macro })
+        let newMicro = try #require(cycles.first { $0.level == .micro })
+        #expect(newMicro.parentID == newMacro.id)
+        #expect(try await model.plannedActivities(ofPlan: plan.id, in: day(-30)...day(30)).first?.cycleID == newMicro.id)
+        #expect(model.trainingPlans.first { $0.id == plan.id }?.macroCycleID == newMacro.id)
+    }
+
+    @Test("a proposal workout that would overwrite a different library workout is refused")
+    func workoutCollision() async throws {
+        let (store, model) = makeModel()
+        let seen = proposal()
+        var other = seen.candidate.workouts[0]
+        other.name = "Something else"
+        try await store.upsert([other])
+        await #expect(throws: PlanProposalError.workoutIDCollision([other.id])) {
+            try await model.commit(seen, named: "Clash", asOf: day(0))
+        }
+        #expect(try await store.trainingPlans().isEmpty)
+        #expect(try await store.workout(id: other.id)?.name == "Something else")
+    }
+
+    @Test("planned workouts that name a missing cycle are refused and nothing is written")
+    func danglingCycle() async throws {
+        let (store, model) = makeModel()
+        let w = workout("Proposed")
+        let ghost = UUID()
+        let candidate = PlanCandidate(
+            cycles: [], plannedActivities: [PlannedActivity(workoutID: w.id, date: day(1), cycleID: ghost)],
+            workouts: [w], sessions: [], metrics: []
+        )
+        let seen = PlanProposal(candidate: candidate, evaluation: PlanEvaluation(findings: []), compromises: [], levers: .none, outcome: .acceptable, today: day(0))
+        await #expect(throws: PlanProposalError.danglingCycleReferences([ghost])) {
+            try await model.commit(seen, named: "Dangling", asOf: day(0))
+        }
+        #expect(try await store.trainingPlans().isEmpty)
+        #expect(try await store.workouts().isEmpty)
+    }
+
+    @Test("a failing plan insert leaves no plan, only the saved workouts")
+    func failingInsert() async throws {
+        let (store, model) = makeModel()
+        let w = workout("Proposed")
+        let overlapping = [
+            TrainingCycle(level: .macro, phase: .base, name: "A", dateRange: day(0)...day(13)),
+            TrainingCycle(level: .macro, phase: .base, name: "B", dateRange: day(10)...day(30)),
+        ]
+        let candidate = PlanCandidate(cycles: overlapping, plannedActivities: [PlannedActivity(workoutID: w.id, date: day(1))], workouts: [w], sessions: [], metrics: [])
+        let seen = PlanProposal(candidate: candidate, evaluation: PlanEvaluation(findings: []), compromises: [], levers: .none, outcome: .acceptable, today: day(0))
+        await #expect(throws: CycleStoreError.self) {
+            try await model.commit(seen, named: "Overlap", asOf: day(0))
+        }
+        #expect(try await store.trainingPlans().isEmpty)
+        #expect(model.trainingPlans.isEmpty)
+        #expect(try await store.workout(id: w.id) != nil)
     }
 }

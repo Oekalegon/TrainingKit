@@ -3,7 +3,8 @@ import Foundation
 /// What the athlete sees before committing a ``PlanProposal`` (MVP5-121): the plan itself, how it
 /// would be judged, what it gave up, and what it would replace.
 ///
-/// Built by ``TrainingModel/preview(_:asOf:)``. The views below read the proposal; the only
+/// Built by ``TrainingModel/preview(_:asOf:)``. Like ``PlanProposal`` it holds a series with `.nan` values, so
+/// a preview is not equal to a copy of itself; compare its parts. The views below read the proposal; the only
 /// information that comes from elsewhere is what the plan being replaced holds.
 public struct PlanPreview: Sendable, Hashable {
     /// The proposal being previewed.

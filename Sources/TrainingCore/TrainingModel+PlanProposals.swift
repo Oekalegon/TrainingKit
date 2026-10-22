@@ -34,8 +34,13 @@ extension TrainingModel {
     /// with `activate` the plan is then activated like ``save(_:asOf:)`` does (a followed plan is
     /// cancelled, otherwise the old plan becomes a draft; nothing is deleted).
     ///
-    /// The steps are separate writes: if activation fails the draft stays, and the workouts saved
-    /// before it stay in the library. A proposal with risks can always be saved as a draft; activating
+    /// The plan gets **fresh ids** for its cycles and planned workouts (parents and cycle references
+    /// remapped), so committing the same proposal twice makes two independent plans instead of moving
+    /// the first plan's contents into the second. The proposal's workouts keep their ids: they are
+    /// library entries, saved as they are, and a repeat commit finds them already there.
+    ///
+    /// The steps are separate writes: if the plan insert fails (for instance on overlapping cycles) the
+    /// saved workouts stay in the library, and if activation fails the draft stays. A proposal with risks can always be saved as a draft; activating
     /// it needs `acceptingRisks`.
     ///
     /// - Parameters:
@@ -48,9 +53,11 @@ extension TrainingModel {
     /// - Returns: The stored plan (as it is after the commit, so active if `activate`).
     /// - Throws: ``PlanProposalError/hasRisks(_:)`` for activating without `acceptingRisks`;
     ///   ``PlanProposalError/missingWorkouts(_:)`` if planned workouts refer to workouts that are in
-    ///   neither the proposal nor the library; ``TrainingPlanError/notConfigured`` without a
-    ///   ``StoreSet/trainingPlanStore``; or whatever the stores throw. Nothing is written when it throws
-    ///   one of the first three.
+    ///   neither the proposal nor the library; ``PlanProposalError/workoutIDCollision(_:)`` if a
+    ///   proposal workout would overwrite a different library workout;
+    ///   ``PlanProposalError/danglingCycleReferences(_:)`` if a planned workout names a cycle the
+    ///   proposal lacks; ``TrainingPlanError/notConfigured`` without a ``StoreSet/trainingPlanStore``;
+    ///   or whatever the stores throw. Nothing is written when it throws one of the first five.
     @discardableResult
     public func commit(
         _ proposal: PlanProposal,
@@ -62,14 +69,37 @@ extension TrainingModel {
         guard let store = stores.trainingPlanStore else { throw TrainingPlanError.notConfigured }
         if activate, !acceptingRisks, !proposal.isAcceptable { throw PlanProposalError.hasRisks(proposal.risks) }
 
-        let known = Set(try await stores.workoutStore.workouts().map(\.id)).union(proposal.candidate.workouts.map(\.id))
-        let missing = Set(proposal.candidate.plannedActivities.map(\.workoutID)).subtracting(known)
+        let library = Dictionary(
+            try await stores.workoutStore.workouts().map { ($0.id, $0) }, uniquingKeysWith: { _, latest in latest }
+        )
+        let proposed = Dictionary(proposal.candidate.workouts.map { ($0.id, $0) }, uniquingKeysWith: { _, latest in latest })
+        let collisions = proposed.filter { library[$0.key] != nil && library[$0.key] != $0.value }.keys
+        if !collisions.isEmpty { throw PlanProposalError.workoutIDCollision(collisions.sorted { $0.uuidString < $1.uuidString }) }
+        let missing = Set(proposal.candidate.plannedActivities.map(\.workoutID)).subtracting(Set(library.keys).union(proposed.keys))
         if !missing.isEmpty { throw PlanProposalError.missingWorkouts(missing.sorted { $0.uuidString < $1.uuidString }) }
+        let cycleIDs = Set(proposal.candidate.cycles.map(\.id))
+        let dangling = Set(proposal.candidate.plannedActivities.compactMap(\.cycleID)).subtracting(cycleIDs)
+        if !dangling.isEmpty { throw PlanProposalError.danglingCycleReferences(dangling.sorted { $0.uuidString < $1.uuidString }) }
 
-        let draft = proposal.draftPlan(named: name)
+        var draft = proposal.draftPlan(named: name)
         let stamped = proposal.stamped(with: draft)
-        try await stores.workoutStore.upsert(proposal.candidate.workouts)
-        try await store.insertTrainingPlan(draft, cycles: stamped.cycles, plannedActivities: stamped.plannedActivities)
+        let newCycleIDs = Dictionary(uniqueKeysWithValues: stamped.cycles.map { ($0.id, UUID()) })
+        let cycles = stamped.cycles.map { cycle in
+            TrainingCycle(
+                id: newCycleIDs[cycle.id] ?? UUID(), level: cycle.level, phase: cycle.phase, loadRole: cycle.loadRole,
+                name: cycle.name, dateRange: cycle.dateRange, parentID: cycle.parentID.flatMap { newCycleIDs[$0] },
+                targetRaceID: cycle.targetRaceID, planID: draft.id
+            )
+        }
+        let activities = stamped.plannedActivities.map { activity in
+            PlannedActivity(
+                workoutID: activity.workoutID, date: activity.date, expectedLoadOverride: activity.expectedLoadOverride,
+                cycleID: activity.cycleID.flatMap { newCycleIDs[$0] }, planID: draft.id
+            )
+        }
+        draft.macroCycleID = draft.macroCycleID.flatMap { newCycleIDs[$0] }
+        try await stores.workoutStore.upsert(proposal.candidate.workouts.filter { library[$0.id] == nil })
+        try await store.insertTrainingPlan(draft, cycles: cycles, plannedActivities: activities)
         trainingPlans = try await store.trainingPlans()
 
         guard activate else { return draft }

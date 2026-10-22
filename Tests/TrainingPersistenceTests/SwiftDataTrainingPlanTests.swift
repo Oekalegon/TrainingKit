@@ -122,5 +122,21 @@ struct SwiftDataTrainingPlanTests {
         let active = try await model.commit(proposal, named: "Active", activate: true, asOf: day(0))
         let plans = try await store.trainingPlans()
         #expect(plans.filter { $0.status == .active }.map(\.id) == [active.id])
+        // The same proposal committed twice: each plan keeps its own cycle and planned workout.
+        #expect(try await model.cycles(ofPlan: draft.id, in: day(-1)...day(20)).count == 1)
+        #expect(try await model.cycles(ofPlan: active.id, in: day(-1)...day(20)).count == 1)
+        #expect(try await model.plannedActivities(ofPlan: draft.id, in: day(-1)...day(20)).count == 1)
+
+        let preview = try await model.preview(proposal, asOf: day(0))
+        #expect(preview.replacedPlan?.id == active.id)
+        #expect(preview.replacedActivities.count == 1)
+
+        let lost = UUID()
+        var broken = proposal
+        broken.candidate.plannedActivities = [PlannedActivity(workoutID: lost, date: day(2))]
+        broken.candidate.workouts = []
+        await #expect(throws: PlanProposalError.missingWorkouts([lost])) {
+            try await model.commit(broken, named: "Broken", asOf: self.day(0))
+        }
     }
 }

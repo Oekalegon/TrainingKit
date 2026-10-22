@@ -164,6 +164,21 @@ struct WorkoutKitBridgeTests {
         #expect(customWorkout.blocks[0].steps[0].purpose == .work)
     }
 
+    @Test("the Glycogen Store Run maps: a distance warmup in the warmup slot, strides with no alert, a 90 s interval to finish")
+    func glycogenStoreRunMaps() throws {
+        let workout = try BuiltInWorkoutTemplates.glycogenStoreRun.instantiate()
+
+        let customWorkout = try bridge.customWorkout(from: workout)
+
+        #expect(customWorkout.warmup?.goal == .distance(2000, .meters))
+        #expect(customWorkout.cooldown == nil)
+        #expect(customWorkout.blocks.count == 2)
+        #expect(customWorkout.blocks[0].iterations == 4)
+        #expect(customWorkout.blocks[0].steps[0].step.goal == .distance(100, .meters))
+        #expect(customWorkout.blocks[0].steps[0].step.alert == nil)
+        #expect(customWorkout.blocks[1].steps[0].step.goal == .time(90, .seconds))
+    }
+
     @Test("a multi-step leading block does not get split out as a warmup, since CustomWorkout's warmup slot only holds one step")
     func multiStepLeadingBlockStaysAnIntervalBlock() throws {
         let workout = StructuredWorkout(

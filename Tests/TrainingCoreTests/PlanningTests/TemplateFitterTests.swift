@@ -52,6 +52,45 @@ struct TemplateAnalysisTests {
         #expect(try BuiltInWorkoutTemplates.baseHillSprints.analysis(athlete: athlete).workLength == 8...8)
     }
 
+    @Test("zone 2 work in a repeated block with a recovery is an interval, an easy run's zone 2 body is not")
+    func zoneTwoIntervals() throws {
+        let repeats = try BuiltInWorkoutTemplates.enduranceRepeats.analysis(athlete: athlete)
+        let pace = athlete.paceModel
+        #expect(repeats.workLength == pace.duration(forMeters: 400, atZone: 2)...pace.duration(forMeters: 6_400, atZone: 2))
+        #expect(repeats.workCount == 2...30)
+        // The long run's easy legs are zone 2 work outside the repeated block.
+        let longRun = try BuiltInWorkoutTemplates.longRunEnduranceIntervals.analysis(athlete: athlete)
+        #expect(longRun.workCount == 2...4)
+        #expect(try BuiltInWorkoutTemplates.longRun.analysis(athlete: athlete).workLength == nil)
+        #expect(try BuiltInWorkoutTemplates.easyRun.analysis(athlete: athlete).workLength == nil)
+    }
+
+    @Test("strides with no target are not hard work, the 90 s interval after them is")
+    func stridesAreNotHard() throws {
+        let analysis = try BuiltInWorkoutTemplates.glycogenStoreRun.analysis(athlete: athlete)
+        #expect(analysis.workLength == 90...90 && analysis.workCount == 1...1)
+    }
+
+    @Test("a repeated block without a recovery step is not an interval set, nor is a single run")
+    func needsRecoveryAndRepetition() throws {
+        func template(repetitions: TemplateValue<Int>, recovery: Bool) -> WorkoutTemplate {
+            var steps = [TemplateStep(kind: .work, goal: .time(.fixed(300)), target: .heartRateZone(2))]
+            if recovery { steps.append(TemplateStep(kind: .recovery, goal: .time(.fixed(30)), target: .heartRateZone(1))) }
+            return WorkoutTemplate(name: "t", sport: .running, parameters: [], blocks: [TemplateBlock(steps: steps, repetitions: repetitions)])
+        }
+        #expect(try template(repetitions: .fixed(4), recovery: true).analysis(athlete: athlete).workLength == 300...300)
+        #expect(try template(repetitions: .fixed(4), recovery: false).analysis(athlete: athlete).workLength == nil)
+        #expect(try template(repetitions: .fixed(1), recovery: true).analysis(athlete: athlete).workLength == nil)
+    }
+
+    @Test("the fitter matches a zone 2 interval template on work length and sets the effort distance")
+    func fitterMatchesZoneTwoIntervals() throws {
+        let profile = SessionProfile(sessionType: .interval, workLength: 300...700)
+        let result = TemplateFitter.fit(profile: profile, targetSeconds: 3_600, templates: [BuiltInWorkoutTemplates.enduranceRepeats, BuiltInWorkoutTemplates.easyRun], athlete: athlete)
+        guard case .fit(let choice) = result else { Issue.record("expected a fit"); return }
+        #expect(choice.template.name == "Muscular Endurance Repeats")
+    }
+
     @Test("the analysis carries sport, tag and archived state")
     func carriesMetadata() throws {
         var template = BuiltInWorkoutTemplates.easyRun

@@ -3,7 +3,8 @@ import Foundation
 /// A plan the generator proposes, with everything the athlete needs to judge it: the findings of
 /// every severity, what was given up, and how the adjust loop got here (MVP5-120).
 ///
-/// Built by ``PlanAdjuster``. It is not stored; the app previews it (MVP5-121) and, on commit, writes
+/// Built by ``PlanAdjuster``. It inherits the NaN caveat of ``PlanCandidate/metrics``: encode it with a
+/// non-conforming-float strategy, and compare its parts rather than whole proposals. It is not stored; the app previews it (MVP5-121) and, on commit, writes
 /// ``draftPlan(named:id:)`` with the cycles and workouts of ``stamped(with:)``.
 public struct PlanProposal: Sendable, Codable, Hashable {
     /// Why the adjust loop stopped.
@@ -106,36 +107,5 @@ public struct PlanProposal: Sendable, Codable, Hashable {
             return activity
         }
         return (cycles, activities)
-    }
-}
-
-/// One adjustment ``PlanAdjuster`` tried, and what it did to the risks.
-public struct PlanIteration: Sendable, Codable, Hashable {
-    /// What was tried.
-    public var adjustment: PlanAdjustment
-    /// The rule of the risk finding it was meant to answer.
-    public var answering: PlanRule
-    /// The number of ``Severity/risk`` findings before.
-    public var risksBefore: Int
-    /// The number of ``Severity/risk`` findings after.
-    public var risksAfter: Int
-    /// Whether the adjustment was kept: it lowered the number of risks, or kept it and moved the
-    /// risks closer to their thresholds.
-    public var kept: Bool
-
-    /// Creates an iteration.
-    ///
-    /// - Parameters:
-    ///   - adjustment: What was tried.
-    ///   - answering: The rule of the risk it was meant to answer.
-    ///   - risksBefore: The number of risks before.
-    ///   - risksAfter: The number of risks after.
-    ///   - kept: Whether the adjustment was kept.
-    public init(adjustment: PlanAdjustment, answering: PlanRule, risksBefore: Int, risksAfter: Int, kept: Bool) {
-        self.adjustment = adjustment
-        self.answering = answering
-        self.risksBefore = risksBefore
-        self.risksAfter = risksAfter
-        self.kept = kept
     }
 }

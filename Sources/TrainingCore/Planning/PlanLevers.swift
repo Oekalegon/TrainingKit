@@ -5,7 +5,8 @@ import Foundation
 ///
 /// The adjuster never edits workouts itself. It hands the provider a set of levers and the provider
 /// rebuilds the plan with them applied. ``none`` is the plan as first asked for. Days and micros are
-/// identified by their start of day, in the timezone of the plan's metrics.
+/// identified by their start of day, in the timezone of the plan's metrics. `volumeScales` has date
+/// keys, so it encodes as a flat array of alternating keys and values, not as a JSON object.
 public struct PlanLevers: Sendable, Codable, Hashable {
     /// The factor on the volume of a micro, by the start of the micro: 0.9 asks for 90 % of the
     /// volume the curve gave it. A micro that is not listed keeps 1.

@@ -13,6 +13,8 @@ private final class StubProvider: PlanCandidateProvider, @unchecked Sendable {
     let sessions: @Sendable (PlanLevers) -> [PlanSession]
     let compromises: [PlanCompromise]
     let failing: Bool
+    let role: MicroLoadRole
+    let outsideDays: Bool
     private let lock = NSLock()
     private var _calls: [PlanLevers] = []
     var calls: [PlanLevers] { lock.withLock { _calls } }
@@ -24,8 +26,12 @@ private final class StubProvider: PlanCandidateProvider, @unchecked Sendable {
         monotony: @escaping @Sendable (Int, PlanLevers) -> Double = { _, _ in .nan },
         sessions: @escaping @Sendable (PlanLevers) -> [PlanSession] = { _ in [] },
         compromises: [PlanCompromise] = [],
-        failing: Bool = false
+        failing: Bool = false,
+        role: MicroLoadRole = .build,
+        outsideDays: Bool = false
     ) {
+        self.role = role
+        self.outsideDays = outsideDays
         self.microLength = microLength
         self.microCount = microCount
         self.tsb = tsb
@@ -42,10 +48,11 @@ private final class StubProvider: PlanCandidateProvider, @unchecked Sendable {
         if failing { throw StubError.failed }
         let days = microLength * microCount
         let macro = TrainingCycle(level: .macro, phase: .build, name: "Macro", dateRange: Self.day(0)...Self.day(days - 1))
+        let offset = outsideDays ? microLength : 0
         let micros = (0..<microCount).map { index in
             TrainingCycle(
-                level: .micro, phase: .build, loadRole: .build, name: "Micro \(index)",
-                dateRange: Self.day(index * microLength)...Self.day((index + 1) * microLength - 1), parentID: macro.id
+                level: .micro, phase: .build, loadRole: role, name: "Micro \(index)",
+                dateRange: Self.day(offset + index * microLength)...Self.day(offset + (index + 1) * microLength - 1), parentID: macro.id
             )
         }
         let metrics = (0..<days).map { index in
@@ -270,5 +277,63 @@ struct PlanAdjusterTests {
         #expect(decoded.levers == proposal.levers)
         #expect(decoded.compromises == proposal.compromises)
         #expect(decoded.evaluation == proposal.evaluation)
+    }
+
+    @Test("Easing the last hard session answers too many hard sessions in a micro", arguments: [(7, 2), (10, 3), (14, 4)])
+    func easeFixesHardSessionsPerMicro(microLength: Int, maximum: Int) async throws {
+        // One session more than the paradigm allows, three days apart, in the second micro.
+        let days = (0...maximum).map { microLength + 3 * $0 }
+        let provider = StubProvider(microLength: microLength, sessions: { levers in
+            days.filter { !levers.easedDays.contains(StubProvider.day($0)) && !levers.droppedDays.contains(StubProvider.day($0)) }
+                .map { PlanSession(day: StubProvider.day($0), seconds: 3600, intensity: .high, speed: .slow) }
+        })
+        let proposal = try await PlanAdjuster(paradigm: .polarized8020).propose(using: provider, today: today)
+        #expect(proposal.isAcceptable)
+        #expect(proposal.history.map(\.adjustment) == [.easeSession(day: day(days.last!))])
+        #expect(proposal.history.first?.answering == .hardSessionsPerMicro)
+    }
+
+    @Test("A finding on a day outside every micro has no volume or down-week to try")
+    func findingOutsideMicros() async throws {
+        let provider = StubProvider(microCount: 2, tsb: { index, _ in index == 0 ? -40 : 0 }, outsideDays: true)
+        let proposal = try await PlanAdjuster().propose(using: provider, today: today)
+        #expect(!proposal.isAcceptable)
+        #expect(proposal.outcome == .noAdjustmentLeft)
+        #expect(proposal.history.isEmpty)
+    }
+
+    @Test("A recovery micro gets volume steps but no down-week")
+    func noDownWeekForRecovery() async throws {
+        let provider = StubProvider(tsb: { index, _ in index == 8 ? -40 : 0 }, role: .recovery)
+        let proposal = try await PlanAdjuster(maxIterations: 100).propose(using: provider, today: today)
+        #expect(!proposal.history.contains { if case .downWeek = $0.adjustment { true } else { false } })
+        #expect(proposal.outcome == .noAdjustmentLeft)
+    }
+
+    @Test("Volume steps stop at the floor")
+    func volumeFloor() async throws {
+        let provider = StubProvider(tsb: { index, levers in
+            index == 8 ? -40 + (1 - levers.volumeScale(forMicro: StubProvider.day(7))) : 0
+        })
+        let proposal = try await PlanAdjuster(maxIterations: 100, minVolumeScale: 0.7).propose(using: provider, today: today)
+        #expect(proposal.levers.volumeScale(forMicro: day(7)) == 0.7)
+        #expect(provider.calls.allSatisfy { $0.volumeScale(forMicro: StubProvider.day(7)) >= 0.7 })
+    }
+
+    @Test("No iterations means the first plan comes back as it is")
+    func zeroIterations() async throws {
+        let provider = StubProvider(tsb: { index, _ in index == 8 ? -40 : 0 })
+        let proposal = try await PlanAdjuster(maxIterations: 0).propose(using: provider, today: today)
+        #expect(proposal.outcome == .iterationLimit)
+        #expect(proposal.history.isEmpty)
+        #expect(provider.calls == [.none])
+    }
+
+    @Test("Tuning values are clamped")
+    func clamped() {
+        let adjuster = PlanAdjuster(maxIterations: -3, volumeStep: 1.5, minVolumeScale: 2)
+        #expect(adjuster.maxIterations == 0)
+        #expect(adjuster.volumeStep == 0.99)
+        #expect(adjuster.minVolumeScale == 1)
     }
 }

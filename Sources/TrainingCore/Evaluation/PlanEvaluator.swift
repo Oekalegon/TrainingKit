@@ -2,10 +2,10 @@ import Foundation
 
 /// Checks a plan's projected `[FitnessMetrics]` against injury-risk and progress guardrails.
 ///
-/// Pure functions over already-computed metrics — the MVP 2 generator loop is propose →
-/// ``DailyLoadSeries`` → ``FitnessMetricsCalculator`` → `PlanEvaluator` → adjust → repeat until
-/// ``PlanEvaluation/isAcceptable``, but MVP 1 already exposes this as a read-only "how does my
-/// current plan look" check.
+/// Pure functions over already-computed metrics — the generator loop,
+/// ``PlanAdjuster``, is propose → ``DailyLoadSeries`` → ``FitnessMetricsCalculator`` →
+/// `PlanEvaluator` → adjust → repeat until ``PlanEvaluation/isAcceptable``, but this also works as a
+/// read-only "how does my current plan look" check.
 ///
 /// The metric rules (TSB band, monotony, strain, race-day TSB) always run, and the longest-run
 /// rule runs on whatever `sessions` it is given. The three

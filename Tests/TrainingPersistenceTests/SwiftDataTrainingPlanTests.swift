@@ -97,4 +97,30 @@ struct SwiftDataTrainingPlanTests {
         }
         #expect(try await store.trainingPlan(id: doomed.id) == nil)
     }
+
+    @Test("committing a proposal stores its workouts, cycles and planned workouts, and activation keeps one active plan")
+    func commitProposal() async throws {
+        let (store, stores) = try makeStores()
+        let model = TrainingModel(stores: stores, athlete: AthleteProfile.fixture())
+        let proposed = workout()
+        let macro = TrainingCycle(level: .macro, phase: .base, name: "Macro", dateRange: day(0)...day(13))
+        let candidate = PlanCandidate(
+            cycles: [macro], plannedActivities: [PlannedActivity(workoutID: proposed.id, date: day(2))],
+            workouts: [proposed], sessions: [], metrics: []
+        )
+        let proposal = PlanProposal(
+            candidate: candidate, evaluation: PlanEvaluation(findings: []), compromises: [],
+            levers: .none, outcome: .acceptable, today: day(0)
+        )
+
+        let draft = try await model.commit(proposal, named: "Draft", asOf: day(0))
+        #expect(try await store.trainingPlan(id: draft.id)?.status == .draft)
+        #expect(try await store.workout(id: proposed.id) != nil)
+        #expect(try await model.cycles(ofPlan: draft.id, in: day(-1)...day(20)).count == 1)
+        #expect(try await model.plannedActivities(ofPlan: draft.id, in: day(-1)...day(20)).count == 1)
+
+        let active = try await model.commit(proposal, named: "Active", activate: true, asOf: day(0))
+        let plans = try await store.trainingPlans()
+        #expect(plans.filter { $0.status == .active }.map(\.id) == [active.id])
+    }
 }

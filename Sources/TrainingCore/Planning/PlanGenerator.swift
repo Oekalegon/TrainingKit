@@ -23,7 +23,7 @@ import Foundation
 /// 6. Each run gets a ``SessionProfile`` (the paradigm's profile for the micro's phase and the run's
 ///    session type, else one with the session type only). ``SessionProfile/progressedWorkLength(microIndex:of:)``
 ///    steps the work length across the phase, and ``TemplateFitter`` picks and sizes a template for an
-///    equal share of the micro's duration, with the previous micro's templates for rotation. No
+///    equal share of the micro's duration, with the previous micro's templates (only that one) for rotation. No
 ///    template is ``PlanCompromise/missingTemplate(microStart:_:)`` and the run is left out.
 /// 7. ``StepTargetResolver`` writes the athlete's zones and the profile's race-target fraction into the
 ///    steps, and the run becomes a ``PlannedActivity`` in the micro's cycle.
@@ -65,13 +65,23 @@ public struct PlanGenerator: PlanCandidateProvider {
 
     /// Builds the first plan and lets ``PlanAdjuster`` adjust it until it has no risk or its bound is hit.
     ///
+    /// The races are checked for race-day TSB at the start of their day in the athlete's time zone.
+    ///
     /// - Returns: The proposal: acceptable, or the plan as it stands with its risks. Its compromises
     ///   are those of the candidate and the adjustments the loop kept; its
     ///   ``PlanProposal/calibrationWarning`` is set when the paradigm is not calibrated for the race.
     /// - Throws: ``PlanGeneratorError`` when no plan can be built, or `CancellationError`.
     public func generate() async throws -> PlanProposal {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = request.athlete.timeZone
+        // The series is keyed on starts of day, and the race-day TSB rule looks the race up by its date.
+        let races = ([request.targetRace] + request.otherRaces).map { race -> Race in
+            var race = race
+            race.date = calendar.startOfDay(for: race.date)
+            return race
+        }
         let adjuster = PlanAdjuster(
-            races: [request.targetRace] + request.otherRaces,
+            races: races,
             paradigm: request.paradigm,
             targetRace: request.targetRace,
             guardrails: request.guardrails
@@ -106,7 +116,6 @@ public struct PlanGenerator: PlanCandidateProvider {
         var previousTemplates: [UUID] = []
         let spacesLong = request.paradigm.resolved(for: request.targetRace).spacesLongRunsAsHard
         let assigner = DayAssigner(paradigm: request.paradigm)
-        let classifier = PlannedIntensityClassifier()
         let weeklyLimit = request.preferences.maxWeeklyVolume[.running]
 
         for (index, micro) in micros.enumerated() {
@@ -130,47 +139,27 @@ public struct PlanGenerator: PlanCandidateProvider {
             let phaseMicros = micros.indices.filter { micros[$0].phase == micro.phase }
             let position = phaseMicros.firstIndex(of: index) ?? 0
             var chosen: [UUID] = []
-            var fitted: TimeInterval = 0
+            var fittedSeconds: TimeInterval = 0
             for run in assignment.assignments where !levers.droppedDays.contains(run.day) {
                 let eased = levers.easedDays.contains(run.day) && Self.easedTypes.contains(run.runType)
-                let sessionType = (eased ? RunType.easy : run.runType).sessionType
-                let profile = request.paradigm.sessionProfiles[micro.phase]?.first { $0.sessionType == sessionType }
-                    ?? SessionProfile(sessionType: sessionType)
-                let fit = TemplateFitter.fit(
-                    profile: profile,
-                    targetSeconds: share,
-                    templates: request.templates,
-                    previous: previousTemplates,
-                    workLength: profile.progressedWorkLength(microIndex: position, of: phaseMicros.count),
-                    athlete: request.athlete
+                let fitted = try fitRun(
+                    run, eased: eased, micro: micro, position: position, phaseCount: phaseMicros.count,
+                    share: share, previous: previousTemplates, cycleID: microCycles[index].id
                 )
-                guard case .fit(let choice) = fit else {
-                    compromises.append(.missingTemplate(microStart: microStart, profile))
+                guard case .run(let result) = fitted else {
+                    if case .missing(let profile) = fitted { compromises.append(.missingTemplate(microStart: microStart, profile)) }
                     continue
                 }
-                let workout: StructuredWorkout
-                do {
-                    workout = try choice.template.instantiate(values: choice.values)
-                } catch {
-                    throw PlanGeneratorError.workoutTemplate(error)
-                }
-                let resolved = StepTargetResolver.resolve(
-                    workout,
-                    on: run.day,
-                    athlete: request.athlete,
-                    raceTarget: request.targetRace.specificPhaseTarget,
-                    raceTargetFraction: profile.raceTargetFraction
-                ).workout
-                workouts.append(resolved)
-                planned.append(PlannedActivity(workoutID: resolved.id, date: run.day, cycleID: microCycles[index].id))
-                planSessions.append(classifier.session(on: run.day, for: resolved, athlete: request.athlete))
-                chosen.append(choice.template.id)
-                fitted += choice.seconds
+                workouts.append(result.workout)
+                planned.append(result.planned)
+                planSessions.append(result.session)
+                chosen.append(result.templateID)
+                fittedSeconds += result.seconds
                 if Self.hardTypes.contains(run.runType) && !eased { hardDates.append(run.day) }
                 if run.runType == .long && !eased { longDates.append(run.day) }
             }
             previousTemplates = chosen
-            if let weeklyLimit, fitted * 7 / Double(volume.lengthDays) > weeklyLimit.amount * (1 + 1e-9) {
+            if let weeklyLimit, fittedSeconds * 7 / Double(volume.lengthDays) > weeklyLimit.amount * (1 + 1e-9) {
                 overWeeklyLimit = true
             }
         }
@@ -187,6 +176,59 @@ public struct PlanGenerator: PlanCandidateProvider {
             cycles: cycles, plannedActivities: planned.sorted { $0.date < $1.date }, workouts: workouts,
             sessions: sessions, metrics: metrics, compromises: compromises
         )
+    }
+
+    private enum RunFit {
+        case run(FittedRun)
+        case missing(SessionProfile)
+    }
+
+    private struct FittedRun {
+        let workout: StructuredWorkout
+        let planned: PlannedActivity
+        let session: PlanSession
+        let templateID: UUID
+        let seconds: TimeInterval
+    }
+
+    /// Steps 6 and 7 for one run: profile, template fit, instantiation, step targets, and the
+    /// planned workout and session that come of it.
+    private func fitRun(
+        _ run: DayAssignment, eased: Bool, micro: Microcycle, position: Int, phaseCount: Int,
+        share: TimeInterval, previous: [UUID], cycleID: UUID
+    ) throws -> RunFit {
+        let sessionType = (eased ? RunType.easy : run.runType).sessionType
+        let profile = request.paradigm.sessionProfiles[micro.phase]?.first { $0.sessionType == sessionType }
+            ?? SessionProfile(sessionType: sessionType)
+        let fit = TemplateFitter.fit(
+            profile: profile,
+            targetSeconds: share,
+            templates: request.templates,
+            previous: previous,
+            workLength: profile.progressedWorkLength(microIndex: position, of: phaseCount),
+            athlete: request.athlete
+        )
+        guard case .fit(let choice) = fit else { return .missing(profile) }
+        let workout: StructuredWorkout
+        do {
+            workout = try choice.template.instantiate(values: choice.values)
+        } catch {
+            throw PlanGeneratorError.workoutTemplate(error)
+        }
+        let resolved = StepTargetResolver.resolve(
+            workout,
+            on: run.day,
+            athlete: request.athlete,
+            raceTarget: request.targetRace.specificPhaseTarget,
+            raceTargetFraction: profile.raceTargetFraction
+        ).workout
+        return .run(FittedRun(
+            workout: resolved,
+            planned: PlannedActivity(workoutID: resolved.id, date: run.day, cycleID: cycleID),
+            session: PlannedIntensityClassifier().session(on: run.day, for: resolved, athlete: request.athlete),
+            templateID: choice.template.id,
+            seconds: choice.seconds
+        ))
     }
 
     private static let hardTypes: Set<RunType> = [.interval, .threshold]

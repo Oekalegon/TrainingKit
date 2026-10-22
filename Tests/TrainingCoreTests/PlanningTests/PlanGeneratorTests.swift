@@ -304,6 +304,54 @@ struct PlanGeneratorTests {
         #expect(proposal.compromises.contains(.overriddenPreference(.includeConditioning)))
     }
 
+    @Test("history seeds the series, so the TSB rules run on the plan's first weeks")
+    func withHistory() async throws {
+        var history: [Activity] = []
+        for offset in stride(from: -84, to: 0, by: 2) {
+            history.append(Activity(source: .manual, sport: .running, start: day(offset), duration: 3600, perceivedExertion: 5))
+        }
+        var withHistory = request(race: race(micros: 16))
+        withHistory.activities = history
+        let proposal = try await PlanGenerator.generate(withHistory)
+
+        #expect(proposal.candidate.metrics.first?.day == day(-84))
+        #expect(proposal.candidate.metrics.first { $0.day >= day(0) }?.isWarmingUp == false)
+        #expect(proposal.candidate.metrics.contains { !$0.isProjected })
+    }
+
+    @Test("recent sessions reach the evaluator, so a long jump in the first week is a risk")
+    func recentSessions() async throws {
+        var asked = request(race: race(micros: 16))
+        asked.recentSessions = [PlanSession(day: day(-3), seconds: 600, intensity: .low, speed: .slow, isLongRun: true)]
+        let candidate = try await PlanGenerator(request: asked).candidate(levers: .none, today: monday)
+
+        #expect(candidate.sessions.first?.day == day(-3))
+        let findings = PlanEvaluator().evaluate(candidate.metrics, races: [], sessions: candidate.sessions)
+        #expect(findings.findings.contains { $0.rule == .longestRun })
+    }
+
+    @Test("a time zone with daylight saving keeps the layout, the runs and the series on whole days")
+    func daylightSaving() async throws {
+        let zone = TimeZone(identifier: "Europe/Amsterdam")!
+        var local = Calendar(identifier: .gregorian)
+        local.timeZone = zone
+        let start = local.date(from: DateComponents(year: 2026, month: 10, day: 12))!
+        let raceDay = local.date(from: DateComponents(year: 2026, month: 10, day: 12 + 8 * 7 - 1, hour: 10))!
+        var asked = request(race: Race(name: "R", date: raceDay, priority: .primary, distanceMeters: Race.marathonDistanceMeters), macro: MacroTemplate(name: "Short", mesoBlocks: [.init(phase: .base, microCount: 4), .init(phase: .specific, microCount: 3), .init(phase: .taper, microCount: 1)]))
+        asked.athlete = AthleteProfile.fixture(timeZoneIdentifier: zone.identifier)
+        asked.start = start
+        asked.today = start
+        let proposal = try await PlanGenerator.generate(asked)
+
+        let micros = proposal.candidate.cycles.filter { $0.level == .micro }
+        #expect(micros.count == 8)
+        #expect(micros.allSatisfy { $0.dateRange.lowerBound == local.startOfDay(for: $0.dateRange.lowerBound) })
+        #expect(proposal.candidate.plannedActivities.allSatisfy { $0.date == local.startOfDay(for: $0.date) })
+        #expect(proposal.candidate.metrics.last?.day == local.startOfDay(for: raceDay))
+        // The race has a time of day; its race-day TSB is still looked up on the day's start.
+        #expect(proposal.candidate.metrics.contains { $0.day == local.startOfDay(for: raceDay) })
+    }
+
     @Test("a cancelled generation throws and returns nothing")
     func cancellation() async {
         let request = request(race: race(micros: 16))

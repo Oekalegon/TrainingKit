@@ -673,6 +673,253 @@ public enum BuiltInWorkoutTemplates {
         uuid: "8F5D6E4E-6E0E-4B8B-9C1A-9E6F9F1C1A13", name: "Sarcomere Runs", titleName: "Downhill Repeats", effortRPE: 8
     )
 
+    // MARK: Run Elite workouts
+
+    // The structures below come from the user's Run Elite notes (`notes/run-elite.md`). Their zones follow the
+    // user's own mapping of the book's percentages of race speed to heart-rate zones (86-94 % Z2, 95-99 % Z3
+    // lower half, 106-114 % Z4, 3-5K pace Z4-5); the template cannot say which percentage a zone stands for,
+    // so the phase's race-target fraction does that (``StepTargetResolver``).
+
+    /// Alternation run (Run Elite, Specific): a long run that alternates continuously between faster and
+    /// slower than race pace.
+    ///
+    /// A fixed 5-minute Zone 1 warmup, an easy Zone 2 run of `build` (10-20 km) metres, then `reps`
+    /// (4-10) times 1 km in Zone 4 (about 106 % of race speed) and 1 km in Zone 3 (about 95 %, the
+    /// recovery that is almost race pace), then a fixed 5-minute Zone 1 cooldown. The notes' example is 15 km
+    /// of build and 15 km of alternation (7.5 pairs); the default of 8 pairs rounds up. The first half
+    /// "builds" in speed, which a single Zone 2 step cannot show; the athlete eases into it.
+    public static let alternationRun = WorkoutTemplate(
+        id: UUID(uuidString: "8F5D6E4E-6E0E-4B8B-9C1A-9E6F9F1C1A14")!,
+        name: "Alternation Run",
+        sport: .running,
+        parameters: [
+            WorkoutTemplateParameter(
+                key: "build", name: "Easy build distance", unit: .meters, defaultValue: 15_000, range: 10_000...20_000
+            ),
+            WorkoutTemplateParameter(key: "reps", name: "Repetitions", unit: .count, defaultValue: 8, range: 4...10),
+        ],
+        blocks: [
+            TemplateBlock(steps: [
+                TemplateStep(kind: .warmup, goal: .time(.fixed(5 * 60)), target: .heartRateZone(1)),
+            ]),
+            TemplateBlock(steps: [
+                TemplateStep(kind: .work, goal: .distance(.parameter("build")), target: .heartRateZone(2)),
+            ]),
+            TemplateBlock(
+                steps: [
+                    TemplateStep(kind: .work, goal: .distance(.fixed(1_000)), target: .heartRateZone(4)),
+                    TemplateStep(kind: .recovery, goal: .distance(.fixed(1_000)), target: .heartRateZone(3)),
+                ],
+                repetitions: .parameter("reps")
+            ),
+            TemplateBlock(steps: [
+                TemplateStep(kind: .cooldown, goal: .time(.fixed(5 * 60)), target: .heartRateZone(1)),
+            ]),
+        ],
+        sessionType: .long
+    )
+
+    /// Muscular endurance repeats (Run Elite, Support endurance quality): repeats at 86-94 % of race speed
+    /// with short recoveries.
+    ///
+    /// A fixed 5-minute Zone 1 warmup, then `reps` (2-30) times a Zone 2 effort of `distance` (400 m to
+    /// 6.4 km) and a Zone 1 recovery of `rest` seconds (20-60), then a fixed 5-minute Zone 1 cooldown.
+    /// The notes' progression is 6 x 1 mile, 2 x 4 miles and 30 x 400 m with recoveries of 20-30 s; the
+    /// default is the mile repeats. A single continuous tempo is not offered, since the notes add
+    /// distance with intervals.
+    public static let enduranceRepeats = WorkoutTemplate(
+        id: UUID(uuidString: "8F5D6E4E-6E0E-4B8B-9C1A-9E6F9F1C1A15")!,
+        name: "Muscular Endurance Repeats",
+        titleName: "Endurance Repeats",
+        sport: .running,
+        parameters: [
+            WorkoutTemplateParameter(key: "reps", name: "Repetitions", unit: .count, defaultValue: 6, range: 2...30),
+            WorkoutTemplateParameter(
+                key: "distance", name: "Effort distance", unit: .meters, defaultValue: 1_600, range: 400...6_400
+            ),
+            WorkoutTemplateParameter(key: "rest", name: "Recovery", unit: .minutes, defaultValue: 30, range: 20...60),
+        ],
+        blocks: [
+            TemplateBlock(steps: [
+                TemplateStep(kind: .warmup, goal: .time(.fixed(5 * 60)), target: .heartRateZone(1)),
+            ]),
+            TemplateBlock(
+                steps: [
+                    TemplateStep(kind: .work, goal: .distance(.parameter("distance")), target: .heartRateZone(2)),
+                    TemplateStep(kind: .recovery, goal: .time(.parameter("rest")), target: .heartRateZone(1)),
+                ],
+                repetitions: .parameter("reps")
+            ),
+            TemplateBlock(steps: [
+                TemplateStep(kind: .cooldown, goal: .time(.fixed(5 * 60)), target: .heartRateZone(1)),
+            ]),
+        ],
+        sessionType: .interval
+    )
+
+    /// Speed endurance repeats (Run Elite, Support fast quality): repeats at 106-114 % of race speed with a
+    /// jog recovery of the same kind of distance.
+    ///
+    /// A fixed 5-minute Zone 1 warmup, then `reps` (6-30) times a Zone 4 effort of `distance` (200 m to
+    /// 1 km) and a Zone 1 recovery of `rest` metres (100 m to 1 km), then a fixed 5-minute Zone 1
+    /// cooldown. The notes' progression is 20-24 x 200 m with 200 m recovery and 6 x 400 m blocks; the
+    /// default is 20 x 200 m with 200 m. The 3-mile tempo of its last step is ``tempoRun``.
+    public static let speedEnduranceRepeats = WorkoutTemplate(
+        id: UUID(uuidString: "8F5D6E4E-6E0E-4B8B-9C1A-9E6F9F1C1A16")!,
+        name: "Speed Endurance Repeats",
+        sport: .running,
+        parameters: [
+            WorkoutTemplateParameter(key: "reps", name: "Repetitions", unit: .count, defaultValue: 20, range: 6...30),
+            WorkoutTemplateParameter(
+                key: "distance", name: "Effort distance", unit: .meters, defaultValue: 200, range: 200...1_000
+            ),
+            WorkoutTemplateParameter(
+                key: "rest", name: "Recovery distance", unit: .meters, defaultValue: 200, range: 100...1_000
+            ),
+        ],
+        blocks: [
+            TemplateBlock(steps: [
+                TemplateStep(kind: .warmup, goal: .time(.fixed(5 * 60)), target: .heartRateZone(1)),
+            ]),
+            TemplateBlock(
+                steps: [
+                    TemplateStep(kind: .work, goal: .distance(.parameter("distance")), target: .heartRateZone(4)),
+                    TemplateStep(kind: .recovery, goal: .distance(.parameter("rest")), target: .heartRateZone(1)),
+                ],
+                repetitions: .parameter("reps")
+            ),
+            TemplateBlock(steps: [
+                TemplateStep(kind: .cooldown, goal: .time(.fixed(5 * 60)), target: .heartRateZone(1)),
+            ]),
+        ],
+        sessionType: .interval
+    )
+
+    /// Long run with endurance intervals (Run Elite, Support): a long run made of blocks at 86-94 % of race
+    /// speed, e.g. 3 x 5 km at 94 %.
+    ///
+    /// A fixed 5-minute Zone 1 warmup, an easy Zone 2 run of `easy` metres, `reps` (2-4) times a Zone 2
+    /// effort of `distance` (3-8 km) and a Zone 1 recovery of `rest` seconds (1-5 minutes), another easy
+    /// Zone 2 run of `easy` metres, and a fixed 5-minute Zone 1 cooldown. With the defaults the
+    /// intervals and the two easy runs are 20 km, the notes' example. The notes give no recovery length;
+    /// 3 minutes is this template's.
+    public static let longRunEnduranceIntervals = WorkoutTemplate(
+        id: UUID(uuidString: "8F5D6E4E-6E0E-4B8B-9C1A-9E6F9F1C1A17")!,
+        name: "Long run with endurance intervals",
+        titleName: "Long Run Intervals",
+        sport: .running,
+        parameters: [
+            WorkoutTemplateParameter(key: "reps", name: "Repetitions", unit: .count, defaultValue: 3, range: 2...4),
+            WorkoutTemplateParameter(
+                key: "distance", name: "Effort distance", unit: .meters, defaultValue: 5_000, range: 3_000...8_000
+            ),
+            WorkoutTemplateParameter(
+                key: "rest", name: "Recovery", unit: .minutes, defaultValue: 3 * 60, range: 60...5 * 60
+            ),
+            WorkoutTemplateParameter(
+                key: "easy", name: "Easy distance before and after", unit: .meters, defaultValue: 2_500, range: 1_000...8_000
+            ),
+        ],
+        blocks: [
+            TemplateBlock(steps: [
+                TemplateStep(kind: .warmup, goal: .time(.fixed(5 * 60)), target: .heartRateZone(1)),
+            ]),
+            TemplateBlock(steps: [
+                TemplateStep(kind: .work, goal: .distance(.parameter("easy")), target: .heartRateZone(2)),
+            ]),
+            TemplateBlock(
+                steps: [
+                    TemplateStep(kind: .work, goal: .distance(.parameter("distance")), target: .heartRateZone(2)),
+                    TemplateStep(kind: .recovery, goal: .time(.parameter("rest")), target: .heartRateZone(1)),
+                ],
+                repetitions: .parameter("reps")
+            ),
+            TemplateBlock(steps: [
+                TemplateStep(kind: .work, goal: .distance(.parameter("easy")), target: .heartRateZone(2)),
+            ]),
+            TemplateBlock(steps: [
+                TemplateStep(kind: .cooldown, goal: .time(.fixed(5 * 60)), target: .heartRateZone(1)),
+            ]),
+        ],
+        sessionType: .long
+    )
+
+    /// Long run with speed intervals (Run Elite, Support fast quality): an easy long run plus repeats at
+    /// 106-114 % of race speed, e.g. 20 km easy plus 6 x 1000 m.
+    ///
+    /// A fixed 5-minute Zone 1 warmup, an easy Zone 2 run of `easy` metres (10-25 km), then `reps` (4-10)
+    /// times a Zone 4 effort of `distance` (400 m to 2 km) and a Zone 1 recovery of `rest` seconds
+    /// (1-5 minutes), and a fixed 5-minute Zone 1 cooldown. The notes give neither the order nor the
+    /// recovery length; easy first and 2 minutes are this template's.
+    public static let longRunSpeedIntervals = WorkoutTemplate(
+        id: UUID(uuidString: "8F5D6E4E-6E0E-4B8B-9C1A-9E6F9F1C1A18")!,
+        name: "Long run with speed intervals",
+        titleName: "Long Run Speed",
+        sport: .running,
+        parameters: [
+            WorkoutTemplateParameter(
+                key: "easy", name: "Easy distance", unit: .meters, defaultValue: 20_000, range: 10_000...25_000
+            ),
+            WorkoutTemplateParameter(key: "reps", name: "Repetitions", unit: .count, defaultValue: 6, range: 4...10),
+            WorkoutTemplateParameter(
+                key: "distance", name: "Effort distance", unit: .meters, defaultValue: 1_000, range: 400...2_000
+            ),
+            WorkoutTemplateParameter(key: "rest", name: "Recovery", unit: .minutes, defaultValue: 2 * 60, range: 60...5 * 60),
+        ],
+        blocks: [
+            TemplateBlock(steps: [
+                TemplateStep(kind: .warmup, goal: .time(.fixed(5 * 60)), target: .heartRateZone(1)),
+            ]),
+            TemplateBlock(steps: [
+                TemplateStep(kind: .work, goal: .distance(.parameter("easy")), target: .heartRateZone(2)),
+            ]),
+            TemplateBlock(
+                steps: [
+                    TemplateStep(kind: .work, goal: .distance(.parameter("distance")), target: .heartRateZone(4)),
+                    TemplateStep(kind: .recovery, goal: .time(.parameter("rest")), target: .heartRateZone(1)),
+                ],
+                repetitions: .parameter("reps")
+            ),
+            TemplateBlock(steps: [
+                TemplateStep(kind: .cooldown, goal: .time(.fixed(5 * 60)), target: .heartRateZone(1)),
+            ]),
+        ],
+        sessionType: .long
+    )
+
+    /// Glycogen store run (Run Elite, race eve): a short run 24-36 hours before the race that ends with one
+    /// 90-second interval at 3-5K pace; the carbohydrate meal that follows is the point of it.
+    ///
+    /// A Zone 1 warmup of `warmup` metres (1-3 km), `strides` (3-6) times a 100 m stride with no target
+    /// ("quick and relaxed") and a Zone 1 jog of 100 m, then one fixed 90-second Zone 5 interval. There is
+    /// no cooldown. The notes do not say how the strides are recovered; the 100 m jog is this template's.
+    /// The meal (400-600 kcal of carbohydrate straight after) is not part of the workout.
+    public static let glycogenStoreRun = WorkoutTemplate(
+        id: UUID(uuidString: "8F5D6E4E-6E0E-4B8B-9C1A-9E6F9F1C1A19")!,
+        name: "Glycogen Store Run",
+        sport: .running,
+        parameters: [
+            WorkoutTemplateParameter(key: "warmup", name: "Warmup distance", unit: .meters, defaultValue: 2_000, range: 1_000...3_000),
+            WorkoutTemplateParameter(key: "strides", name: "Strides", unit: .count, defaultValue: 4, range: 3...6),
+        ],
+        blocks: [
+            TemplateBlock(steps: [
+                TemplateStep(kind: .warmup, goal: .distance(.parameter("warmup")), target: .heartRateZone(1)),
+            ]),
+            TemplateBlock(
+                steps: [
+                    TemplateStep(kind: .work, goal: .distance(.fixed(100))),
+                    TemplateStep(kind: .recovery, goal: .distance(.fixed(100)), target: .heartRateZone(1)),
+                ],
+                repetitions: .parameter("strides")
+            ),
+            TemplateBlock(steps: [
+                TemplateStep(kind: .work, goal: .time(.fixed(90)), target: .heartRateZone(5)),
+            ]),
+        ],
+        sessionType: .interval
+    )
+
     /// Every built-in template, in the order they should appear in a library UI.
-    public static let all: [WorkoutTemplate] = [recoveryRun, easyRun, longRun, tempoRun, baseHillSprints, shortIntervalRun, shortIntervalRunTrack, maxHRTest, lthrTest, fastFinishRun, cruiseIntervalRun, longFartlekRun, longRunFastFinish, fartlekZone4, fartlekZone5, hillRepetitionRun, longIntervalRun, mixedIntervalRun, sarcomereRun]
+    public static let all: [WorkoutTemplate] = [recoveryRun, easyRun, longRun, tempoRun, baseHillSprints, shortIntervalRun, shortIntervalRunTrack, maxHRTest, lthrTest, fastFinishRun, cruiseIntervalRun, longFartlekRun, longRunFastFinish, fartlekZone4, fartlekZone5, hillRepetitionRun, longIntervalRun, mixedIntervalRun, sarcomereRun, alternationRun, enduranceRepeats, speedEnduranceRepeats, longRunEnduranceIntervals, longRunSpeedIntervals, glycogenStoreRun]
 }

@@ -100,6 +100,9 @@ See `docs/design/trainingKit-design.md` in the package repository for the full m
 - ``CalibrationWarning``
 - ``PlanCandidate``
 - ``PlanCandidateProvider``
+- ``PlanGenerator``
+- ``PlanRequest``
+- ``PlanGeneratorError``
 - ``PlanPreview``
 - ``PlanProposalError``
 - ``DayAssigner``

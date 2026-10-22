@@ -43,7 +43,7 @@ Groundwork laid for paradigms (MVP5-102/103): `CyclePhase` is a named, paradigm-
 
 Training paradigms (MVP5-102): `TrainingParadigm` (named phases in order, `PlanGuardrails.Overrides`, the settings of three paradigm rules) with `IntensityMix` targets per phase, and `PlanSession` with a `SpeedLevel` next to `IntensityCategory` (hill sprints are low intensity but max speed). `PlanEvaluator` gains `intensityDistribution` (warning), `hardSessionSpacing` and `hardSessionsPerMicro` (risks), which run only when a paradigm is supplied. The built-in 80/20 and triphasic paradigms are MVP5-103.
 
-Built-in paradigms (MVP5-103): `TrainingParadigm.polarized8020` and `.triphasic` (`builtIn` lists them), rules data only. Triphasic encodes its phases, the easy-only conditioning and base mixes, max-speed sprints as hard for placement, and 2-day spacing; the structural/specific session profiles wait for MVP5-100, and layout (micro length, meso pattern, phase lengths) for the generator.
+Built-in paradigms (MVP5-103): `TrainingParadigm.polarized8020` and `.triphasic` (`builtIn` lists them), rules data only. Triphasic encodes its phases, the easy-only conditioning and base mixes, max-speed sprints as hard for placement, and 2-day spacing (3 days since MVP5-137); the structural/specific session profiles wait for MVP5-100, and layout (micro length, meso pattern, phase lengths) for the generator.
 
 Polarized numbers (MVP5-136): reviewed and kept except per-phase `high` targets (base/taper 0.2, build 0.22, peak 0.25; medium 0, tolerance 0.05, 2 days between hard sessions, 2/3/4 hard sessions per 7/10/14-day micro, long runs spaced as hard); `PolarizedNumbersTests` pins them and their boundaries.
 

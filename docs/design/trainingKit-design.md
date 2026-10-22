@@ -747,7 +747,7 @@ Long runs (`PlanSession.isLongRun`, set from the workout's `sessionType` tag, MV
 
 #### Template fit (MVP5-118)
 
-A phase asks for sessions as data: `TrainingParadigm.sessionProfiles[phase]` is a list of `SessionProfile` (a `SessionType`, and optionally a work-length range in seconds, a work-count range and a `raceTargetFraction` that `StepTargetResolver` (MVP5-122) turns into step targets). A profile is a request, not a `PlanSession`. The built-in paradigms carry none yet; the triphasic numbers are MVP5-100.
+A phase asks for sessions as data: `TrainingParadigm.sessionProfiles[phase]` is a list of `SessionProfile` (a `SessionType`, and optionally a work-length range in seconds, a work-count range and a `raceTargetFraction` that `StepTargetResolver` (MVP5-122) turns into step targets). A profile is a request, not a `PlanSession`. The built-in paradigms carry none yet; the triphasic profile numbers are not decided (the questions are in [triphasic-design.md](triphasic-design.md) §9).
 
 `WorkoutTemplate.analysis(athlete:)` reads what a template contains, the athlete's own as much as a built-in one: it instantiates the template with every parameter at the low end of its range and at the high end (every step grows with its parameters) and reports the shortest and longest *hard work step* (`.work` at zone 3 or higher, or RPE 7 or more, or `.work` at zone 2 in an interval set: a block repeated by a parameter or more than once that also has a recovery step, so 6 × 1 mile at zone 2 counts and an easy run's zone 2 body does not; pace, power and heart-rate-range targets are not counted), the work count, the total work time and the total duration. Distance steps are timed with the pace model, so the analysis needs the athlete.
 

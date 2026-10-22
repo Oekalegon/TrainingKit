@@ -91,6 +91,14 @@ See `docs/design/trainingKit-design.md` in the package repository for the full m
 - ``StepTargetResolution``
 - ``UnresolvedStep``
 - ``UnresolvedReason``
+- ``PlanAdjuster``
+- ``PlanProposal``
+- ``PlanIteration``
+- ``PlanAdjustment``
+- ``PlanLevers``
+- ``PlanCompromise``
+- ``PlanCandidate``
+- ``PlanCandidateProvider``
 - ``DayAssigner``
 - ``DayAssignment``
 - ``DayAssignmentResult``

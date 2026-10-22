@@ -1,7 +1,7 @@
 import Foundation
 
 /// One guardrail observation from ``PlanEvaluator``.
-public struct PlanFinding: Sendable, Hashable {
+public struct PlanFinding: Sendable, Codable, Hashable {
     /// The day this finding applies to — the day the rule's signal was computed for, or the start
     /// of the relevant cycle for a cycle-aware rule.
     public let day: Date

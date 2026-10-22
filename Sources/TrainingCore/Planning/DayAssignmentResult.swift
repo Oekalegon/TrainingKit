@@ -2,7 +2,7 @@
 public struct DayAssignmentResult: Sendable, Hashable {
     /// The placed runs, in date order and, within a day, in day-part order.
     public let assignments: [DayAssignment]
-    /// The requested sessions that could not be placed; the generator reports each as a compromise.
+    /// The requested sessions that could not be placed; the generator reports each as ``PlanCompromise/unplacedSession(microStart:_:)``.
     public let dropped: [DroppedSession]
 
     /// Creates a result.

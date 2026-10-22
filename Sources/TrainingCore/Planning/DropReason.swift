@@ -1,5 +1,5 @@
 /// Why ``DayAssigner`` could not place a requested session.
-public enum DropReason: Sendable, Hashable {
+public enum DropReason: Sendable, Codable, Hashable {
     /// No day of the micro has a free run left.
     case noFreeDay
     /// There are free runs, but no day allows the session's run type, because the athlete named it

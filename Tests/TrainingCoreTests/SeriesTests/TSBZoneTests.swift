@@ -49,4 +49,15 @@ struct TSBZoneTests {
 
         #expect(metrics.tsbZone() == .injuryRisk)
     }
+
+    @Test("the middle of a zone: -20, -2.5 and 15 with the default guardrails, none for the open-ended zones")
+    func midpoints() {
+        #expect(TSBZone.training.midpoint() == -20)
+        #expect(TSBZone.recovery.midpoint() == -2.5)
+        #expect(TSBZone.race.midpoint() == 15)
+        #expect(TSBZone.injuryRisk.midpoint() == nil)
+        #expect(TSBZone.detraining.midpoint() == nil)
+        #expect(TSBZone.race.midpoint(guardrails: PlanGuardrails(minTSBOnRaceDay: 10, maxTSBOnRaceDay: 30)) == 20)
+        #expect(TSBZone.recovery.midpoint(guardrails: PlanGuardrails(minTSBOnRaceDay: 10, maxTSBOnRaceDay: 30)) == 0)
+    }
 }

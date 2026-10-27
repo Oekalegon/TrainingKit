@@ -22,7 +22,9 @@ import Foundation
 /// and lowers micros where the guardrails ask, and reports the volume it reached. It does not
 /// read ``PlanPreferences/maxWeeklyVolume``; the caller passes the peak, capped by that limit if
 /// the athlete set one. The fractions are design defaults, not training prescriptions, and can be
-/// changed per builder.
+/// changed per builder. ``PlanGenerator`` uses the curve as a ceiling: it sizes each micro to its TSB
+/// zone under the build volume of its place in the ramp (the fractions set to 1), and falls back on
+/// the curve with its fractions where there is no TSB to aim at yet.
 public struct VolumeCurveBuilder: Sendable, Hashable {
     /// A recovery micro's volume relative to the preceding build micro; defaults to 0.6, like
     /// ``MesocycleTemplate/recoveryLoadFraction``.

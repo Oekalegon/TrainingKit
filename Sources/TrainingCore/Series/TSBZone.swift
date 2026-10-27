@@ -40,6 +40,19 @@ public enum TSBZone: Sendable, Codable, Hashable, CaseIterable {
         ]
     }
 
+    /// The middle of the zone, in TSB points: -20 for ``training``, -2.5 for ``recovery`` and 15 for
+    /// ``race`` with the default guardrails. `nil` for ``injuryRisk`` and ``detraining``, which have
+    /// no other end to be the middle of.
+    ///
+    /// The plan generator aims a micro's end-of-micro TSB at this value (MVP5-147).
+    ///
+    /// - Parameter guardrails: Where ``race``'s boundaries come from; defaults to `PlanGuardrails()`.
+    public func midpoint(guardrails: PlanGuardrails = PlanGuardrails()) -> Double? {
+        let bounds = Self.lowerBounds(guardrails: guardrails)
+        guard let index = bounds.firstIndex(where: { $0.zone == self }), index > 0, index + 1 < bounds.count else { return nil }
+        return (bounds[index].lowerBound + bounds[index + 1].lowerBound) / 2
+    }
+
     /// Classifies `tsb` into its zone.
     ///
     /// A `tsb` of `.nan` (not reachable today — unlike ``FitnessMetrics/monotony``/`.strain`,

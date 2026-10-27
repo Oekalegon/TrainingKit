@@ -30,10 +30,10 @@ public struct DefaultSeriesEngine: SeriesEngine {
     /// Creates the engine.
     ///
     /// - Parameters:
-    ///   - estimator: Estimates the load of planned activities and races; defaults to ``TRIMPPlanEstimator``.
+    ///   - estimator: Estimates the load of planned activities and races; defaults to `TRIMPPlanEstimator`.
     ///   - loadCalculators: Tried in order per completed activity.
     ///   - parameters: The CTL/ATL time constants.
-    ///   - races: The races whose load is added on their day, like ``TrainingModel`` does; defaults to
+    ///   - races: The races whose load is added on their day, like `TrainingModel` does; defaults to
     ///     none. The engine's ``metrics(activities:plans:workouts:athlete:today:)`` has no races
     ///     argument, so pass the athlete's races here when the sandbox should show the same series.
     public init(

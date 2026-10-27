@@ -167,14 +167,16 @@ struct PlanGeneratorTests {
     func unplacedSession() async throws {
         var availability = RunAvailability()
         availability[.sunday] = [.morning]
-        let proposal = try await PlanGenerator.generate(request(race: race(micros: 16), preferences: PlanPreferences(runAvailability: availability)))
+        let asked = request(race: race(micros: 16), preferences: PlanPreferences(runAvailability: availability))
+        let proposal = try await PlanGenerator.generate(asked)
 
         let dropped = proposal.compromises.compactMap { compromise -> DroppedSession? in
             if case .unplacedSession(_, let session) = compromise { session } else { nil }
         }
-        // A hard session a micro; the last micro's only free day is race day, so its long run is dropped too.
-        #expect(dropped.count == 17)
-        #expect(dropped.filter { $0.kind == .hard }.count == 16)
+        // The hard sessions of every micro (2 in a 7-day micro); the last micro's only free day is race day, so its long run is dropped too.
+        #expect(asked.hardSessionsPerMicro == 2)
+        #expect(dropped.count == 16 * asked.hardSessionsPerMicro + 1)
+        #expect(dropped.filter { $0.kind == .hard }.count == 16 * asked.hardSessionsPerMicro)
         #expect(dropped.filter { $0.kind == .long }.map(\.reason) == [.noFreeDay])
     }
 

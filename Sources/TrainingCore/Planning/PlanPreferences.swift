@@ -31,6 +31,14 @@ public struct PlanPreferences: Sendable, Codable, Hashable {
     /// otherwise and reports that the preference was overridden.
     public var includeConditioning: Bool
 
+    /// The fewest days between two hard sessions (and between long runs, when the paradigm spaces them
+    /// as hard), or `nil` (the default) for the paradigm's own ``TrainingParadigm/minDaysBetweenHardSessions``.
+    /// 2 means one easy day in between, 3 two. At least 1; a smaller value is stored as `nil`.
+    ///
+    /// The generator applies it to both the day assignment and the paradigm rules the plan is
+    /// evaluated against, so a plan is not flagged for the spacing the athlete asked for.
+    public var minDaysBetweenHardSessions: Int?
+
     /// The ceiling on a long run for a plan aimed at `targetRace`, in meters.
     ///
     /// Only an ultra target has one: `nil` for any other race, or none. For an ultra it is the
@@ -54,20 +62,24 @@ public struct PlanPreferences: Sendable, Codable, Hashable {
     ///     defaults to `nil` (the paradigm's ceiling applies). A value that is not finite or not
     ///     above zero is stored as `nil`.
     ///   - includeConditioning: Whether the athlete wants a conditioning phase; defaults to `false`.
+    ///   - minDaysBetweenHardSessions: The fewest days between two hard sessions; defaults to `nil` (the
+    ///     paradigm's value). A value below 1 is stored as `nil`.
     public init(
         runAvailability: RunAvailability = RunAvailability(),
         maxWeeklyVolume: [Sport: VolumeTarget] = [:],
         maxLongRunMeters: Double? = nil,
-        includeConditioning: Bool = false
+        includeConditioning: Bool = false,
+        minDaysBetweenHardSessions: Int? = nil
     ) {
         self.includeConditioning = includeConditioning
+        self.minDaysBetweenHardSessions = minDaysBetweenHardSessions.flatMap { $0 >= 1 ? $0 : nil }
         self.maxLongRunMeters = maxLongRunMeters.flatMap { $0.isFinite && $0 > 0 ? $0 : nil }
         self.runAvailability = runAvailability
         self.maxWeeklyVolume = maxWeeklyVolume
     }
 
     private enum CodingKeys: String, CodingKey {
-        case runAvailability, maxWeeklyVolume, maxLongRunMeters, includeConditioning
+        case runAvailability, maxWeeklyVolume, maxLongRunMeters, includeConditioning, minDaysBetweenHardSessions
     }
 
     /// One sport's limit, as stored: `Sport` encodes as an object, so a dictionary keyed by it
@@ -97,14 +109,16 @@ public struct PlanPreferences: Sendable, Codable, Hashable {
         maxWeeklyVolume = limits
         maxLongRunMeters = (try? container.decodeIfPresent(Double.self, forKey: .maxLongRunMeters)).flatMap { $0.isFinite && $0 > 0 ? $0 : nil }
         includeConditioning = (try? container.decodeIfPresent(Bool.self, forKey: .includeConditioning)) ?? false
+        minDaysBetweenHardSessions = (try? container.decodeIfPresent(Int.self, forKey: .minDaysBetweenHardSessions)).flatMap { $0 >= 1 ? $0 : nil }
     }
 
-    /// Encodes the preferences; an empty ``maxWeeklyVolume``, a `nil` ``maxLongRunMeters`` and a `false` ``includeConditioning`` are left out.
+    /// Encodes the preferences; an empty ``maxWeeklyVolume``, a `nil` ``maxLongRunMeters``, a `nil` ``minDaysBetweenHardSessions`` and a `false` ``includeConditioning`` are left out.
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(runAvailability, forKey: .runAvailability)
         try container.encodeIfPresent(maxLongRunMeters, forKey: .maxLongRunMeters)
         if includeConditioning { try container.encode(true, forKey: .includeConditioning) }
+        try container.encodeIfPresent(minDaysBetweenHardSessions, forKey: .minDaysBetweenHardSessions)
         if !maxWeeklyVolume.isEmpty {
             let sorter = JSONEncoder()
             sorter.outputFormatting = JSONEncoder.OutputFormatting.sortedKeys

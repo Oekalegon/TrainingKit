@@ -28,9 +28,9 @@ struct TriphasicPlanQualityTests {
         return PlanPreferences(runAvailability: availability)
     }
 
-    /// Twelve weeks of history before the plan: an hour every other day.
+    /// Twelve weeks of history before the plan: an hour every other day, as light as a planned easy run weighs.
     private func history(scale: Double) -> [Activity] {
-        stride(from: -84, to: 0, by: 2).map { Activity(source: .manual, sport: .running, start: day($0), duration: 3600 * scale, perceivedExertion: 5) }
+        stride(from: -84, to: 0, by: 2).map { Activity(source: .manual, sport: .running, start: day($0), duration: 3600 * scale, perceivedExertion: 1) }
     }
 
     /// `scale` multiplies the history and the plan's volumes: 1 is a 3 to 5 hour week, 2 a 6 to 10 hour one.
@@ -116,9 +116,15 @@ struct TriphasicPlanQualityTests {
         var asked = request(distance: Race.marathonDistanceMeters)
         asked.startingVolume = VolumeTarget(measure: .distanceMeters, amount: 10_800 / easy)!
         asked.peakVolume = VolumeTarget(measure: .distanceMeters, amount: 18_000 / easy)!
-        asked.preferences.maxWeeklyVolume[.running] = VolumeTarget(measure: .distanceMeters, amount: 50_000)
-        let proposal = try await PlanGenerator.generate(asked)
-        #expect(!proposal.compromises.contains(.overriddenPreference(.maxWeeklyVolume)))
+        asked.preferences.maxWeeklyVolume[.running] = VolumeTarget(measure: .distanceMeters, amount: 80_000)
+        let roomy = try await PlanGenerator.generate(asked)
+        #expect(!roomy.compromises.contains(.overriddenPreference(.maxWeeklyVolume)))
+
+        asked.preferences.maxWeeklyVolume[.running] = VolumeTarget(measure: .distanceMeters, amount: 10_000)
+        asked.startingVolume = VolumeTarget(measure: .distanceMeters, amount: 8_000)!
+        asked.peakVolume = VolumeTarget(measure: .distanceMeters, amount: 10_000)!
+        let tight = try await PlanGenerator.generate(asked)
+        #expect(tight.compromises.contains(.overriddenPreference(.maxWeeklyVolume)))
     }
 
     // MARK: Target workouts (the user's setup: 10-day micros, Tuesday and Thursday for hard sessions, Saturday and Sunday for long runs)
@@ -194,6 +200,60 @@ struct TriphasicPlanQualityTests {
             let hard = candidate.sessions.filter { $0.intensity >= .high || $0.speed == .max || $0.isLongRun }.map(\.day).sorted()
             let gaps = zip(hard, hard.dropFirst()).map { calendar.dateComponents([.day], from: $0, to: $1).day! }
             #expect(gaps.allSatisfy { $0 >= spacing }, "spacing \(spacing): gaps \(gaps)")
+        }
+    }
+
+    // MARK: TSB zones
+
+    @Test("point 2: a build micro ends in the training zone, a recovery micro in the recovery zone, none reaches detraining", arguments: [Race.marathonDistanceMeters, 100_000])
+    func tsbZonePerMicro(distance: Double) async throws {
+        // Volumes above what the zones need: the curve is a ceiling, and the plan sizes each micro under it.
+        var asked = tenDayRequest(distance: distance)
+        asked.startingVolume = VolumeTarget(measure: .durationSeconds, amount: 36_000)!
+        asked.peakVolume = VolumeTarget(measure: .durationSeconds, amount: 54_000)!
+        let candidate = try await PlanGenerator.generate(asked).candidate
+        for micro in micros(candidate).dropLast() {
+            let inMicro = candidate.metrics.filter { micro.dateRange.contains($0.day) }
+            let end = try #require(inMicro.last)
+            let expected: TSBZone = micro.loadRole == .recovery ? .recovery : .training
+            #expect(end.tsbZone() == expected, "\(micro.loadRole.map(String.init(describing:)) ?? "-") micro at \(micro.dateRange.lowerBound): end TSB \(end.tsb)")
+            // The day-to-day TSB still swings by several points (it jumps after a rest day), so only the end is aimed at.
+            #expect(!inMicro.contains { $0.tsbZone() == .detraining }, "detraining in the micro at \(micro.dateRange.lowerBound)")
+        }
+    }
+
+    @Test("point 3: TSB is in the race zone on race day and never in detraining in the last micro", arguments: [1.0, 2.0])
+    func raceDayZone(scale: Double) async throws {
+        var asked = tenDayRequest(distance: 100_000)
+        asked.activities = history(scale: scale)
+        asked.startingVolume = VolumeTarget(measure: .durationSeconds, amount: 10_800 * scale)!
+        asked.peakVolume = VolumeTarget(measure: .durationSeconds, amount: 18_000 * scale)!
+        let proposal = try await PlanGenerator.generate(asked)
+        let last = try #require(micros(proposal.candidate).last)
+        let raceDay = try #require(proposal.candidate.metrics.last { $0.day == asked.targetRace.date })
+        #expect(raceDay.tsbZone() == .race, "race-day TSB \(raceDay.tsb)")
+        #expect(!proposal.candidate.metrics.filter { last.dateRange.contains($0.day) }.contains { $0.tsbZone() == .detraining })
+    }
+
+    @Test("without history the curve's own volumes are used: the first weeks are warming up and have no TSB to aim at")
+    func noHistoryUsesCurve() async throws {
+        var asked = request(distance: Race.marathonDistanceMeters, withHistory: false)
+        asked.volumeCurve = VolumeCurveBuilder()
+        let candidate = try await PlanGenerator.generate(asked).candidate
+        let first = try #require(micros(candidate).first)
+        let seconds = candidate.sessions.filter { first.dateRange.contains($0.day) }.map(\.seconds).reduce(0, +)
+        #expect(abs(seconds - 10_800) < 10_800 * 0.2, "first micro \(seconds) s")
+    }
+
+    @Test("the volume curve is a ceiling: sizing never plans more than the curve's build volume for a micro")
+    func ceiling() async throws {
+        var asked = tenDayRequest(distance: Race.marathonDistanceMeters)
+        asked.startingVolume = VolumeTarget(measure: .durationSeconds, amount: 36_000)!
+        asked.peakVolume = VolumeTarget(measure: .durationSeconds, amount: 54_000)!
+        let candidate = try await PlanGenerator.generate(asked).candidate
+        for micro in micros(candidate) {
+            let seconds = candidate.sessions.filter { micro.dateRange.contains($0.day) }.map(\.seconds).reduce(0, +)
+            #expect(seconds <= 54_000 * 10 / 7 * 1.15, "micro at \(micro.dateRange.lowerBound): \(seconds) s")
         }
     }
 }

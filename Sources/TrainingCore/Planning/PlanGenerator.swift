@@ -17,7 +17,13 @@ import Foundation
 /// 3. ``CycleLayoutBuilder`` turns the micros into the macro, meso and micro ``TrainingCycle``s.
 /// 4. ``VolumeCurveBuilder`` gives each micro a volume, from the request's starting and peak volume
 ///    (the peak lowered to ``PlanPreferences/maxWeeklyVolume`` for running) times the lever for the micro.
-///    A distance becomes a duration at the easy pace (zone 2) of the athlete's pace model.
+///    A distance becomes a duration at the easy pace (zone 2) of the athlete's pace model. The curve is a
+///    ceiling: each micro is sized, by bisection, to the largest volume under its ceiling (the build
+///    volume of its place in the ramp, with no recovery or taper fraction) that ends in the middle of
+///    its TSB zone (``TSBZone/midpoint(guardrails:)``): training for a build micro, recovery for a
+///    recovery micro, race on race day for a taper micro. A micro already fresher than its aim at the
+///    ceiling stays at the ceiling, and while the aimed day is still warming up (no history) the curve's
+///    own volume, with its recovery and taper fractions, is used.
 /// 5. ``DayAssigner`` places the micro's hard sessions, long runs and easy runs on the athlete's days
 ///    and day parts, with the spacing of earlier micros passed as `preceding`. Nothing is placed on
 ///    the day of a race. A session it cannot place is ``PlanCompromise/unplacedSession(microStart:_:)``.
@@ -34,7 +40,7 @@ import Foundation
 ///    The target race and the other races add their load on their day (``Race/expectedLoadOverride``
 ///    or an estimate), whatever their priority.
 ///
-/// Levers act in steps 2, 4 and 6: ``PlanLevers/volumeScales`` multiply the micro's duration,
+/// Levers act in steps 2, 4 and 6: ``PlanLevers/volumeScales`` multiply the micro's ceiling,
 /// ``PlanLevers/easedDays`` turn a hard or long run into an easy one, ``PlanLevers/droppedDays``
 /// leave the day's runs out.
 ///
@@ -117,7 +123,8 @@ public struct PlanGenerator: PlanCandidateProvider {
         let (micros, macro) = try layout(levers: levers, calendar: calendar, compromises: &compromises)
         let cycles = CycleLayoutBuilder().cycles(from: micros, macro: macro, race: request.targetRace)
         let microCycles = cycles.filter { $0.level == .micro }
-        let volumes = try volumeTargets(for: micros)
+        let volumes = try volumeTargets(for: micros, curve: request.volumeCurve)
+        let ceilings = try volumeTargets(for: micros, curve: ceilingCurve)
 
         var planned: [PlannedActivity] = []
         var workouts: [StructuredWorkout] = []
@@ -136,7 +143,7 @@ public struct PlanGenerator: PlanCandidateProvider {
             try Task.checkCancellation()
             let microStart = micro.dateRange.lowerBound
             let volume = volumes[index]
-            let seconds = try durationSeconds(of: volume.target) * levers.volumeScale(forMicro: microStart)
+            let leverScale = levers.volumeScale(forMicro: microStart)
             let assignment = assigner.assign(
                 micro: micro.dateRange,
                 availability: request.preferences.runAvailability,
@@ -148,35 +155,55 @@ public struct PlanGenerator: PlanCandidateProvider {
                 targetRace: request.targetRace,
                 calendar: calendar
             )
-            compromises += assignment.dropped.map { .unplacedSession(microStart: microStart, $0) }
-
-            let share = seconds / Double(max(assignment.assignments.count, 1))
             let phaseMicros = micros.indices.filter { micros[$0].phase == micro.phase }
             let position = phaseMicros.firstIndex(of: index) ?? 0
-            var chosen: [UUID] = []
-            var fittedSeconds: TimeInterval = 0
-            var hardIndex = 0
-            for run in assignment.assignments where !levers.droppedDays.contains(run.day) {
-                let eased = levers.easedDays.contains(run.day) && Self.easedTypes.contains(run.runType)
-                let fitted = try fitRun(
-                    run, eased: eased, hardIndex: hardIndex, micro: micro, position: position, phaseCount: phaseMicros.count,
-                    share: share, previous: previousTemplates, cycleID: microCycles[index].id
+
+            func build(_ seconds: TimeInterval) throws -> MicroBuild {
+                try buildMicro(
+                    assignment, micro: micro, cycleID: microCycles[index].id, seconds: seconds, position: position,
+                    phaseCount: phaseMicros.count, previous: previousTemplates, levers: levers
                 )
-                if Self.hardTypes.contains(run.runType) && !eased { hardIndex += 1 }
-                guard case .run(let result) = fitted else {
-                    if case .missing(let profile) = fitted { compromises.append(.missingTemplate(microStart: microStart, profile)) }
-                    continue
-                }
-                workouts.append(result.workout)
-                planned.append(result.planned)
-                planSessions.append(result.session)
-                chosen.append(result.templateID)
-                fittedSeconds += result.seconds
-                if Self.hardTypes.contains(run.runType) && !eased { hardDates.append(run.day) }
-                if run.runType == .long && !eased { longDates.append(run.day) }
             }
-            previousTemplates = chosen
-            if let weeklyLimitSeconds, fittedSeconds * 7 / Double(volume.lengthDays) > weeklyLimitSeconds * (1 + 1e-9) {
+            func endTSB(of built: MicroBuild, on day: Date) -> FitnessMetrics? {
+                projectedMetrics(
+                    plans: planned + built.planned, workouts: workouts + built.workouts, races: races,
+                    through: day, calendar: calendar, today: today
+                ).first { $0.day == day }
+            }
+
+            let curveSeconds = try durationSeconds(of: volume.target) * leverScale
+            let ceilingSeconds = try durationSeconds(of: ceilings[index].target) * leverScale
+            var built: MicroBuild
+            if let aim = sizingAim(for: micro, raceDays: raceDays, calendar: calendar) {
+                built = try build(ceilingSeconds)
+                if let top = endTSB(of: built, on: aim.day), !top.isWarmingUp, top.tsb < aim.tsb {
+                    // Too tired at the ceiling: the smallest volume that ends at the aim, found by bisection.
+                    var (low, high) = (0.0, 1.0)
+                    var best = built
+                    for _ in 0..<Self.sizingSteps {
+                        let scale = (low + high) / 2
+                        let probe = try build(ceilingSeconds * scale)
+                        guard let metric = endTSB(of: probe, on: aim.day) else { break }
+                        if metric.tsb < aim.tsb { high = scale } else { low = scale; best = probe }
+                        if abs(metric.tsb - aim.tsb) < Self.sizingTolerance { best = probe; break }
+                    }
+                    built = best
+                } else if endTSB(of: built, on: aim.day)?.isWarmingUp == true {
+                    built = try build(curveSeconds)
+                }
+            } else {
+                built = try build(curveSeconds)
+            }
+
+            compromises += assignment.dropped.map { .unplacedSession(microStart: microStart, $0) }
+            compromises += built.compromises
+            workouts += built.workouts
+            planned += built.planned
+            planSessions += built.sessions
+            hardDates += built.hardDays
+            longDates += built.longDays
+            previousTemplates = built.templates
+            if let weeklyLimitSeconds, built.fittedSeconds * 7 / Double(volume.lengthDays) > weeklyLimitSeconds * (1 + 1e-9) {
                 overWeeklyLimit = true
             }
         }
@@ -193,6 +220,81 @@ public struct PlanGenerator: PlanCandidateProvider {
             cycles: cycles, plannedActivities: planned.sorted { $0.date < $1.date }, workouts: workouts,
             sessions: sessions, metrics: metrics, compromises: compromises
         )
+    }
+
+    /// The volume curve with every fraction at 1: each micro's ceiling is the build volume of its place
+    /// in the ramp (the last build micro's for a recovery, the peak for a taper), because the sizing
+    /// below, not a fixed fraction, decides how much lighter it is.
+    private var ceilingCurve: VolumeCurveBuilder {
+        var curve = request.volumeCurve
+        curve.recoveryLoadFraction = 1
+        curve.taperStartFraction = 1
+        curve.taperEndFraction = 1
+        curve.raceFraction = 1
+        return curve
+    }
+
+    /// Bisection steps and the TSB distance (in points) at which the sizing of a micro stops.
+    private static let sizingSteps = 12
+    private static let sizingTolerance = 0.5
+
+    /// Where a micro should end: the middle of the TSB zone of its role (training for a build micro,
+    /// recovery for a recovery micro) on its last day, and the middle of the race zone on race day for
+    /// a taper micro (the race inside it, else its last day). `nil` for a micro with no zone.
+    private func sizingAim(for micro: Microcycle, raceDays: [Date], calendar: Calendar) -> (day: Date, tsb: Double)? {
+        let guardrails = request.guardrails
+        let zone: TSBZone
+        var day = calendar.startOfDay(for: micro.dateRange.upperBound)
+        switch micro.loadRole {
+        case .build: zone = .training
+        case .recovery: zone = .recovery
+        case .taper, .race:
+            zone = .race
+            if let raceDay = raceDays.filter({ micro.dateRange.contains($0) }).min() { day = raceDay }
+        }
+        return zone.midpoint(guardrails: guardrails).map { (day, $0) }
+    }
+
+    /// One micro's runs, fitted for `seconds`, before they are added to the plan.
+    private struct MicroBuild {
+        var planned: [PlannedActivity] = []
+        var workouts: [StructuredWorkout] = []
+        var sessions: [PlanSession] = []
+        var templates: [UUID] = []
+        var fittedSeconds: TimeInterval = 0
+        var hardDays: [Date] = []
+        var longDays: [Date] = []
+        var compromises: [PlanCompromise] = []
+    }
+
+    /// Steps 5 and 6 for one micro: the runs of `assignment` fitted to an equal share of `seconds`.
+    private func buildMicro(
+        _ assignment: DayAssignmentResult, micro: Microcycle, cycleID: UUID, seconds: TimeInterval, position: Int,
+        phaseCount: Int, previous: [UUID], levers: PlanLevers
+    ) throws -> MicroBuild {
+        var built = MicroBuild()
+        let share = seconds / Double(max(assignment.assignments.count, 1))
+        var hardIndex = 0
+        for run in assignment.assignments where !levers.droppedDays.contains(run.day) {
+            let eased = levers.easedDays.contains(run.day) && Self.easedTypes.contains(run.runType)
+            let fitted = try fitRun(
+                run, eased: eased, hardIndex: hardIndex, micro: micro, position: position, phaseCount: phaseCount,
+                share: share, previous: previous, cycleID: cycleID
+            )
+            if Self.hardTypes.contains(run.runType) && !eased { hardIndex += 1 }
+            guard case .run(let result) = fitted else {
+                if case .missing(let profile) = fitted { built.compromises.append(.missingTemplate(microStart: micro.dateRange.lowerBound, profile)) }
+                continue
+            }
+            built.workouts.append(result.workout)
+            built.planned.append(result.planned)
+            built.sessions.append(result.session)
+            built.templates.append(result.templateID)
+            built.fittedSeconds += result.seconds
+            if Self.hardTypes.contains(run.runType) && !eased { built.hardDays.append(run.day) }
+            if run.runType == .long && !eased { built.longDays.append(run.day) }
+        }
+        return built
     }
 
     private enum RunFit {
@@ -311,7 +413,7 @@ public struct PlanGenerator: PlanCandidateProvider {
     }
 
     /// Step 4: the volume of each micro, the peak capped by the athlete's weekly maximum.
-    private func volumeTargets(for micros: [Microcycle]) throws -> [MicroVolumeTarget] {
+    private func volumeTargets(for micros: [Microcycle], curve: VolumeCurveBuilder) throws -> [MicroVolumeTarget] {
         for measure in [request.startingVolume.measure, request.peakVolume.measure] where measure == .trimp {
             throw PlanGeneratorError.unsupportedVolumeMeasure(measure)
         }
@@ -323,7 +425,7 @@ public struct PlanGenerator: PlanCandidateProvider {
             if peak.amount < starting.amount { starting = peak }
         }
         do {
-            return try request.volumeCurve.targets(for: micros, starting: starting, peak: peak)
+            return try curve.targets(for: micros, starting: starting, peak: peak)
         } catch let error as VolumeCurveError {
             throw PlanGeneratorError.volumeCurve(error)
         }

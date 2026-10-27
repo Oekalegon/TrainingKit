@@ -1,0 +1,123 @@
+import Foundation
+import Testing
+@testable import TrainingCore
+
+/// Reproduction of the first real triphasic plan (fix/triphasic-plan-quality): one test per reported
+/// problem, each a regression test once the fix is in.
+@Suite("Triphasic plan quality")
+struct TriphasicPlanQualityTests {
+    private let athlete = AthleteProfile.fixture()
+    private var calendar: Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+        return calendar
+    }
+
+    private var monday: Date { calendar.date(from: DateComponents(year: 2026, month: 10, day: 26))! }
+    private func day(_ offset: Int) -> Date { calendar.date(byAdding: .day, value: offset, to: monday)! }
+
+    private let macro = MacroTemplate(name: "Triphasic", mesoBlocks: [
+        .init(phase: .base, microCount: 3), .init(phase: .structural, microCount: 6),
+        .init(phase: .specific, microCount: 6), .init(phase: .taper, microCount: 1),
+    ])
+
+    /// Tuesday, Thursday, Saturday and Sunday, one run each.
+    private var fourRuns: PlanPreferences {
+        var availability = RunAvailability()
+        for weekday in [Weekday.tuesday, .thursday, .saturday, .sunday] { availability[weekday] = [.morning] }
+        return PlanPreferences(runAvailability: availability)
+    }
+
+    /// Twelve weeks of history before the plan: an hour every other day.
+    private func history(scale: Double) -> [Activity] {
+        stride(from: -84, to: 0, by: 2).map { Activity(source: .manual, sport: .running, start: day($0), duration: 3600 * scale, perceivedExertion: 5) }
+    }
+
+    /// `scale` multiplies the history and the plan's volumes: 1 is a 3 to 5 hour week, 2 a 6 to 10 hour one.
+    private func request(distance: Double, scale: Double = 1, withHistory: Bool = true) -> PlanRequest {
+        let race = Race(name: "A race", date: day(16 * 7 - 1), priority: .primary, distanceMeters: distance)
+        var request = PlanRequest(
+            targetRace: race, paradigm: .triphasic, macro: macro, meso: .threeToOne, preferences: fourRuns, athlete: athlete,
+            today: monday, start: monday, templates: BuiltInWorkoutTemplates.all,
+            startingVolume: VolumeTarget(measure: .durationSeconds, amount: 10_800 * scale)!,
+            peakVolume: VolumeTarget(measure: .durationSeconds, amount: 18_000 * scale)!
+        )
+        request.activities = withHistory ? history(scale: scale) : []
+        return request
+    }
+
+    private func micros(_ candidate: PlanCandidate) -> [TrainingCycle] {
+        candidate.cycles.filter { $0.level == .micro }.sorted { $0.dateRange.lowerBound < $1.dateRange.lowerBound }
+    }
+
+    @Test("point 4: nothing is planned on race day", arguments: [Race.marathonDistanceMeters, 100_000])
+    func nothingOnRaceDay(distance: Double) async throws {
+        let candidate = try await PlanGenerator.generate(request(distance: distance)).candidate
+        #expect(!candidate.plannedActivities.contains { $0.date == day(16 * 7 - 1) })
+    }
+
+    @Test("point 5: the target race adds its load on race day, and no run does")
+    func raceLoad() async throws {
+        let asked = request(distance: 100_000)
+        let candidate = try await PlanGenerator.generate(asked).candidate
+        let raceDay = try #require(candidate.metrics.last)
+        #expect(raceDay.day == day(16 * 7 - 1))
+        #expect(raceDay.load == RaceLoad.load(for: asked.targetRace, estimator: TRIMPPlanEstimator(), athlete: athlete))
+        #expect(raceDay.load > candidate.metrics.dropLast().map(\.load).max()!)
+    }
+
+    @Test("the day after a 100 km race the athlete is in the injury risk zone")
+    func riskAfterUltra() throws {
+        let race = Race(name: "100K", date: day(10), priority: .primary, distanceMeters: 100_000)
+        let days = DailyLoadSeries().days(
+            activities: history(scale: 1), plans: [], workouts: [], races: [race],
+            estimator: TRIMPPlanEstimator(), calculators: [DurationRPECalculator()], athlete: athlete, today: monday
+        )
+        let padded = days + (1...3).map { DayLoad(day: day(10 + $0), load: 0, isProjected: true) }
+        let metrics = FitnessMetricsCalculator().metrics(for: padded, parameters: LoadModelParameters(), seed: nil)
+        let after = try #require(metrics.first { $0.day == day(11) })
+        #expect(after.tsbZone() == .injuryRisk, "TSB \(after.tsb)")
+    }
+
+    @Test("the other races add load on their day too, whatever their priority", arguments: [RacePriority.secondary, .tertiary])
+    func otherRaceLoad(priority: RacePriority) async throws {
+        var asked = request(distance: Race.marathonDistanceMeters)
+        let other = Race(name: "Other", date: day(8 * 7 + 2), priority: priority, distanceMeters: 21_097.5)
+        asked.otherRaces = [other]
+        let candidate = try await PlanGenerator.generate(asked).candidate
+        let metric = try #require(candidate.metrics.first { $0.day == other.date })
+        #expect(metric.load == RaceLoad.load(for: other, estimator: TRIMPPlanEstimator(), athlete: athlete))
+        #expect(!candidate.plannedActivities.contains { $0.date == other.date })
+    }
+
+    @Test("starting and peak volume can be a distance, planned as the same duration at the easy pace")
+    func distanceVolume() async throws {
+        let easy = athlete.paceModel.secondsPerMeter(atZone: 2)
+        var asked = request(distance: Race.marathonDistanceMeters)
+        asked.startingVolume = VolumeTarget(measure: .distanceMeters, amount: 10_800 / easy)!
+        asked.peakVolume = VolumeTarget(measure: .distanceMeters, amount: 18_000 / easy)!
+        let byDistance = try await PlanGenerator.generate(asked).candidate
+
+        let bySeconds = try await PlanGenerator.generate(request(distance: Race.marathonDistanceMeters)).candidate
+        #expect(!byDistance.plannedActivities.isEmpty)
+        #expect(byDistance.sessions.map(\.seconds).map { $0.rounded() } == bySeconds.sessions.map(\.seconds).map { $0.rounded() })
+    }
+
+    @Test("a TRIMP volume is still not supported")
+    func trimpVolume() async throws {
+        var asked = request(distance: Race.marathonDistanceMeters)
+        asked.peakVolume = VolumeTarget(measure: .trimp, amount: 500)!
+        await #expect(throws: PlanGeneratorError.unsupportedVolumeMeasure(.trimp)) { try await PlanGenerator.generate(asked) }
+    }
+
+    @Test("a maximum weekly distance is compared with the plan in the same measure")
+    func weeklyDistanceLimit() async throws {
+        let easy = athlete.paceModel.secondsPerMeter(atZone: 2)
+        var asked = request(distance: Race.marathonDistanceMeters)
+        asked.startingVolume = VolumeTarget(measure: .distanceMeters, amount: 10_800 / easy)!
+        asked.peakVolume = VolumeTarget(measure: .distanceMeters, amount: 18_000 / easy)!
+        asked.preferences.maxWeeklyVolume[.running] = VolumeTarget(measure: .distanceMeters, amount: 50_000)
+        let proposal = try await PlanGenerator.generate(asked)
+        #expect(!proposal.compromises.contains(.overriddenPreference(.maxWeeklyVolume)))
+    }
+}

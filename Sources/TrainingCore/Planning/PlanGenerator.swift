@@ -15,11 +15,12 @@ import Foundation
 /// 2. ``KeyRaceLayout`` lays out the micros back from the target race and gives each secondary race
 ///    its taper and recovery micros. Micros in ``PlanLevers/downWeeks`` become `.recovery`.
 /// 3. ``CycleLayoutBuilder`` turns the micros into the macro, meso and micro ``TrainingCycle``s.
-/// 4. ``VolumeCurveBuilder`` gives each micro a duration, from the request's starting and peak volume
+/// 4. ``VolumeCurveBuilder`` gives each micro a volume, from the request's starting and peak volume
 ///    (the peak lowered to ``PlanPreferences/maxWeeklyVolume`` for running) times the lever for the micro.
+///    A distance becomes a duration at the easy pace (zone 2) of the athlete's pace model.
 /// 5. ``DayAssigner`` places the micro's hard sessions, long runs and easy runs on the athlete's days
-///    and day parts, with the spacing of earlier micros passed as `preceding`. A session it cannot
-///    place is ``PlanCompromise/unplacedSession(microStart:_:)``.
+///    and day parts, with the spacing of earlier micros passed as `preceding`. Nothing is placed on
+///    the day of a race. A session it cannot place is ``PlanCompromise/unplacedSession(microStart:_:)``.
 /// 6. Each run gets a ``SessionProfile`` (the paradigm's profile for the micro's phase and the run's
 ///    session type, else one with the session type only). ``SessionProfile/progressedWorkLength(microIndex:of:)``
 ///    steps the work length across the phase, and ``TemplateFitter`` picks and sizes a template for an
@@ -29,6 +30,8 @@ import Foundation
 ///    steps, and the run becomes a ``PlannedActivity`` in the micro's cycle.
 /// 8. ``PlannedIntensityClassifier`` makes the ``PlanSession``s, and ``DailyLoadSeries`` with
 ///    ``FitnessMetricsCalculator`` project the series, from the request's history, through race day.
+///    The target race and the other races add their load on their day (``Race/expectedLoadOverride``
+///    or an estimate), whatever their priority.
 ///
 /// Levers act in steps 2, 4 and 6: ``PlanLevers/volumeScales`` multiply the micro's duration,
 /// ``PlanLevers/easedDays`` turn a hard or long run into an easy one, ``PlanLevers/droppedDays``
@@ -42,7 +45,7 @@ import Foundation
 /// Not done: steps the resolver could not resolve, secondary races the layout skipped, a plan that
 /// starts after `start` because the macro is shorter than the lead time, and a long run over
 /// ``PlanPreferences/maxLongRun(for:targetRace:)`` are not reported as compromises; the request's
-/// volume must be in seconds; the two or more runs of one day all carry the start of that day.
+/// volume must not be in TRIMP; the two or more runs of one day all carry the start of that day.
 public struct PlanGenerator: PlanCandidateProvider {
     /// The request every candidate is built from.
     public let request: PlanRequest
@@ -116,13 +119,15 @@ public struct PlanGenerator: PlanCandidateProvider {
         var previousTemplates: [UUID] = []
         let spacesLong = request.paradigm.resolved(for: request.targetRace).spacesLongRunsAsHard
         let assigner = DayAssigner(paradigm: request.paradigm)
-        let weeklyLimit = request.preferences.maxWeeklyVolume[.running]
+        let weeklyLimitSeconds = try request.preferences.maxWeeklyVolume[.running].map(durationSeconds(of:))
+        let races = [request.targetRace] + request.otherRaces
+        let raceDays = races.map { calendar.startOfDay(for: $0.date) }
 
         for (index, micro) in micros.enumerated() {
             try Task.checkCancellation()
             let microStart = micro.dateRange.lowerBound
             let volume = volumes[index]
-            let seconds = volume.target.amount * levers.volumeScale(forMicro: microStart)
+            let seconds = try durationSeconds(of: volume.target) * levers.volumeScale(forMicro: microStart)
             let assignment = assigner.assign(
                 micro: micro.dateRange,
                 availability: request.preferences.runAvailability,
@@ -130,6 +135,7 @@ public struct PlanGenerator: PlanCandidateProvider {
                 longCount: request.longRunsPerMicro,
                 preceding: hardDates + (spacesLong ? longDates : []),
                 precedingLongRuns: longDates,
+                raceDays: raceDays,
                 targetRace: request.targetRace,
                 calendar: calendar
             )
@@ -159,14 +165,14 @@ public struct PlanGenerator: PlanCandidateProvider {
                 if run.runType == .long && !eased { longDates.append(run.day) }
             }
             previousTemplates = chosen
-            if let weeklyLimit, fittedSeconds * 7 / Double(volume.lengthDays) > weeklyLimit.amount * (1 + 1e-9) {
+            if let weeklyLimitSeconds, fittedSeconds * 7 / Double(volume.lengthDays) > weeklyLimitSeconds * (1 + 1e-9) {
                 overWeeklyLimit = true
             }
         }
         if overWeeklyLimit { compromises.append(.overriddenPreference(.maxWeeklyVolume)) }
 
         let metrics = projectedMetrics(
-            plans: planned, workouts: workouts, through: calendar.startOfDay(for: request.targetRace.date),
+            plans: planned, workouts: workouts, races: races, through: calendar.startOfDay(for: request.targetRace.date),
             calendar: calendar, today: today
         )
         let sessions = (request.recentSessions + planSessions).enumerated()
@@ -270,9 +276,19 @@ public struct PlanGenerator: PlanCandidateProvider {
         return (micros, adjustment.macro)
     }
 
-    /// Step 4: the duration of each micro, the peak capped by the athlete's weekly maximum.
+    /// A volume as a duration in seconds: a duration as it is, a distance at the easy pace (zone 2) of
+    /// the athlete's pace model.
+    private func durationSeconds(of target: VolumeTarget) throws -> TimeInterval {
+        switch target.measure {
+        case .durationSeconds: target.amount
+        case .distanceMeters: request.athlete.paceModel.duration(forMeters: target.amount, atZone: 2)
+        case .trimp: throw PlanGeneratorError.unsupportedVolumeMeasure(.trimp)
+        }
+    }
+
+    /// Step 4: the volume of each micro, the peak capped by the athlete's weekly maximum.
     private func volumeTargets(for micros: [Microcycle]) throws -> [MicroVolumeTarget] {
-        for measure in [request.startingVolume.measure, request.peakVolume.measure] where measure != .durationSeconds {
+        for measure in [request.startingVolume.measure, request.peakVolume.measure] where measure == .trimp {
             throw PlanGeneratorError.unsupportedVolumeMeasure(measure)
         }
         var starting = request.startingVolume
@@ -291,12 +307,13 @@ public struct PlanGenerator: PlanCandidateProvider {
 
     /// Step 8: the series with the plan in it, through race day.
     private func projectedMetrics(
-        plans: [PlannedActivity], workouts: [StructuredWorkout], through raceDay: Date, calendar: Calendar, today: Date
+        plans: [PlannedActivity], workouts: [StructuredWorkout], races: [Race], through raceDay: Date, calendar: Calendar, today: Date
     ) -> [FitnessMetrics] {
         var days = DailyLoadSeries().days(
             activities: request.activities,
             plans: plans,
             workouts: workouts,
+            races: races,
             estimator: TRIMPPlanEstimator(),
             calculators: [ExponentialTRIMPCalculator(), ImportedLoadCalculator(), DurationRPECalculator()],
             athlete: request.athlete,

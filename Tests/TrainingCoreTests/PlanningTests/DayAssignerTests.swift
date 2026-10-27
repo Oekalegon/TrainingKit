@@ -192,4 +192,24 @@ struct DayAssignerTests {
         #expect(result.assignments.count == 4)
         #expect(result.assignments.allSatisfy { calendar.startOfDay(for: $0.day) == $0.day })
     }
+
+    @Test("a race day gets nothing and the other days are filled as before")
+    func raceDays() {
+        let result = DayAssigner().assign(
+            micro: micro(days: 7), availability: availability(allWeek), hardCount: 1, longCount: 1,
+            raceDays: [day(6)], calendar: calendar
+        )
+        #expect(result.assignments.count == 6 && result.dropped.isEmpty)
+        #expect(!result.assignments.contains { calendar.isDate($0.day, inSameDayAs: day(6)) })
+    }
+
+    @Test("a long run that would fall on a race day goes to another day, or is dropped when there is none")
+    func longRunAvoidsRaceDay() {
+        let onlySunday = DayAssigner().assign(
+            micro: micro(days: 7), availability: availability([.sunday]), hardCount: 0, longCount: 1,
+            raceDays: [day(6)], calendar: calendar
+        )
+        #expect(onlySunday.assignments.isEmpty)
+        #expect(onlySunday.dropped.map(\.reason) == [.noFreeDay])
+    }
 }

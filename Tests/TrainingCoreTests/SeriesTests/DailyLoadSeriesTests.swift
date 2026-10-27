@@ -121,4 +121,77 @@ struct DailyLoadSeriesTests {
         let leakedDay = localDayStart.addingTimeInterval(86400)
         #expect(!days.contains { $0.day == leakedDay && $0.load > 0 })
     }
+
+    @Test("a race adds its estimated load on its day, whatever its priority", arguments: [RacePriority.primary, .secondary, .tertiary])
+    func raceAddsLoad(priority: RacePriority) {
+        let today = startOfDay(0, from: Date())
+        let race = Race(name: "Race", date: startOfDay(5, from: today), priority: priority, distanceMeters: 42_195)
+
+        let days = series.days(
+            activities: [], plans: [], workouts: [], races: [race],
+            estimator: estimator, calculators: calculators, athlete: athlete, today: today
+        )
+
+        let raceDay = days.first { $0.day == startOfDay(5, from: today) }
+        #expect((raceDay?.load ?? 0) > 100)
+        #expect(raceDay?.isProjected == true)
+        #expect(days.filter { $0.day != startOfDay(5, from: today) }.allSatisfy { $0.load == 0 })
+    }
+
+    @Test("a longer race weighs more, and a pace target sets its duration")
+    func raceLoadFollowsDistanceAndPace() {
+        let athlete = athlete
+        let marathon = Race(name: "M", date: Date(), priority: .primary, distanceMeters: 42_195)
+        let ultra = Race(name: "U", date: Date(), priority: .primary, distanceMeters: 100_000)
+        let slow = Race(name: "S", date: Date(), priority: .primary, distanceMeters: 42_195, specificPhaseTarget: .pace(secondsPerKilometer: 420))
+        let fast = Race(name: "F", date: Date(), priority: .primary, distanceMeters: 42_195, specificPhaseTarget: .pace(secondsPerKilometer: 300))
+        func load(_ race: Race) -> Double { RaceLoad.load(for: race, estimator: estimator, athlete: athlete) }
+
+        #expect(load(ultra) > load(marathon))
+        #expect(load(slow) > load(fast))
+    }
+
+    @Test("a race's expected load override replaces the estimate")
+    func raceOverride() {
+        let today = startOfDay(0, from: Date())
+        let race = Race(name: "Race", date: startOfDay(2, from: today), priority: .primary, distanceMeters: 100_000, expectedLoadOverride: 1234)
+
+        let days = series.days(
+            activities: [], plans: [], workouts: [], races: [race],
+            estimator: estimator, calculators: calculators, athlete: athlete, today: today
+        )
+
+        #expect(days.first { $0.day == startOfDay(2, from: today) }?.load == 1234)
+    }
+
+    @Test("a race before today adds nothing: its activity counts")
+    func pastRaceAddsNothing() {
+        let today = startOfDay(0, from: Date())
+        let race = Race(name: "Race", date: startOfDay(-4, from: today), priority: .primary, distanceMeters: 42_195)
+
+        let days = series.days(
+            activities: [], plans: [], workouts: [], races: [race],
+            estimator: estimator, calculators: calculators, athlete: athlete, today: today
+        )
+
+        #expect(days.allSatisfy { $0.load == 0 })
+        #expect(days.first?.day == today)
+    }
+
+    @Test("a completed race activity counts as an activity")
+    func completedRaceCounts() {
+        let today = startOfDay(0, from: Date())
+        let raceDay = startOfDay(-2, from: today)
+        let race = Race(name: "Race", date: raceDay, priority: .primary, distanceMeters: 42_195)
+        let activity = Activity(source: .manual, sport: .running, start: raceDay, duration: 4 * 3600, perceivedExertion: 8)
+
+        let days = series.days(
+            activities: [activity], plans: [], workouts: [], races: [race],
+            estimator: estimator, calculators: calculators, athlete: athlete, today: today
+        )
+
+        let day = days.first { $0.day == raceDay }
+        #expect((day?.load ?? 0) > 0)
+        #expect(day?.isProjected == false)
+    }
 }

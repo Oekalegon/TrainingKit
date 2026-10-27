@@ -159,7 +159,8 @@ struct PlanGeneratorTests {
 
         #expect(proposal.candidate.plannedActivities.isEmpty)
         let missing = proposal.compromises.filter { if case .missingTemplate = $0 { true } else { false } }
-        #expect(missing.count == 16 * 3)
+        // Three runs a micro, minus the one on race day, which is the race.
+        #expect(missing.count == 16 * 3 - 1)
     }
 
     @Test("a session the athlete's days cannot hold is reported with its reason")
@@ -171,8 +172,10 @@ struct PlanGeneratorTests {
         let dropped = proposal.compromises.compactMap { compromise -> DroppedSession? in
             if case .unplacedSession(_, let session) = compromise { session } else { nil }
         }
-        #expect(dropped.count == 16)
-        #expect(dropped.allSatisfy { $0.kind == .hard })
+        // A hard session a micro; the last micro's only free day is race day, so its long run is dropped too.
+        #expect(dropped.count == 17)
+        #expect(dropped.filter { $0.kind == .hard }.count == 16)
+        #expect(dropped.filter { $0.kind == .long }.map(\.reason) == [.noFreeDay])
     }
 
     @Test("micros of 7, 10 and 14 days are laid out whole and every run lands inside its micro", arguments: [7, 10, 14])
@@ -270,12 +273,12 @@ struct PlanGeneratorTests {
         #expect(eased.sessions.contains { $0.day == hardDay })
     }
 
-    @Test("volume that is not in seconds, or a limit in another measure, is an error")
+    @Test("volume in TRIMP, or a limit in another measure, is an error")
     func volumeErrors() async throws {
-        var distance = request(race: race(micros: 16))
-        distance.startingVolume = VolumeTarget(measure: .distanceMeters, amount: 30_000)!
-        distance.peakVolume = VolumeTarget(measure: .distanceMeters, amount: 50_000)!
-        await #expect(throws: PlanGeneratorError.unsupportedVolumeMeasure(.distanceMeters)) { try await PlanGenerator.generate(distance) }
+        var trimp = request(race: race(micros: 16))
+        trimp.startingVolume = VolumeTarget(measure: .trimp, amount: 300)!
+        trimp.peakVolume = VolumeTarget(measure: .trimp, amount: 500)!
+        await #expect(throws: PlanGeneratorError.unsupportedVolumeMeasure(.trimp)) { try await PlanGenerator.generate(trimp) }
 
         var mismatched = request(race: race(micros: 16))
         mismatched.preferences.maxWeeklyVolume[.running] = VolumeTarget(measure: .distanceMeters, amount: 40_000)!

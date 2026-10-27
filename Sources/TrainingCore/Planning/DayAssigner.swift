@@ -19,7 +19,7 @@ import Foundation
 /// ``TrainingParadigm/maxHardSessionsPerMicro`` allows for its length. Within a day, a run takes
 /// the first free part in the order morning, afternoon, evening (a long run the first one where a
 /// long run is possible). A session that cannot be placed is returned as dropped, never
-/// substituted. Track availability is ignored: an interval session does not need a track.
+/// substituted. A day with a race (`raceDays`) gets nothing: the race is that day's run. Track availability is ignored: an interval session does not need a track.
 public struct DayAssigner: Sendable, Hashable {
     /// The paradigm whose hard-session rules apply; `nil` for no spacing or limit.
     public var paradigm: TrainingParadigm?
@@ -49,6 +49,7 @@ public struct DayAssigner: Sendable, Hashable {
     ///   - precedingLongRuns: The days of the long runs just before the micro, so a long run on the
     ///     micro's first day next to one counts as a back-to-back pair; used only for the pair limit of
     ///     an ultra target, and independent of `preceding`. Defaults to none.
+    ///   - raceDays: The days of the races; nothing is placed on them. Defaults to none.
     ///   - targetRace: The race the plan builds towards; for an ultra the paradigm's long runs are not
     ///     spaced and at most ``TrainingParadigm/maxBackToBackLongRunPairsPerMicro`` pairs of long
     ///     runs on consecutive days are placed, see ``TrainingParadigm/resolved(for:)``. Defaults to `nil`.
@@ -62,6 +63,7 @@ public struct DayAssigner: Sendable, Hashable {
         longCount: Int,
         preceding: [Date] = [],
         precedingLongRuns: [Date] = [],
+        raceDays: [Date] = [],
         targetRace: Race? = nil,
         calendar: Calendar
     ) -> DayAssignmentResult {
@@ -69,7 +71,8 @@ public struct DayAssigner: Sendable, Hashable {
         var days: [Day] = []
         var cursor = micro.lowerBound
         while cursor <= micro.upperBound {
-            if let weekday = Weekday(rawValue: calendar.component(.weekday, from: cursor)) {
+            if !raceDays.contains(where: { calendar.isDate($0, inSameDayAs: cursor) }),
+               let weekday = Weekday(rawValue: calendar.component(.weekday, from: cursor)) {
                 let runs = availability.runs(on: weekday)
                 if runs > 0 {
                     days.append(Day(date: cursor, weekday: weekday, capacity: runs, freeSlots: DaySlot.allCases.filter { availability[weekday].contains($0) }))

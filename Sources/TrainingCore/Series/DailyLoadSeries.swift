@@ -9,6 +9,10 @@ import Foundation
 /// | `today` | Sum of actual loads if any exist that day, otherwise the planned estimate. |
 /// | After `today` | Sum of estimated loads for planned activities. |
 ///
+/// A race counts like a planned activity: on or after `today` it adds `RaceLoad`, its
+/// ``Race/expectedLoadOverride`` or an estimate from its distance and ``Race/specificPhaseTarget``. A
+/// race before `today` counts through the activity that was recorded, so it adds nothing here.
+///
 /// `today` is an injected `Date`, not `Date()`, so the series is deterministic in tests and so a
 /// caller can ask "what does the curve look like as of next Monday".
 public struct DailyLoadSeries: Sendable {
@@ -21,6 +25,8 @@ public struct DailyLoadSeries: Sendable {
     ///   - activities: Completed activities to score with `calculators`.
     ///   - plans: Planned activities to score with `estimator`.
     ///   - workouts: The library workouts `plans` reference, looked up by id.
+    ///   - races: The races whose load to add on their day; defaults to none. A race adds its load
+    ///     whatever its priority.
     ///   - estimator: Estimates load for a planned activity's workout.
     ///   - calculators: Tried in order per activity; the first to succeed wins, so an activity
     ///     without heart-rate data can fall back to e.g. ``DurationRPECalculator``.
@@ -35,6 +41,7 @@ public struct DailyLoadSeries: Sendable {
         activities: [Activity],
         plans: [PlannedActivity],
         workouts: [StructuredWorkout],
+        races: [Race] = [],
         estimator: PlannedLoadEstimator,
         calculators: [any LoadCalculator],
         athlete: AthleteProfile,
@@ -61,6 +68,12 @@ public struct DailyLoadSeries: Sendable {
             let load = plan.expectedLoadOverride ?? estimator.estimatedLoad(for: workout, athlete: athlete).value
             let day = calendar.startOfDay(for: plan.date)
             estimatedLoadByDay[day, default: 0] += load
+        }
+
+        for race in races {
+            let day = calendar.startOfDay(for: race.date)
+            guard day >= todayStart else { continue }
+            estimatedLoadByDay[day, default: 0] += RaceLoad.load(for: race, estimator: estimator, athlete: athlete)
         }
 
         // The range always includes `today`, even if the last actual/planned data is days away

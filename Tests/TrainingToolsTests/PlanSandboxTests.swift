@@ -147,6 +147,17 @@ struct PlanSandboxTests {
         _ = athlete
     }
 
+    @Test("an engine given races adds their load to the sandbox series")
+    func engineWithRaces() {
+        let athlete = AthleteProfile.fixture()
+        let race = Race(name: "Race", date: day(3), priority: .primary, distanceMeters: 42_195)
+        let without = DefaultSeriesEngine().metrics(activities: [], plans: [], workouts: [], athlete: athlete, today: day(0))
+        let with = DefaultSeriesEngine(races: [race]).metrics(activities: [], plans: [], workouts: [], athlete: athlete, today: day(0))
+
+        #expect(without.allSatisfy { $0.load == 0 })
+        #expect(with.contains { $0.load > 0 })
+    }
+
     @Test("simulate surfaces PlanEvaluator findings for a guardrail-tripping plan")
     func simulateSurfacesGuardrailFindings() async throws {
         let (store, stores, _) = try await makeStores()

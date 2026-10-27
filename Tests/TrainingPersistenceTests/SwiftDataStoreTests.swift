@@ -675,6 +675,21 @@ struct SwiftDataStoreTests {
         #expect(stored == [race])
     }
 
+    @Test("RaceStore round-trips an expected load override, and a race stored without one reads nil")
+    func raceStoreRoundTripsExpectedLoadOverride() async throws {
+        let store = try makeStore()
+        let heavy = Race(name: "100K", date: day(3), priority: .primary, distanceMeters: 100_000, expectedLoadOverride: 900)
+        let plain = Race(name: "10K", date: day(4), priority: .secondary, distanceMeters: 10_000)
+        try await store.upsert([heavy, plain])
+
+        #expect(try await store.race(id: heavy.id)?.expectedLoadOverride == 900)
+        #expect(try await store.race(id: plain.id)?.expectedLoadOverride == nil)
+        // A payload written before the field existed still decodes.
+        let legacy = try JSONEncoder().encode(plain)
+        #expect(!String(decoding: legacy, as: UTF8.self).contains("expectedLoadOverride"))
+        #expect(try JSONDecoder().decode(Race.self, from: legacy) == plain)
+    }
+
     @Test("RaceStore round-trips a specific-phase target of each kind")
     func raceStoreRoundTripsSpecificPhaseTarget() async throws {
         let store = try makeStore()

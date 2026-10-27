@@ -27,7 +27,8 @@ public struct Race: Identifiable, Sendable, Codable, Hashable {
     /// from the distance and the ``specificPhaseTarget``. Zero or more, and finite (see ``validate()``).
     ///
     /// Set it when the estimate is off, the way ``PlannedActivity/expectedLoadOverride`` does for a
-    /// planned run. A race that has been run counts through its activity instead.
+    /// planned run, or when the athlete has no heart-rate zone settings (the estimator then gives 0).
+    /// A race that has been run counts through its activity instead.
     public var expectedLoadOverride: Double?
 
     /// Creates a race.
@@ -79,7 +80,8 @@ public struct Race: Identifiable, Sendable, Codable, Hashable {
     /// the stores skip and log it.
     ///
     /// See ``specificPhaseTarget`` for how a missing, unknown or invalid target decodes. A stored race
-    /// without an ``expectedLoadOverride`` decodes to `nil`.
+    /// without an ``expectedLoadOverride``, or with one that is negative or not finite, decodes it as
+    /// `nil`, so a bad value never loses the race.
     public init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(UUID.self, forKey: .id)
@@ -88,7 +90,8 @@ public struct Race: Identifiable, Sendable, Codable, Hashable {
         priority = try container.decode(RacePriority.self, forKey: .priority)
         distanceMeters = try container.decode(Double.self, forKey: .distanceMeters)
         specificPhaseTarget = try? container.decodeIfPresent(SpecificPhaseTarget.self, forKey: .specificPhaseTarget)
-        expectedLoadOverride = try container.decodeIfPresent(Double.self, forKey: .expectedLoadOverride)
+        expectedLoadOverride = (try? container.decodeIfPresent(Double.self, forKey: .expectedLoadOverride))
+            .flatMap { $0.isFinite && $0 >= 0 ? $0 : nil }
         try validate()
     }
 }

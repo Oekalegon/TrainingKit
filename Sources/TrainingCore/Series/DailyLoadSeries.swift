@@ -11,7 +11,9 @@ import Foundation
 ///
 /// A race counts like a planned activity: on or after `today` it adds `RaceLoad`, its
 /// ``Race/expectedLoadOverride`` or an estimate from its distance and ``Race/specificPhaseTarget``. A
-/// race before `today` counts through the activity that was recorded, so it adds nothing here.
+/// race before `today` counts through the activity that was recorded, so it adds nothing here. On
+/// `today` itself any recorded activity replaces the race's estimate, as it does for a planned
+/// activity, so a warm-up logged before the race hides the estimate until the race is recorded.
 ///
 /// `today` is an injected `Date`, not `Date()`, so the series is deterministic in tests and so a
 /// caller can ask "what does the curve look like as of next Monday".

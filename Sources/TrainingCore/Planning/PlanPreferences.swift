@@ -36,7 +36,8 @@ public struct PlanPreferences: Sendable, Codable, Hashable {
     /// 2 means one easy day in between, 3 two. At least 1; a smaller value is stored as `nil`.
     ///
     /// The generator applies it to both the day assignment and the paradigm rules the plan is
-    /// evaluated against, so a plan is not flagged for the spacing the athlete asked for.
+    /// evaluated against, so a plan is not flagged for the spacing the athlete asked for. A paradigm
+    /// with no spacing rule of its own gets one from this value.
     public var minDaysBetweenHardSessions: Int?
 
     /// The ceiling on a long run for a plan aimed at `targetRace`, in meters.

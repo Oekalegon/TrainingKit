@@ -103,9 +103,13 @@ public struct PlanEvaluator: Sendable {
     /// *prior* (non-`.nan`) strain values than `maxStrainPercentile` — today is never compared
     /// against itself, and ties don't count as "exceeding," so a perfectly flat run of identical
     /// strain values (e.g. a steady, unchanging week) never trivially ranks at its own 100th
-    /// percentile. Skipped when there isn't enough trailing history yet to judge against.
+    /// percentile. Skipped when there isn't enough trailing history yet to judge against, and for
+    /// the whole series when it holds fewer than 14 days of real (not projected) strain: a plan that
+    /// ramps up from no history only has itself to be compared with, and every week of a ramp
+    /// exceeds the weeks before it.
     private func strainFindings(metrics: [FitnessMetrics], guardrails: PlanGuardrails) -> [PlanFinding] {
         let minimumSamples = 14
+        guard metrics.filter({ !$0.isProjected && !$0.strain.isNaN }).count >= minimumSamples else { return [] }
         var findings: [PlanFinding] = []
         for index in metrics.indices {
             let current = metrics[index]

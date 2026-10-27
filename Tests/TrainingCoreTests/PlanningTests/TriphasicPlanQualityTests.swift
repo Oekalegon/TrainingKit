@@ -256,4 +256,10 @@ struct TriphasicPlanQualityTests {
             #expect(seconds <= 54_000 * 10 / 7 * 1.15, "micro at \(micro.dateRange.lowerBound): \(seconds) s")
         }
     }
+
+    @Test("the strain rule does not flag a plan that ramps up from no history")
+    func strainOnRamp() async throws {
+        let proposal = try await PlanGenerator.generate(request(distance: Race.marathonDistanceMeters, withHistory: false))
+        #expect(!proposal.risks.contains { $0.rule == .strain })
+    }
 }

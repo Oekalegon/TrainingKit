@@ -23,6 +23,13 @@ public struct Race: Identifiable, Sendable, Codable, Hashable {
     /// target is of a kind this version doesn't know or fails ``SpecificPhaseTarget/validate()``,
     /// so a newer device's data never loses the race.
     public var specificPhaseTarget: SpecificPhaseTarget?
+    /// The training load the race adds on its day, or `nil` to let ``DailyLoadSeries`` estimate it
+    /// from the distance and the ``specificPhaseTarget``. Zero or more, and finite (see ``validate()``).
+    ///
+    /// Set it when the estimate is off, the way ``PlannedActivity/expectedLoadOverride`` does for a
+    /// planned run, or when the athlete has no heart-rate zone settings (the estimator then gives 0).
+    /// A race that has been run counts through its activity instead.
+    public var expectedLoadOverride: Double?
 
     /// Creates a race.
     ///
@@ -33,9 +40,10 @@ public struct Race: Identifiable, Sendable, Codable, Hashable {
     ///   - priority: How much this race matters to the athlete; see ``KeyRaceLayout``.
     ///   - distanceMeters: The distance of the race, in meters; must pass ``validate()``.
     ///   - specificPhaseTarget: The intensity the specific-phase work is aimed at; defaults to `nil`, none.
+    ///   - expectedLoadOverride: The load the race adds on its day; defaults to `nil`, estimated.
     public init(
         id: UUID = UUID(), name: String, date: Date, priority: RacePriority,
-        distanceMeters: Double, specificPhaseTarget: SpecificPhaseTarget? = nil
+        distanceMeters: Double, specificPhaseTarget: SpecificPhaseTarget? = nil, expectedLoadOverride: Double? = nil
     ) {
         self.id = id
         self.name = name
@@ -43,6 +51,7 @@ public struct Race: Identifiable, Sendable, Codable, Hashable {
         self.priority = priority
         self.distanceMeters = distanceMeters
         self.specificPhaseTarget = specificPhaseTarget
+        self.expectedLoadOverride = expectedLoadOverride
     }
 
     /// The marathon distance in meters; a race longer than this is an ultra.
@@ -54,19 +63,25 @@ public struct Race: Identifiable, Sendable, Codable, Hashable {
 
     /// Checks that the race makes sense.
     ///
-    /// - Throws: ``RaceError/invalidDistance`` if ``distanceMeters`` is not finite or not above zero.
+    /// - Throws: ``RaceError/invalidDistance`` if ``distanceMeters`` is not finite or not above zero,
+    ///   ``RaceError/invalidExpectedLoad`` if ``expectedLoadOverride`` is set and is not finite or is negative.
     public func validate() throws {
         guard distanceMeters.isFinite, distanceMeters > 0 else { throw RaceError.invalidDistance }
+        if let expectedLoadOverride {
+            guard expectedLoadOverride.isFinite, expectedLoadOverride >= 0 else { throw RaceError.invalidExpectedLoad }
+        }
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, name, date, priority, distanceMeters, specificPhaseTarget
+        case id, name, date, priority, distanceMeters, specificPhaseTarget, expectedLoadOverride
     }
 
     /// Decodes a race and validates it. A race with no distance, or an invalid one, does not decode:
     /// the stores skip and log it.
     ///
-    /// See ``specificPhaseTarget`` for how a missing, unknown or invalid target decodes.
+    /// See ``specificPhaseTarget`` for how a missing, unknown or invalid target decodes. A stored race
+    /// without an ``expectedLoadOverride``, or with one that is negative or not finite, decodes it as
+    /// `nil`, so a bad value never loses the race.
     public init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(UUID.self, forKey: .id)
@@ -75,6 +90,8 @@ public struct Race: Identifiable, Sendable, Codable, Hashable {
         priority = try container.decode(RacePriority.self, forKey: .priority)
         distanceMeters = try container.decode(Double.self, forKey: .distanceMeters)
         specificPhaseTarget = try? container.decodeIfPresent(SpecificPhaseTarget.self, forKey: .specificPhaseTarget)
+        expectedLoadOverride = (try? container.decodeIfPresent(Double.self, forKey: .expectedLoadOverride))
+            .flatMap { $0.isFinite && $0 >= 0 ? $0 : nil }
         try validate()
     }
 }

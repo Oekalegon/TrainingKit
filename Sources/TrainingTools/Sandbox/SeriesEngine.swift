@@ -25,12 +25,24 @@ public struct DefaultSeriesEngine: SeriesEngine {
     private let estimator: PlannedLoadEstimator
     private let loadCalculators: [any LoadCalculator]
     private let parameters: LoadModelParameters
+    private let races: [Race]
 
+    /// Creates the engine.
+    ///
+    /// - Parameters:
+    ///   - estimator: Estimates the load of planned activities and races; defaults to `TRIMPPlanEstimator`.
+    ///   - loadCalculators: Tried in order per completed activity.
+    ///   - parameters: The CTL/ATL time constants.
+    ///   - races: The races whose load is added on their day, like `TrainingModel` does; defaults to
+    ///     none. The engine's ``metrics(activities:plans:workouts:athlete:today:)`` has no races
+    ///     argument, so pass the athlete's races here when the sandbox should show the same series.
     public init(
         estimator: PlannedLoadEstimator = TRIMPPlanEstimator(),
         loadCalculators: [any LoadCalculator] = [ExponentialTRIMPCalculator(), ImportedLoadCalculator(), DurationRPECalculator()],
-        parameters: LoadModelParameters = LoadModelParameters()
+        parameters: LoadModelParameters = LoadModelParameters(),
+        races: [Race] = []
     ) {
+        self.races = races
         self.estimator = estimator
         self.loadCalculators = loadCalculators
         self.parameters = parameters
@@ -47,6 +59,7 @@ public struct DefaultSeriesEngine: SeriesEngine {
             activities: activities,
             plans: plans,
             workouts: workouts,
+            races: races,
             estimator: estimator,
             calculators: loadCalculators,
             athlete: athlete,

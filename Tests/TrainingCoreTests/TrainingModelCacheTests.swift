@@ -439,6 +439,43 @@ struct TrainingModelCacheTests {
         #expect(try await cache.earliestCachedDay() == day(-3))
         #expect(try await cache.dirtyWatermark() == nil) // consumed
     }
+    // MARK: Race load
+
+    @Test("a future race adds its load to metrics, with and without a cache, and deleting it takes the load away")
+    func raceLoadReachesMetrics() async throws {
+        for cache in [nil, InMemoryStore()] as [InMemoryStore?] {
+            let store = InMemoryStore()
+            let stores = StoreSet(
+                activityStore: store, planStore: store, workoutStore: store,
+                cycleStore: store, raceStore: store, athleteStore: store, fitnessMetricsCacheStore: cache
+            )
+            let model = TrainingModel(stores: stores, athlete: AthleteProfile.fixture())
+            try await model.load(in: day(0)...day(10), asOf: day(0))
+            #expect(model.metrics.allSatisfy { $0.load == 0 })
+
+            let race = Race(name: "100K", date: day(6), priority: .tertiary, distanceMeters: 100_000)
+            try await model.add(race, asOf: day(0))
+            let raceDay = try #require(model.metrics.first { $0.day == day(6) })
+            #expect(raceDay.load > 0 && raceDay.isProjected)
+            #expect(model.metrics.first { $0.day == day(8) }.map { $0.atl > 0 && $0.tsb < 0 } == true)
+            #expect(model.metrics.filter { $0.day < day(6) }.allSatisfy { $0.load == 0 })
+
+            try await model.deleteRace(id: race.id, asOf: day(0))
+            #expect(model.metrics.allSatisfy { $0.load == 0 })
+        }
+    }
+
+    @Test("a race in the past adds nothing and writes nothing to the cache")
+    func pastRaceWritesNothing() async throws {
+        let cache = InMemoryStore()
+        let (store, stores) = makeStores(cache: cache)
+        try await store.upsert([Race(name: "Old", date: day(-3), priority: .primary, distanceMeters: 42_195)])
+        let model = TrainingModel(stores: stores, athlete: AthleteProfile.fixture())
+        try await model.load(in: day(-5)...day(2), asOf: day(0))
+
+        #expect(model.metrics.allSatisfy { $0.load == 0 })
+        #expect(try await cache.cachedMetrics(in: day(-10)...day(10)).allSatisfy { $0.load == 0 })
+    }
 }
 
 /// A minimal `ActivityImporting` fake for this file's tests — mirrors `TrainingModelTests.swift`'s
@@ -649,4 +686,5 @@ struct TrainingModelAthleteEditCacheTests {
         }
         #expect(try await cache.cachedMetrics(in: day(-1)...day(-1)).first?.ctl != 42)
     }
+
 }

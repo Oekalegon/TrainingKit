@@ -15,8 +15,8 @@ public enum PlanGeneratorError: Error, Sendable, Equatable {
     /// ``VolumeCurveBuilder/targets(for:starting:peak:)``. A ``PlanPreferences/maxWeeklyVolume``
     /// in another measure than the requested volume is ``VolumeCurveError/mismatchedMeasure``.
     case volumeCurve(VolumeCurveError)
-    /// The volume is not in ``VolumeMeasure/durationSeconds``; the generator sizes sessions in seconds
-    /// and has no conversion from distance or TRIMP.
+    /// The volume is in ``VolumeMeasure/trimp``; the generator sizes sessions in seconds and converts a
+    /// distance at the easy pace, but has no conversion from TRIMP.
     case unsupportedVolumeMeasure(VolumeMeasure)
     /// A template the fitter chose could not be instantiated.
     case workoutTemplate(WorkoutTemplateError)

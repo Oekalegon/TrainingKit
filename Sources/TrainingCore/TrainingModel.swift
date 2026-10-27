@@ -336,10 +336,8 @@ public final class TrainingModel {
     ///
     /// If `load(in:asOf:)` hasn't been called yet, this falls back to a range covering just
     /// `race.date` (and adopts it as the loaded range), for the same reason as the
-    /// `PlannedActivity` overload of `add` above. Always recomputes even though nothing in
-    /// ``metrics`` depends on races yet (`PlanEvaluator`'s race-day TSB rule isn't wired up here
-    /// until MVP2-18) — matching every other `add` overload's behavior rather than special-casing
-    /// this one to skip it.
+    /// `PlannedActivity` overload of `add` above. Always recomputes: a race on or after `today` adds
+    /// its load to ``metrics`` (see ``DailyLoadSeries``).
     public func add(_ race: Race, asOf today: Date = .now) async throws {
         try await stores.raceStore.upsert([race])
         let range = loadedRange ?? (race.date...race.date)
@@ -485,6 +483,7 @@ public final class TrainingModel {
                 plans: plans,
                 publishRange: loadedRange ?? (today...today),
                 workouts: workouts,
+                races: races,
                 estimator: estimator,
                 calculators: calculators,
                 athlete: athlete,
@@ -596,6 +595,7 @@ public final class TrainingModel {
         plans: [PlannedActivity],
         publishRange: ClosedRange<Date>,
         workouts: [StructuredWorkout],
+        races: [Race] = [],
         estimator: any PlannedLoadEstimator,
         calculators: [any LoadCalculator],
         athlete: AthleteProfile,
@@ -609,6 +609,7 @@ public final class TrainingModel {
             activities: activities,
             plans: plans,
             workouts: workouts,
+            races: races,
             estimator: estimator,
             calculators: calculators,
             athlete: athlete,
@@ -744,11 +745,14 @@ public final class TrainingModel {
         let cacheWriteBlocked = fetchedActivities == nil
         let rawActivities = fetchedActivities ?? []
         let rawPlans = fetchedPlans ?? []
+        // Like the plans, races only matter from `today` on, so a failed fetch can't taint the cache.
+        let fetchedRaces = (try? await stores.raceStore.races(in: fetchFromStart...upperBound)) ?? []
 
         var days = DailyLoadSeries().days(
             activities: rawActivities,
             plans: rawPlans,
             workouts: workouts,
+            races: fetchedRaces,
             estimator: estimator,
             calculators: calculators,
             athlete: athlete,

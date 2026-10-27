@@ -35,7 +35,10 @@ public struct PlanRequest: Sendable {
     /// lowered to ``PlanPreferences/maxWeeklyVolume`` for running if that is lower.
     public var peakVolume: VolumeTarget
     /// How many hard sessions each micro asks the day assigner for (every micro, whatever its role).
-    /// By default ``defaultHardSessionsPerMicro(microLengthDays:)`` for the micro length of `meso`.
+    /// By default ``defaultHardSessionsPerMicro(microLengthDays:)`` for the micro length of `meso`,
+    /// worked out once when the request is created: a `meso` set afterwards does not change it. This
+    /// default (2, 3 or 4 for a 7, 10 or 14-day micro) replaces the single hard session earlier
+    /// requests got.
     public var hardSessionsPerMicro: Int
     /// How many long runs each micro asks the day assigner for (every micro, whatever its role).
     public var longRunsPerMicro: Int

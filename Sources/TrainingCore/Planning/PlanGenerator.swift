@@ -53,6 +53,7 @@ public struct PlanGenerator: PlanCandidateProvider {
 
     /// The request's paradigm with the spacing the plan's preferences ask for
     /// (``PlanPreferences/minDaysBetweenHardSessions``), which the day assignment and the evaluation share.
+    /// A paradigm without a spacing rule gets one from the preference.
     private var paradigm: TrainingParadigm {
         var paradigm = request.paradigm
         if let spacing = request.preferences.minDaysBetweenHardSessions { paradigm.minDaysBetweenHardSessions = spacing }
@@ -214,7 +215,7 @@ public struct PlanGenerator: PlanCandidateProvider {
         _ run: DayAssignment, eased: Bool, hardIndex: Int, micro: Microcycle, position: Int, phaseCount: Int,
         share: TimeInterval, previous: [UUID], cycleID: UUID
     ) throws -> RunFit {
-        let profile = profile(for: run, eased: eased, hardIndex: hardIndex, phase: micro.phase)
+        let profile = profile(for: run, eased: eased, hardIndex: hardIndex, position: position, phase: micro.phase)
         let fit = TemplateFitter.fit(
             profile: profile,
             targetSeconds: share,
@@ -247,15 +248,17 @@ public struct PlanGenerator: PlanCandidateProvider {
     }
 
     /// The profile of a run. A hard run takes the phase's hard profiles (interval, tempo and hill
-    /// sessions) in turn, the first hard run of the micro the first profile, the second the second,
-    /// and so on round again; a phase without any gives the run type's session type alone. Any other
+    /// sessions) in turn, the first hard run of the micro the profile at the micro's `position` in its
+    /// phase, the next the following one, and so on round again, so a micro with a single hard run
+    /// gets each profile in turn across the phase; a phase without any gives the run type's session
+    /// type alone. Any other
     /// run takes the phase's profile for its session type, else the session type alone.
-    private func profile(for run: DayAssignment, eased: Bool, hardIndex: Int, phase: CyclePhase) -> SessionProfile {
+    private func profile(for run: DayAssignment, eased: Bool, hardIndex: Int, position: Int, phase: CyclePhase) -> SessionProfile {
         let sessionType = (eased ? RunType.easy : run.runType).sessionType
         let profiles = request.paradigm.sessionProfiles[phase] ?? []
         if Self.hardTypes.contains(run.runType) && !eased {
             let hard = profiles.filter { Self.hardSessionTypes.contains($0.sessionType) }
-            if !hard.isEmpty { return hard[hardIndex % hard.count] }
+            if !hard.isEmpty { return hard[(hardIndex + position) % hard.count] }
         }
         return profiles.first { $0.sessionType == sessionType } ?? SessionProfile(sessionType: sessionType)
     }

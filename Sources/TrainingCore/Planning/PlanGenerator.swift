@@ -22,8 +22,11 @@ import Foundation
 ///    volume of its place in the ramp, with no recovery or taper fraction) that ends in the middle of
 ///    its TSB zone (``TSBZone/midpoint(guardrails:)``): training for a build micro, recovery for a
 ///    recovery micro, race on race day for a taper micro. A micro already fresher than its aim at the
-///    ceiling stays at the ceiling, and while the aimed day is still warming up (no history) the curve's
-///    own volume, with its recovery and taper fractions, is used.
+///    ceiling stays at the ceiling, a micro that no volume brings to its aim gets the lightest one tried,
+///    and while the aimed day is still warming up (no history) the curve's own volume, with its
+///    recovery and taper fractions, is used. The aim uses the paradigm's guardrail overrides, like the
+///    evaluator. With volumes close to the athlete's history the ceiling is often not enough to reach
+///    -20, and the micros then end fresher than that.
 /// 5. ``DayAssigner`` places the micro's hard sessions, long runs and easy runs on the athlete's days
 ///    and day parts, with the spacing of earlier micros passed as `preceding`. Nothing is placed on
 ///    the day of a race. A session it cannot place is ``PlanCompromise/unplacedSession(microStart:_:)``.
@@ -40,7 +43,7 @@ import Foundation
 ///    The target race and the other races add their load on their day (``Race/expectedLoadOverride``
 ///    or an estimate), whatever their priority.
 ///
-/// Levers act in steps 2, 4 and 6: ``PlanLevers/volumeScales`` multiply the micro's ceiling,
+/// Levers act in steps 2, 4 and 6: ``PlanLevers/volumeScales`` multiply the micro's sized volume (so the adjust loop can lower a micro below its TSB aim),
 /// ``PlanLevers/easedDays`` turn a hard or long run into an easy one, ``PlanLevers/droppedDays``
 /// leave the day's runs out.
 ///
@@ -172,24 +175,33 @@ public struct PlanGenerator: PlanCandidateProvider {
                 ).first { $0.day == day }
             }
 
+            // The lever lowers the sized volume (it is the adjust loop's own step), it is not another ceiling.
             let curveSeconds = try durationSeconds(of: volume.target) * leverScale
-            let ceilingSeconds = try durationSeconds(of: ceilings[index].target) * leverScale
+            let ceilingSeconds = try durationSeconds(of: ceilings[index].target)
             var built: MicroBuild
             if let aim = sizingAim(for: micro, raceDays: raceDays, calendar: calendar) {
-                built = try build(ceilingSeconds)
-                if let top = endTSB(of: built, on: aim.day), !top.isWarmingUp, top.tsb < aim.tsb {
-                    // Too tired at the ceiling: the smallest volume that ends at the aim, found by bisection.
-                    var (low, high) = (0.0, 1.0)
-                    var best = built
-                    for _ in 0..<Self.sizingSteps {
-                        let scale = (low + high) / 2
-                        let probe = try build(ceilingSeconds * scale)
-                        guard let metric = endTSB(of: probe, on: aim.day) else { break }
-                        if metric.tsb < aim.tsb { high = scale } else { low = scale; best = probe }
-                        if abs(metric.tsb - aim.tsb) < Self.sizingTolerance { best = probe; break }
+                let top = try build(ceilingSeconds)
+                if let topMetric = endTSB(of: top, on: aim.day), !topMetric.isWarmingUp {
+                    var chosen = (scale: 1.0, build: top)
+                    if topMetric.tsb < aim.tsb {
+                        // Too tired at the ceiling: the largest volume that still ends at the aim, found by
+                        // bisection; when no volume reaches it, the lightest one tried.
+                        var (low, high) = (0.0, 1.0)
+                        var reached: (scale: Double, build: MicroBuild)?
+                        var lightest = chosen
+                        for _ in 0..<Self.sizingSteps {
+                            let scale = (low + high) / 2
+                            let probe = try build(ceilingSeconds * scale)
+                            guard let metric = endTSB(of: probe, on: aim.day) else { break }
+                            if scale < lightest.scale { lightest = (scale, probe) }
+                            if metric.tsb < aim.tsb { high = scale } else { low = scale; reached = (scale, probe) }
+                            if abs(metric.tsb - aim.tsb) < Self.sizingTolerance { reached = (scale, probe); break }
+                        }
+                        chosen = reached ?? lightest
                     }
-                    built = best
-                } else if endTSB(of: built, on: aim.day)?.isWarmingUp == true {
+                    built = leverScale == 1 ? chosen.build : try build(ceilingSeconds * chosen.scale * leverScale)
+                } else {
+                    // Still warming up (no history to aim from): the curve's own volume.
                     built = try build(curveSeconds)
                 }
             } else {
@@ -243,7 +255,8 @@ public struct PlanGenerator: PlanCandidateProvider {
     /// recovery for a recovery micro) on its last day, and the middle of the race zone on race day for
     /// a taper micro (the race inside it, else its last day). `nil` for a micro with no zone.
     private func sizingAim(for micro: Microcycle, raceDays: [Date], calendar: Calendar) -> (day: Date, tsb: Double)? {
-        let guardrails = request.guardrails
+        // The evaluator's guardrails: the paradigm's overrides applied, as `PlanEvaluator` does.
+        let guardrails = paradigm.resolved(for: request.targetRace).guardrailOverrides.applied(to: request.guardrails)
         let zone: TSBZone
         var day = calendar.startOfDay(for: micro.dateRange.upperBound)
         switch micro.loadRole {

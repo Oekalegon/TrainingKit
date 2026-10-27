@@ -139,11 +139,11 @@ struct TriphasicPlanQualityTests {
         return PlanPreferences(runAvailability: availability)
     }
 
-    private func tenDayRequest(distance: Double, spacing: Int? = nil) -> PlanRequest {
-        let meso = MesocycleTemplate(name: "3:1", microRoles: [.build, .build, .build, .recovery], microLengthDays: 10)
+    private func tenDayRequest(distance: Double, spacing: Int? = nil, microLength: Int = 10) -> PlanRequest {
+        let meso = MesocycleTemplate(name: "3:1", microRoles: [.build, .build, .build, .recovery], microLengthDays: microLength)
         var preferences = userPreferences
         preferences.minDaysBetweenHardSessions = spacing
-        let race = Race(name: "A race", date: day(16 * 10 - 1), priority: .primary, distanceMeters: distance)
+        let race = Race(name: "A race", date: day(16 * microLength - 1), priority: .primary, distanceMeters: distance)
         var asked = PlanRequest(
             targetRace: race, paradigm: .triphasic, macro: macro, meso: meso, preferences: preferences, athlete: athlete,
             today: monday, start: monday, templates: BuiltInWorkoutTemplates.all,
@@ -310,5 +310,98 @@ struct TriphasicPlanQualityTests {
         let hard = candidate.sessions.filter { $0.intensity >= .high || $0.speed == .max || $0.isLongRun }.map(\.day).sorted()
         let gaps = zip(hard, hard.dropFirst()).map { calendar.dateComponents([.day], from: $0, to: $1).day! }
         #expect(gaps.allSatisfy { $0 >= 3 }, "gaps \(gaps)")
+    }
+
+    // MARK: Sizing in detail
+
+    /// Volumes above what the zones need, so the sizing is active.
+    private func generous(_ asked: PlanRequest) -> PlanRequest {
+        var asked = asked
+        asked.startingVolume = VolumeTarget(measure: .durationSeconds, amount: 36_000)!
+        asked.peakVolume = VolumeTarget(measure: .durationSeconds, amount: 54_000)!
+        return asked
+    }
+
+    private func seconds(in micro: TrainingCycle, of candidate: PlanCandidate) -> Double {
+        candidate.sessions.filter { micro.dateRange.contains($0.day) }.map(\.seconds).reduce(0, +)
+    }
+
+    @Test("micros of 7 and 14 days are sized too: most build micros end in training, recovery micros are no heavier, race day is in the race zone", arguments: [7, 14])
+    func microLengths(length: Int) async throws {
+        let candidate = try await PlanGenerator.generate(generous(tenDayRequest(distance: Race.marathonDistanceMeters, microLength: length))).candidate
+        let all = micros(candidate)
+        let builds = all.dropLast().filter { $0.loadRole == .build }
+        let training = builds.filter { micro in candidate.metrics.last { micro.dateRange.contains($0.day) }?.tsbZone() == .training }
+        // A short micro can't always move TSB to the middle of its zone, and a template has a longest duration.
+        #expect(Double(training.count) >= 0.7 * Double(builds.count), "\(length)-day: \(training.count) of \(builds.count) build micros end in training")
+        for (index, micro) in all.enumerated() where micro.loadRole == .recovery {
+            // Lighter than the build micro before it, even where the micro is too short to reach the recovery zone.
+            guard let previous = all[..<index].last(where: { $0.loadRole == .build }) else { continue }
+            #expect(seconds(in: micro, of: candidate) <= seconds(in: previous, of: candidate) * 1.001, "\(length)-day recovery micro at \(micro.dateRange.lowerBound)")
+        }
+        #expect(try #require(candidate.metrics.last).tsbZone() == .race)
+    }
+
+    @Test("a secondary race gets its taper aimed at the race zone on its day, and the micro after it is as light as it takes")
+    func secondaryRace() async throws {
+        var asked = generous(tenDayRequest(distance: Race.marathonDistanceMeters))
+        let other = Race(name: "B race", date: day(5 * 10 + 8), priority: .secondary, distanceMeters: 100_000)
+        asked.otherRaces = [other]
+        let candidate = try await PlanGenerator.generate(asked).candidate
+
+        let raceDay = try #require(candidate.metrics.first { $0.day == other.date })
+        #expect(raceDay.tsbZone() == .race, "B race day TSB \(raceDay.tsb)")
+        // The 100 km leaves the following recovery micro below the recovery zone whatever it runs: it gets the
+        // lightest volume, not the ceiling.
+        let all = micros(candidate)
+        let afterIndex = try #require(all.firstIndex { $0.dateRange.lowerBound > other.date })
+        let after = all[afterIndex]
+        let before = all[afterIndex - 2]
+        #expect(after.loadRole == .recovery)
+        #expect(seconds(in: after, of: candidate) < 0.7 * seconds(in: before, of: candidate))
+    }
+
+    @Test("the lever lowers a sized micro: the adjust loop's volume step still has an effect")
+    func leverLowersSizedMicro() async throws {
+        let generator = PlanGenerator(request: generous(tenDayRequest(distance: Race.marathonDistanceMeters)))
+        let plain = try await generator.candidate(levers: .none, today: monday)
+        let target = try #require(micros(plain)[5].dateRange.lowerBound as Date?)
+        let lowered = try await generator.candidate(levers: PlanLevers(volumeScales: [target: 0.5]), today: monday)
+
+        let before = seconds(in: micros(plain)[5], of: plain)
+        let after = seconds(in: micros(lowered)[5], of: lowered)
+        // Templates have shortest durations, so halving the lever does not halve the fitted seconds.
+        #expect(after < 0.85 * before, "\(after) s against \(before) s")
+    }
+
+    @Test("a down week becomes a recovery micro and is sized to the recovery zone")
+    func downWeekIsSized() async throws {
+        let generator = PlanGenerator(request: generous(tenDayRequest(distance: Race.marathonDistanceMeters)))
+        let start = try await generator.candidate(levers: .none, today: monday)
+        let target = micros(start)[5].dateRange.lowerBound
+        let down = try await generator.candidate(levers: PlanLevers(downWeeks: [target]), today: monday)
+
+        let micro = micros(down)[5]
+        #expect(micro.loadRole == .recovery)
+        #expect(try #require(down.metrics.last { micro.dateRange.contains($0.day) }).tsbZone() == .recovery)
+    }
+
+    @Test("race day is sized in the athlete's time zone")
+    func raceDayInTimeZone() async throws {
+        var asked = generous(tenDayRequest(distance: Race.marathonDistanceMeters))
+        asked.athlete = .fixture(timeZoneIdentifier: "Europe/Amsterdam")
+        let proposal = try await PlanGenerator.generate(asked)
+        #expect(try #require(proposal.candidate.metrics.last).tsbZone() == .race)
+    }
+
+    @Test("the aim uses the paradigm's guardrail overrides, like the evaluator")
+    func aimFollowsOverrides() async throws {
+        var asked = generous(tenDayRequest(distance: Race.marathonDistanceMeters))
+        asked.paradigm.guardrailOverrides.minTSBOnRaceDay = 15
+        asked.paradigm.guardrailOverrides.maxTSBOnRaceDay = 35
+        let candidate = try await PlanGenerator.generate(asked).candidate
+        let raceDay = try #require(candidate.metrics.last)
+        // The middle of 15...35 is 25; the default zone's middle, 15, is not what it aims at.
+        #expect(raceDay.tsb > 20, "race-day TSB \(raceDay.tsb)")
     }
 }

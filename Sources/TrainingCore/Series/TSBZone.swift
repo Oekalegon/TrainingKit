@@ -44,7 +44,7 @@ public enum TSBZone: Sendable, Codable, Hashable, CaseIterable {
     /// ``race`` with the default guardrails. `nil` for ``injuryRisk`` and ``detraining``, which have
     /// no other end to be the middle of.
     ///
-    /// The plan generator aims a micro's end-of-micro TSB at this value (MVP5 plan quality fix).
+    /// The plan generator aims a micro's end-of-micro TSB at this value (MVP5-147).
     ///
     /// - Parameter guardrails: Where ``race``'s boundaries come from; defaults to `PlanGuardrails()`.
     public func midpoint(guardrails: PlanGuardrails = PlanGuardrails()) -> Double? {

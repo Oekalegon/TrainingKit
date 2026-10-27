@@ -144,7 +144,42 @@ struct SessionProfileTests {
         let json = #"{"name":"X","sessionProfiles":{"build":[{"sessionType":"nonsense"},{"sessionType":"easy"}]}}"#
         #expect(try JSONDecoder().decode(TrainingParadigm.self, from: Data(json.utf8)).sessionProfiles == [.build: [SessionProfile(sessionType: .easy)]])
         #expect(try JSONDecoder().decode(TrainingParadigm.self, from: Data(#"{"name":"X"}"#.utf8)).sessionProfiles.isEmpty)
-        #expect(TrainingParadigm.builtIn.allSatisfy { $0.sessionProfiles.isEmpty })
+        #expect(TrainingParadigm.polarized8020.sessionProfiles.isEmpty)
+    }
+    @Test("a race-target fraction can drift across a phase, linearly from the first micro to the last")
+    func fractionDrift() {
+        let fast = SessionProfile(sessionType: .interval, raceTargetFraction: 1.14, endRaceTargetFraction: 1.06)
+        #expect(fast.progressedRaceTargetFraction(microIndex: 0, of: 5) == 1.14)
+        #expect(abs(fast.progressedRaceTargetFraction(microIndex: 2, of: 5)! - 1.10) < 1e-9)
+        #expect(abs(fast.progressedRaceTargetFraction(microIndex: 4, of: 5)! - 1.06) < 1e-9)
+        #expect(fast.progressedRaceTargetFraction(microIndex: 0, of: 1) == 1.14)
+        #expect(SessionProfile(sessionType: .interval, raceTargetFraction: 1.0).progressedRaceTargetFraction(microIndex: 3, of: 5) == 1.0)
+        #expect(SessionProfile(sessionType: .interval, endRaceTargetFraction: 1.0).progressedRaceTargetFraction(microIndex: 0, of: 5) == nil)
+        let decoded = try? JSONDecoder().decode(SessionProfile.self, from: JSONEncoder().encode(fast))
+        #expect(decoded == fast)
+        // A profile stored before the end fraction existed decodes without one.
+        let legacy = try? JSONDecoder().decode(SessionProfile.self, from: Data(#"{"sessionType":"interval","raceTargetFraction":1.1}"#.utf8))
+        #expect(legacy == SessionProfile(sessionType: .interval, raceTargetFraction: 1.1))
+        #expect(legacy?.endRaceTargetFraction == nil)
+    }
+
+    @Test("the triphasic paradigm carries the decided profiles and the polarized one none")
+    func triphasicProfiles() {
+        let triphasic = TrainingParadigm.triphasic.sessionProfiles
+        #expect(triphasic[.base] == [SessionProfile(sessionType: .hillRepeats, workLength: 0...8)])
+        #expect(triphasic[.structural]?.map(\.raceTargetFraction) == [1.14, 0.86])
+        #expect(triphasic[.structural]?.map(\.endRaceTargetFraction) == [1.06, 0.94])
+        #expect(triphasic[.structural]?.map(\.workLength) == [60...130, 150...2600])
+        #expect(triphasic[.specific]?.first?.raceTargetFraction == 1.0 && triphasic[.taper]?.first?.raceTargetFraction == 1.0)
+        #expect(triphasic[.conditioning] == nil)
+        #expect(TrainingParadigm.polarized8020.sessionProfiles.isEmpty)
+    }
+
+    @Test("a request asks for 2, 3 and 4 hard sessions for micros of 7, 10 and 14 days unless told otherwise")
+    func hardSessionDefaults() {
+        #expect([7, 10, 14].map { PlanRequest.defaultHardSessionsPerMicro(microLengthDays: $0) } == [2, 3, 4])
+        // Other lengths are 2 per 7 days, rounded.
+        #expect([8, 12, 21].map { PlanRequest.defaultHardSessionsPerMicro(microLengthDays: $0) } == [2, 3, 6])
     }
 }
 

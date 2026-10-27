@@ -22,7 +22,7 @@ struct TriphasicNumbersTests {
         PlanSession(day: day(offset), seconds: minutes * 60, intensity: intensity, speed: speed)
     }
 
-    @Test("the numbers: per-phase mixes and tolerances, 3 days between hard sessions, no per-micro limit")
+    @Test("the numbers: per-phase mixes and tolerances, 2 days between hard sessions, no per-micro limit")
     func values() {
         #expect(paradigm.phaseMixes[.conditioning] == IntensityMix(intensityShares: [.medium: 0, .high: 0], speedShares: [.moderate: 0, .fast: 0, .max: 0], tolerance: 0.05))
         #expect(paradigm.phaseMixes[.base] == IntensityMix(intensityShares: [.medium: 0, .high: 0], speedShares: [.moderate: 0, .fast: 0], tolerance: 0.05))
@@ -31,7 +31,7 @@ struct TriphasicNumbersTests {
         #expect(paradigm.phaseMixes[.specific] == keyWorkouts)
         #expect(paradigm.phaseMixes[.taper] == keyWorkouts)
         #expect(paradigm.defaultMix == nil)
-        #expect(paradigm.minDaysBetweenHardSessions == 3)
+        #expect(paradigm.minDaysBetweenHardSessions == 2)
         #expect(paradigm.maxHardSessionsPerMicro.isEmpty)
         #expect(paradigm.hardIntensity == .high && paradigm.hardSpeed == .max)
         #expect(paradigm.spacesLongRunsAsHard)
@@ -80,14 +80,15 @@ struct TriphasicNumbersTests {
         }
     }
 
-    @Test("spacing 3 days: Tue to Fri passes, Tue to Thu is a risk")
+    @Test("spacing 2 days: Tue to Thu passes, consecutive days are a risk")
     func spacing() {
         func spacing(_ gap: Int) -> [PlanFinding] {
             findings([session(0, .high, minutes: 20), session(gap, .high, minutes: 20)], phase: .specific).filter { $0.rule == .hardSessionSpacing }
         }
+        #expect(spacing(2).isEmpty)
         #expect(spacing(3).isEmpty)
-        let close = spacing(2)
-        #expect(close.count == 1 && close[0].severity == .risk && close[0].value == 2 && close[0].threshold == 3)
+        let close = spacing(1)
+        #expect(close.count == 1 && close[0].severity == .risk && close[0].value == 1 && close[0].threshold == 2)
     }
 
     @Test("no per-micro limit: 7, 10 and 14-day micros are never flagged however many hard sessions")

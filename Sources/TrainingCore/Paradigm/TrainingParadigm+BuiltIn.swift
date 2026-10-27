@@ -37,7 +37,8 @@ extension TrainingParadigm {
     ///
     /// The mixes, tolerances and spacing were reviewed with the user and set on 2026-10-22
     /// (MVP5-137) against the Run Elite skills (`docs/design/triphasic-design.md`); the per-phase
-    /// session profiles (interval work lengths, race-target fractions) are the generator's.
+    /// session profiles (hill sprints, quality work lengths, race-target fractions) are in
+    /// ``sessionProfiles``, with only the numbers the design document has decided (MVP5-147).
     /// Its numbers are calibrated for a marathon (``TrainingParadigm/calibratedDistanceMeters``), so a
     /// shorter target race gets a ``CalibrationWarning`` (MVP5-143).
     /// - Phases: ``CyclePhase/conditioning``, ``CyclePhase/base``, ``CyclePhase/structural``,
@@ -55,9 +56,17 @@ extension TrainingParadigm {
     ///   the specific mix because the skills only say to keep intensity.
     /// - Hard: intensity of ``IntensityCategory/high`` or more, or ``SpeedLevel/max`` speed, so an
     ///   easy session of maximal 8-second sprints is placed like a hard day.
-    /// - Spacing: at least 3 days between hard sessions (Tuesday to Friday: two days in between);
-    ///   long runs are spaced like hard sessions.
+    /// - Spacing: at least 2 days between hard sessions (Tuesday to Thursday: one easy day in
+    ///   between); long runs are spaced like hard sessions. The skills give no spacing for the base and
+    ///   structural work; the plan can ask for more (``PlanPreferences/minDaysBetweenHardSessions``).
     /// - Hard sessions per micro: no limit; the athlete sets the number of sessions per micro.
+    /// - Session profiles, only what the skills decide: base hill sprints of at most 8 s; structural
+    ///   fast quality (work lengths from 60 s to 130 s, 114 % of race speed drifting to 106 %) and
+    ///   endurance quality (150 s to 2600 s, 86 % drifting to 94 %), one of each per two hard
+    ///   sessions; specific and taper ask for race-pace work (100 %), when a template's zone can
+    ///   hold that pace. The work lengths are the book's
+    ///   worked examples (design doc, Q1); the specific work lengths and the share of race pace are
+    ///   open (Q3), so none is set.
     public static let triphasic = TrainingParadigm(
         name: "Triphasic",
         phases: [.conditioning, .base, .structural, .specific, .taper],
@@ -83,9 +92,18 @@ extension TrainingParadigm {
         hardIntensity: .high,
         hardSpeed: .max,
         spacesLongRunsAsHard: true,
-        minDaysBetweenHardSessions: 3,
+        minDaysBetweenHardSessions: 2,
         maxBackToBackLongRunPairsPerMicro: [7: 1, 10: 1, 14: 2],
         shortenablePhase: .specific,
+        sessionProfiles: [
+            .base: [SessionProfile(sessionType: .hillRepeats, workLength: 0...8)],
+            .structural: [
+                SessionProfile(sessionType: .interval, workLength: 60...130, raceTargetFraction: 1.14, endRaceTargetFraction: 1.06),
+                SessionProfile(sessionType: .interval, workLength: 150...2600, raceTargetFraction: 0.86, endRaceTargetFraction: 0.94),
+            ],
+            .specific: [SessionProfile(sessionType: .interval, raceTargetFraction: 1.0)],
+            .taper: [SessionProfile(sessionType: .interval, raceTargetFraction: 1.0)],
+        ],
         calibratedDistanceMeters: Race.marathonDistanceMeters
     )
 

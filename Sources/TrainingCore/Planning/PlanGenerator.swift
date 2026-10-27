@@ -22,7 +22,8 @@ import Foundation
 ///    and day parts, with the spacing of earlier micros passed as `preceding`. Nothing is placed on
 ///    the day of a race. A session it cannot place is ``PlanCompromise/unplacedSession(microStart:_:)``.
 /// 6. Each run gets a ``SessionProfile`` (the paradigm's profile for the micro's phase and the run's
-///    session type, else one with the session type only). ``SessionProfile/progressedWorkLength(microIndex:of:)``
+///    session type, else one with the session type only; a micro's hard runs take the phase's hard
+///    profiles in turn, so a structural micro with two gets a fast and an endurance quality session). ``SessionProfile/progressedWorkLength(microIndex:of:)``
 ///    steps the work length across the phase, and ``TemplateFitter`` picks and sizes a template for an
 ///    equal share of the micro's duration, with the previous micro's templates (only that one) for rotation. No
 ///    template is ``PlanCompromise/missingTemplate(microStart:_:)`` and the run is left out.
@@ -49,6 +50,15 @@ import Foundation
 public struct PlanGenerator: PlanCandidateProvider {
     /// The request every candidate is built from.
     public let request: PlanRequest
+
+    /// The request's paradigm with the spacing the plan's preferences ask for
+    /// (``PlanPreferences/minDaysBetweenHardSessions``), which the day assignment and the evaluation share.
+    /// A paradigm without a spacing rule gets one from the preference.
+    private var paradigm: TrainingParadigm {
+        var paradigm = request.paradigm
+        if let spacing = request.preferences.minDaysBetweenHardSessions { paradigm.minDaysBetweenHardSessions = spacing }
+        return paradigm
+    }
 
     /// Creates a generator.
     ///
@@ -85,7 +95,7 @@ public struct PlanGenerator: PlanCandidateProvider {
         }
         let adjuster = PlanAdjuster(
             races: races,
-            paradigm: request.paradigm,
+            paradigm: paradigm,
             targetRace: request.targetRace,
             guardrails: request.guardrails
         )
@@ -117,8 +127,8 @@ public struct PlanGenerator: PlanCandidateProvider {
         var hardDates: [Date] = []
         var longDates: [Date] = []
         var previousTemplates: [UUID] = []
-        let spacesLong = request.paradigm.resolved(for: request.targetRace).spacesLongRunsAsHard
-        let assigner = DayAssigner(paradigm: request.paradigm)
+        let spacesLong = paradigm.resolved(for: request.targetRace).spacesLongRunsAsHard
+        let assigner = DayAssigner(paradigm: paradigm)
         let weeklyLimitSeconds = try request.preferences.maxWeeklyVolume[.running].map(durationSeconds(of:))
         let races = [request.targetRace] + request.otherRaces
         let raceDays = races.map { calendar.startOfDay(for: $0.date) }
@@ -146,12 +156,14 @@ public struct PlanGenerator: PlanCandidateProvider {
             let position = phaseMicros.firstIndex(of: index) ?? 0
             var chosen: [UUID] = []
             var fittedSeconds: TimeInterval = 0
+            var hardIndex = 0
             for run in assignment.assignments where !levers.droppedDays.contains(run.day) {
                 let eased = levers.easedDays.contains(run.day) && Self.easedTypes.contains(run.runType)
                 let fitted = try fitRun(
-                    run, eased: eased, micro: micro, position: position, phaseCount: phaseMicros.count,
+                    run, eased: eased, hardIndex: hardIndex, micro: micro, position: position, phaseCount: phaseMicros.count,
                     share: share, previous: previousTemplates, cycleID: microCycles[index].id
                 )
+                if Self.hardTypes.contains(run.runType) && !eased { hardIndex += 1 }
                 guard case .run(let result) = fitted else {
                     if case .missing(let profile) = fitted { compromises.append(.missingTemplate(microStart: microStart, profile)) }
                     continue
@@ -200,12 +212,10 @@ public struct PlanGenerator: PlanCandidateProvider {
     /// Steps 6 and 7 for one run: profile, template fit, instantiation, step targets, and the
     /// planned workout and session that come of it.
     private func fitRun(
-        _ run: DayAssignment, eased: Bool, micro: Microcycle, position: Int, phaseCount: Int,
+        _ run: DayAssignment, eased: Bool, hardIndex: Int, micro: Microcycle, position: Int, phaseCount: Int,
         share: TimeInterval, previous: [UUID], cycleID: UUID
     ) throws -> RunFit {
-        let sessionType = (eased ? RunType.easy : run.runType).sessionType
-        let profile = request.paradigm.sessionProfiles[micro.phase]?.first { $0.sessionType == sessionType }
-            ?? SessionProfile(sessionType: sessionType)
+        let profile = profile(for: run, eased: eased, hardIndex: hardIndex, position: position, phase: micro.phase)
         let fit = TemplateFitter.fit(
             profile: profile,
             targetSeconds: share,
@@ -226,7 +236,7 @@ public struct PlanGenerator: PlanCandidateProvider {
             on: run.day,
             athlete: request.athlete,
             raceTarget: request.targetRace.specificPhaseTarget,
-            raceTargetFraction: profile.raceTargetFraction
+            raceTargetFraction: profile.progressedRaceTargetFraction(microIndex: position, of: phaseCount)
         ).workout
         return .run(FittedRun(
             workout: resolved,
@@ -237,6 +247,23 @@ public struct PlanGenerator: PlanCandidateProvider {
         ))
     }
 
+    /// The profile of a run. A hard run takes the phase's hard profiles (interval, tempo and hill
+    /// sessions) in turn, the first hard run of the micro the profile at the micro's `position` in its
+    /// phase, the next the following one, and so on round again, so a micro with a single hard run
+    /// gets each profile in turn across the phase; a phase without any gives the run type's session
+    /// type alone. Any other
+    /// run takes the phase's profile for its session type, else the session type alone.
+    private func profile(for run: DayAssignment, eased: Bool, hardIndex: Int, position: Int, phase: CyclePhase) -> SessionProfile {
+        let sessionType = (eased ? RunType.easy : run.runType).sessionType
+        let profiles = request.paradigm.sessionProfiles[phase] ?? []
+        if Self.hardTypes.contains(run.runType) && !eased {
+            let hard = profiles.filter { Self.hardSessionTypes.contains($0.sessionType) }
+            if !hard.isEmpty { return hard[(hardIndex + position) % hard.count] }
+        }
+        return profiles.first { $0.sessionType == sessionType } ?? SessionProfile(sessionType: sessionType)
+    }
+
+    private static let hardSessionTypes: Set<SessionType> = [.interval, .tempo, .hillRepeats]
     private static let hardTypes: Set<RunType> = [.interval, .threshold]
     private static let easedTypes: Set<RunType> = [.interval, .threshold, .long]
 

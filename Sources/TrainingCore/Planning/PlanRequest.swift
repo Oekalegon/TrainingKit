@@ -35,6 +35,10 @@ public struct PlanRequest: Sendable {
     /// lowered to ``PlanPreferences/maxWeeklyVolume`` for running if that is lower.
     public var peakVolume: VolumeTarget
     /// How many hard sessions each micro asks the day assigner for (every micro, whatever its role).
+    /// By default ``defaultHardSessionsPerMicro(microLengthDays:)`` for the micro length of `meso`,
+    /// worked out once when the request is created: a `meso` set afterwards does not change it. This
+    /// default (2, 3 or 4 for a 7, 10 or 14-day micro) replaces the single hard session earlier
+    /// requests got.
     public var hardSessionsPerMicro: Int
     /// How many long runs each micro asks the day assigner for (every micro, whatever its role).
     public var longRunsPerMicro: Int
@@ -53,6 +57,14 @@ public struct PlanRequest: Sendable {
     /// Turns the starting and peak volume into a volume per micro.
     public var volumeCurve: VolumeCurveBuilder
 
+    /// The hard sessions a micro of `microLengthDays` days asks for by default: 2 for 7 days, 3 for 10
+    /// and 4 for 14, which is 2 per 7 days rounded to a whole number.
+    ///
+    /// - Parameter microLengthDays: The micro length in days.
+    public static func defaultHardSessionsPerMicro(microLengthDays: Int) -> Int {
+        max(Int((Double(microLengthDays) * 2 / 7).rounded()), 0)
+    }
+
     /// Creates a request.
     ///
     /// - Parameters:
@@ -68,7 +80,8 @@ public struct PlanRequest: Sendable {
     ///   - templates: The workout templates to choose from.
     ///   - startingVolume: Seconds per 7 days at the first build micro.
     ///   - peakVolume: Seconds per 7 days at the last build micro.
-    ///   - hardSessionsPerMicro: Hard sessions asked per micro; defaults to 1.
+    ///   - hardSessionsPerMicro: Hard sessions asked per micro; defaults to `nil`, which asks
+    ///     ``defaultHardSessionsPerMicro(microLengthDays:)`` for the micro length of `meso`.
     ///   - longRunsPerMicro: Long runs asked per micro; defaults to 1.
     ///   - activities: The past activities; defaults to none.
     ///   - recentSessions: Past runs for the longest-run rule; defaults to none.
@@ -89,7 +102,7 @@ public struct PlanRequest: Sendable {
         templates: [WorkoutTemplate],
         startingVolume: VolumeTarget,
         peakVolume: VolumeTarget,
-        hardSessionsPerMicro: Int = 1,
+        hardSessionsPerMicro: Int? = nil,
         longRunsPerMicro: Int = 1,
         activities: [Activity] = [],
         recentSessions: [PlanSession] = [],
@@ -110,7 +123,7 @@ public struct PlanRequest: Sendable {
         self.templates = templates
         self.startingVolume = startingVolume
         self.peakVolume = peakVolume
-        self.hardSessionsPerMicro = hardSessionsPerMicro
+        self.hardSessionsPerMicro = hardSessionsPerMicro ?? Self.defaultHardSessionsPerMicro(microLengthDays: meso.microLengthDays)
         self.longRunsPerMicro = longRunsPerMicro
         self.activities = activities
         self.recentSessions = recentSessions

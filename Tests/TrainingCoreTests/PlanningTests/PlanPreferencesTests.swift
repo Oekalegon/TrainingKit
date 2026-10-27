@@ -237,4 +237,14 @@ struct PlanPreferencesTests {
 
         #expect(decoded.runsPerDay == [.saturday: 2])
     }
+
+    @Test("the spacing override round-trips, is left out when nil and reads below 1 as nil")
+    func spacingCoding() throws {
+        let preferences = PlanPreferences(minDaysBetweenHardSessions: 3)
+        let decoded = try JSONDecoder().decode(PlanPreferences.self, from: JSONEncoder().encode(preferences))
+        #expect(decoded.minDaysBetweenHardSessions == 3)
+        #expect(!String(decoding: try JSONEncoder().encode(PlanPreferences()), as: UTF8.self).contains("minDaysBetweenHardSessions"))
+        #expect(PlanPreferences(minDaysBetweenHardSessions: 0).minDaysBetweenHardSessions == nil)
+        #expect(try JSONDecoder().decode(PlanPreferences.self, from: Data(#"{"minDaysBetweenHardSessions":-2}"#.utf8)).minDaysBetweenHardSessions == nil)
+    }
 }

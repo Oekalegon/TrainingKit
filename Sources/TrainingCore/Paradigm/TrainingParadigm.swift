@@ -59,8 +59,8 @@ public struct TrainingParadigm: Sendable, Codable, Hashable {
     public var shortenablePhase: CyclePhase?
     /// What each phase asks of its sessions (MVP5-118), for example one interval profile and a long
     /// run for a build phase; ``TemplateFitter`` matches each to a library template. A phase with no
-    /// entry asks nothing. Empty for the built-in paradigms until their numbers are written down
-    /// (MVP5-100).
+    /// entry asks nothing. Empty for ``polarized8020``; ``triphasic`` carries the profiles its design
+    /// document has decided (MVP5-147).
     public var sessionProfiles: [CyclePhase: [SessionProfile]]
     /// The race distance, in meters, the paradigm's percentages and zone mapping were calibrated for
     /// (42,195 for ``triphasic``); `nil` (the default) when it makes no claim. A plan aimed at a

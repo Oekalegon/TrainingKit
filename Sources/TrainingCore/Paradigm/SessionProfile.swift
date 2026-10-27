@@ -21,6 +21,11 @@ public struct SessionProfile: Sendable, Codable, Hashable {
     /// The intensity of the work as a fraction of the race target (race pace, say), or `nil`. Data
     /// only: it is not used for matching; ``StepTargetResolver`` turns it into step targets (MVP5-122).
     public var raceTargetFraction: Double?
+    /// The intensity in the last micro of the phase, as a fraction of the race target, or `nil` to keep
+    /// ``raceTargetFraction`` all phase. The fraction moves linearly from ``raceTargetFraction`` in the
+    /// first micro to this one in the last, see ``progressedRaceTargetFraction(microIndex:of:)``; it has
+    /// no effect without a ``raceTargetFraction``.
+    public var endRaceTargetFraction: Double?
 
     /// Creates a profile.
     ///
@@ -32,16 +37,37 @@ public struct SessionProfile: Sendable, Codable, Hashable {
     ///     lower bound is dropped to `nil`.
     ///   - raceTargetFraction: The work intensity as a fraction of the race target; defaults to `nil`.
     ///     A value that is not positive and finite is dropped to `nil`.
+    ///   - endRaceTargetFraction: The fraction in the phase's last micro; defaults to `nil` (no drift).
+    ///     A value that is not positive and finite is dropped to `nil`.
     public init(
         sessionType: SessionType,
         workLength: ClosedRange<TimeInterval>? = nil,
         workCount: ClosedRange<Int>? = nil,
-        raceTargetFraction: Double? = nil
+        raceTargetFraction: Double? = nil,
+        endRaceTargetFraction: Double? = nil
     ) {
         self.sessionType = sessionType
         self.workLength = workLength.flatMap { $0.lowerBound.isFinite && $0.upperBound.isFinite && $0.lowerBound >= 0 ? $0 : nil }
         self.workCount = workCount.flatMap { $0.lowerBound >= 0 ? $0 : nil }
         self.raceTargetFraction = raceTargetFraction.flatMap { $0.isFinite && $0 > 0 ? $0 : nil }
+        self.endRaceTargetFraction = endRaceTargetFraction.flatMap { $0.isFinite && $0 > 0 ? $0 : nil }
+    }
+
+    /// The race-target fraction for micro `index` of `count` micros of a phase: it steps linearly from
+    /// ``raceTargetFraction`` in the first micro to ``endRaceTargetFraction`` in the last, so a fast
+    /// quality that starts at 1.14 and ends at 1.06 gets 1.10 in the middle of a three-micro phase.
+    ///
+    /// Without an end fraction it is ``raceTargetFraction`` itself, and `nil` without a
+    /// ``raceTargetFraction``. A phase of one micro uses the start.
+    ///
+    /// - Parameters:
+    ///   - index: The micro's position in its phase, 0 for the first. Clamped to `0..<count`.
+    ///   - count: The number of micros in the phase.
+    public func progressedRaceTargetFraction(microIndex index: Int, of count: Int) -> Double? {
+        guard let start = raceTargetFraction else { return nil }
+        guard let end = endRaceTargetFraction, count > 1 else { return start }
+        let position = Double(min(max(index, 0), count - 1)) / Double(count - 1)
+        return start + (end - start) * position
     }
 
     /// The work length for micro `index` of `count` micros of a phase, in seconds: it steps linearly
@@ -63,7 +89,7 @@ public struct SessionProfile: Sendable, Codable, Hashable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case sessionType, workLength, workCount, raceTargetFraction
+        case sessionType, workLength, workCount, raceTargetFraction, endRaceTargetFraction
     }
 
     /// Decodes a profile; everything but `sessionType` is optional. A range that is invalid reads as
@@ -74,7 +100,8 @@ public struct SessionProfile: Sendable, Codable, Hashable {
             sessionType: try container.decode(SessionType.self, forKey: .sessionType),
             workLength: try? container.decodeIfPresent(ClosedRange<TimeInterval>.self, forKey: .workLength),
             workCount: try? container.decodeIfPresent(ClosedRange<Int>.self, forKey: .workCount),
-            raceTargetFraction: try? container.decodeIfPresent(Double.self, forKey: .raceTargetFraction)
+            raceTargetFraction: try? container.decodeIfPresent(Double.self, forKey: .raceTargetFraction),
+            endRaceTargetFraction: try? container.decodeIfPresent(Double.self, forKey: .endRaceTargetFraction)
         )
     }
 }

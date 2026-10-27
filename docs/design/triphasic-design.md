@@ -514,8 +514,21 @@ Decided with the user on **2026-10-22**, one question per number. Each is a data
 | Specific intensity and speed | none | `medium`, `high`, `moderate`, `fast` each 0.25 ± 0.25 (none above 50 %) | Skills: most miles very easy, default more than 50 % (`DIR D-61`); user answered A |
 | Taper intensity and speed | none | same as specific | Skills only say to keep intensity (`DIR D-33`, `D-62`); user answered A |
 | Tolerance | 0.05 | 0.05 where a target is exact (conditioning, base); 0.10 structural; 0.25 specific and taper | The tolerance sets the width of the "at most" ranges |
-| `minDaysBetweenHardSessions` | 2 | **3** | "At least a couple of days between" key workouts (`DIR D-60`), read literally: Tue to Fri |
+| `minDaysBetweenHardSessions` | 2 | **3**, then **2** (2026-10-27) | MVP5-137 read "a couple of days between" literally (Tue to Fri). Changed back after the first real plan: with Tuesday and Thursday as the only hard days a 3 left a hard session out of most micros. One easy day in between is the default; 3 is for the very intense specific workouts (alternation run), not modelled yet. The plan can ask for another value (`PlanPreferences.minDaysBetweenHardSessions`) |
 | `maxHardSessionsPerMicro` | none | **none** (decided) | Skills cap quality sessions, not the code's "hard" |
 | `hardIntensity`, `hardSpeed` | `.high`, `.max` | **unchanged** (decided) | |
 
-Not decided here (still open in §9): the profile numbers (Q1-Q3), phase lengths and dropping (Q7-Q10), the volume curve (Q14), conditioning content (Q13).
+### Triphasic plan quality (2026-10-27)
+
+Decided with the user after the first real plan, written into `TrainingParadigm.triphasic.sessionProfiles` (no other number is set):
+
+| Profile | Decided |
+|---|---|
+| Base | Hill sprints (`hillRepeats`), work at most 8 s (`DIR D-04`) |
+| Structural fast quality | Q1 (a): work length 60 s growing to 130 s over the phase; Q2 (b): 114 % of race speed drifting to 106 % across the micros |
+| Structural endurance quality | Q1 (a): 150 s growing to 2600 s; Q2 (b): 86 % drifting to 94 % |
+| Specific and taper | Asks for race-pace work (100 %), when a template's zone can hold that pace (the fitter does not check it yet: the step keeps its zone target and is not reported); only that; the work lengths and the share of race pace (Q3) and the 101-105 % band are not set |
+
+A micro's hard runs take the phase's hard profiles in turn (starting at the micro's position in its phase, so a micro with a single hard run alternates between them), so a structural micro with two hard runs gets a fast and an endurance quality session. The number of hard sessions per micro is the athlete's; the request defaults to 2 for a 7-day micro, 3 for 10 days and 4 for 14. The number of repetitions is not decided here: the template fitter takes it from the micro's volume, so the hard session grows and the easy runs and the long run give way. Q5 is answered as (b) with the alternation run (c) left open: the alternation run needs at least one very easy day before and about two recovery days after (`D-65`), but the long-run template is chosen after the days are placed, so the generator cannot space it yet.
+
+Not decided here (still open in §9): the specific work lengths and race-pace share (Q3), phase lengths and dropping (Q7-Q10), the volume curve (Q14), conditioning content (Q13).

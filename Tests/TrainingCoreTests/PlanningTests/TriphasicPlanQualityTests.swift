@@ -120,4 +120,135 @@ struct TriphasicPlanQualityTests {
         let proposal = try await PlanGenerator.generate(asked)
         #expect(!proposal.compromises.contains(.overriddenPreference(.maxWeeklyVolume)))
     }
+
+    // MARK: Target workouts (the user's setup: 10-day micros, Tuesday and Thursday for hard sessions, Saturday and Sunday for long runs)
+
+    private var userPreferences: PlanPreferences {
+        var availability = RunAvailability()
+        for weekday in [Weekday.tuesday, .thursday, .saturday, .sunday] { availability[weekday] = [.morning] }
+        availability.setRunTypes([.interval, .threshold, .easy], on: .tuesday)
+        availability.setRunTypes([.interval, .threshold, .easy], on: .thursday)
+        availability.setRunTypes([.long, .easy], on: .saturday)
+        availability.setRunTypes([.long, .easy], on: .sunday)
+        return PlanPreferences(runAvailability: availability)
+    }
+
+    private func tenDayRequest(distance: Double, spacing: Int? = nil) -> PlanRequest {
+        let meso = MesocycleTemplate(name: "3:1", microRoles: [.build, .build, .build, .recovery], microLengthDays: 10)
+        var preferences = userPreferences
+        preferences.minDaysBetweenHardSessions = spacing
+        let race = Race(name: "A race", date: day(16 * 10 - 1), priority: .primary, distanceMeters: distance)
+        var asked = PlanRequest(
+            targetRace: race, paradigm: .triphasic, macro: macro, meso: meso, preferences: preferences, athlete: athlete,
+            today: monday, start: monday, templates: BuiltInWorkoutTemplates.all,
+            startingVolume: VolumeTarget(measure: .durationSeconds, amount: 10_800)!,
+            peakVolume: VolumeTarget(measure: .durationSeconds, amount: 18_000)!
+        )
+        asked.activities = history(scale: 1)
+        return asked
+    }
+
+    @Test("point 1: every micro has target workouts; the only sessions left out are hard ones the Tuesday and Thursday cannot hold", arguments: [Race.marathonDistanceMeters, 100_000])
+    func targetWorkouts(distance: Double) async throws {
+        let asked = tenDayRequest(distance: distance)
+        #expect(asked.hardSessionsPerMicro == 3)
+        let proposal = try await PlanGenerator.generate(asked)
+        #expect(!proposal.compromises.contains { if case .missingTemplate = $0 { true } else { false } })
+        for case .unplacedSession(_, let dropped) in proposal.compromises {
+            // A 10-day micro holds two to four Tuesdays and Thursdays, the only days that allow a hard session.
+            #expect(dropped.kind == .hard && dropped.reason == .runTypeNotAllowed)
+        }
+
+        let workouts = Dictionary(uniqueKeysWithValues: proposal.candidate.workouts.map { ($0.id, $0) })
+        let hardTypes: Set<SessionType> = [.interval, .tempo, .hillRepeats]
+        for micro in micros(proposal.candidate) where [CyclePhase.base, .structural, .specific].contains(micro.phase) {
+            let targets = proposal.candidate.plannedActivities
+                .filter { micro.dateRange.contains($0.date) }
+                .compactMap { workouts[$0.workoutID]?.sessionType }
+                .filter(hardTypes.contains)
+            #expect(targets.count >= 2, "\(micro.phase.id) micro at \(micro.dateRange.lowerBound): \(targets.count) target workouts")
+        }
+        #expect(!proposal.risks.contains { $0.rule == .hardSessionSpacing })
+    }
+
+    @Test("base micros plan hill sprints, structural micros a fast and an endurance quality session")
+    func profilesTakeEffect() async throws {
+        let candidate = try await PlanGenerator.generate(tenDayRequest(distance: 100_000)).candidate
+        let workouts = Dictionary(uniqueKeysWithValues: candidate.workouts.map { ($0.id, $0) })
+        func types(_ phase: CyclePhase) -> Set<SessionType> {
+            Set(micros(candidate).filter { $0.phase == phase }.flatMap { micro in
+                candidate.plannedActivities.filter { micro.dateRange.contains($0.date) }.compactMap { workouts[$0.workoutID]?.sessionType }
+            })
+        }
+        #expect(types(.base).contains(.hillRepeats))
+        #expect(types(.structural).contains(.interval))
+        let structural = micros(candidate).first { $0.phase == .structural }!
+        let names = candidate.plannedActivities.filter { structural.dateRange.contains($0.date) }.compactMap { workouts[$0.workoutID] }
+        #expect(names.filter { $0.sessionType == .interval }.count >= 2)
+    }
+
+    @Test("the plan's spacing replaces the paradigm's: with 3 days no two hard sessions are closer")
+    func spacingOverride() async throws {
+        for spacing in [2, 3] {
+            let candidate = try await PlanGenerator.generate(tenDayRequest(distance: Race.marathonDistanceMeters, spacing: spacing)).candidate
+            let hard = candidate.sessions.filter { $0.intensity >= .high || $0.speed == .max || $0.isLongRun }.map(\.day).sorted()
+            let gaps = zip(hard, hard.dropFirst()).map { calendar.dateComponents([.day], from: $0, to: $1).day! }
+            #expect(gaps.allSatisfy { $0 >= spacing }, "spacing \(spacing): gaps \(gaps)")
+        }
+    }
+
+    // MARK: Race-target fractions reach the steps
+
+    /// The fractions of race pace (250 s/km) the work steps of the structural interval sessions were given,
+    /// per micro, with a Z5 interval template so that fast quality's 1.14 to 1.06 can fall in its zone.
+    private func structuralFractions(hardSessions: Int? = nil) async throws -> [[Double]] {
+        var asked = tenDayRequest(distance: Race.marathonDistanceMeters)
+        asked.targetRace.specificPhaseTarget = .pace(secondsPerKilometer: 250)
+        asked.templates = [BuiltInWorkoutTemplates.easyRun, BuiltInWorkoutTemplates.longRun, BuiltInWorkoutTemplates.shortIntervalRunTrack]
+        if let hardSessions { asked.hardSessionsPerMicro = hardSessions }
+        let candidate = try await PlanGenerator.generate(asked).candidate
+        let workouts = Dictionary(uniqueKeysWithValues: candidate.workouts.map { ($0.id, $0) })
+        var result: [[Double]] = []
+        for micro in micros(candidate) where micro.phase == .structural {
+            var fractions: [Double] = []
+            for planned in candidate.plannedActivities where micro.dateRange.contains(planned.date) {
+                guard let workout = workouts[planned.workoutID], workout.sessionType == .interval else { continue }
+                for step in workout.blocks.flatMap(\.steps) where step.kind == .work {
+                    if case .pace(let range)? = step.companionTarget {
+                        fractions.append(250 / ((range.lowerBound + range.upperBound) / 2))
+                    }
+                }
+            }
+            result.append(fractions)
+        }
+        return result
+    }
+
+    @Test("the fast and endurance quality fractions drift across the structural phase and reach the steps")
+    func fractionsReachSteps() async throws {
+        let perMicro = try await structuralFractions()
+        let all = perMicro.flatMap { $0 }
+        #expect(perMicro.first?.contains { abs($0 - 1.14) < 0.003 } == true, "first micro \(perMicro.first ?? [])")
+        #expect(perMicro.first?.contains { abs($0 - 0.86) < 0.003 } == true)
+        #expect(all.contains { $0 > 1.07 && $0 < 1.12 }, "a fast fraction part-way down: \(all)")
+        #expect(all.contains { $0 > 0.88 && $0 < 0.92 }, "an endurance fraction part-way up: \(all)")
+    }
+
+    @Test("a micro with a single hard run alternates between fast and endurance quality")
+    func singleHardRunAlternates() async throws {
+        let perMicro = try await structuralFractions(hardSessions: 1)
+        let fast = perMicro.filter { $0.contains { $0 > 1.05 && $0 < 1.15 } }.count
+        let endurance = perMicro.filter { $0.contains { $0 > 0.85 && $0 < 0.95 } }.count
+        #expect(fast > 0 && endurance > 0, "fast in \(fast) micros, endurance in \(endurance)")
+    }
+
+    @Test("a plan's spacing applies to a paradigm that has none of its own")
+    func overrideOnParadigmWithoutSpacing() async throws {
+        var asked = tenDayRequest(distance: Race.marathonDistanceMeters, spacing: 3)
+        asked.paradigm.minDaysBetweenHardSessions = nil
+        let candidate = try await PlanGenerator.generate(asked).candidate
+        let hard = candidate.sessions.filter { $0.intensity >= .high || $0.speed == .max || $0.isLongRun }.map(\.day).sorted()
+        let gaps = zip(hard, hard.dropFirst()).map { calendar.dateComponents([.day], from: $0, to: $1).day! }
+        #expect(gaps.allSatisfy { $0 >= 3 }, "gaps \(gaps)")
+    }
 }

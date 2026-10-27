@@ -157,6 +157,10 @@ struct SessionProfileTests {
         #expect(SessionProfile(sessionType: .interval, endRaceTargetFraction: 1.0).progressedRaceTargetFraction(microIndex: 0, of: 5) == nil)
         let decoded = try? JSONDecoder().decode(SessionProfile.self, from: JSONEncoder().encode(fast))
         #expect(decoded == fast)
+        // A profile stored before the end fraction existed decodes without one.
+        let legacy = try? JSONDecoder().decode(SessionProfile.self, from: Data(#"{"sessionType":"interval","raceTargetFraction":1.1}"#.utf8))
+        #expect(legacy == SessionProfile(sessionType: .interval, raceTargetFraction: 1.1))
+        #expect(legacy?.endRaceTargetFraction == nil)
     }
 
     @Test("the triphasic paradigm carries the decided profiles and the polarized one none")
@@ -174,6 +178,8 @@ struct SessionProfileTests {
     @Test("a request asks for 2, 3 and 4 hard sessions for micros of 7, 10 and 14 days unless told otherwise")
     func hardSessionDefaults() {
         #expect([7, 10, 14].map { PlanRequest.defaultHardSessionsPerMicro(microLengthDays: $0) } == [2, 3, 4])
+        // Other lengths are 2 per 7 days, rounded.
+        #expect([8, 12, 21].map { PlanRequest.defaultHardSessionsPerMicro(microLengthDays: $0) } == [2, 3, 6])
     }
 }
 

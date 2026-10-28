@@ -38,9 +38,10 @@ public actor PlanSandbox {
     ///     through six months ahead — wide enough for most planning horizons without pulling an
     ///     athlete's entire multi-year history out of the store on every sandbox construction.
     ///     Pass a wider range explicitly if a tool genuinely needs it (e.g. season-long stats).
-    ///   - races: Races to evaluate race-day TSB against. `TrainingCore` has no `RaceStore` yet
+    ///   - races: Races to add to the series and to evaluate race-day TSB against. `TrainingCore` has no `RaceStore` yet
     ///     (races are laid out through `CycleLayoutBuilder` inputs, not persisted per MVP 1), so
-    ///     callers that have races in hand pass them here; defaults to none.
+    ///     callers that have races in hand pass them here; defaults to none. Their load is in the simulated
+    ///     series from MVP5-149 on, so the findings after a race include its fatigue.
     /// - Throws: ``PlanSandboxError/missingAthleteProfile`` if `stores.athleteStore` has no
     ///   profile saved yet.
     public init(
@@ -117,6 +118,7 @@ public actor PlanSandbox {
             activities: activities,
             plans: plans,
             workouts: workouts,
+            races: races,
             athlete: athlete,
             today: today
         )

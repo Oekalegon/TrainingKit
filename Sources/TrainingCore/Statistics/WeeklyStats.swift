@@ -1,7 +1,7 @@
 import Foundation
 
 /// Descriptive totals for one calendar week, the special case of ``PeriodStats`` that
-/// ``StatisticsCalculator/weeklyStats(activities:plans:workouts:athlete:asOf:)`` returns for every
+/// ``StatisticsCalculator/weeklyStats(activities:plans:workouts:races:athlete:asOf:)`` returns for every
 /// week touched by `activities`/`plans`, from the earliest through `today`.
 ///
 /// Week boundaries come from ``AthleteProfile/weekStartsOn`` and ``AthleteProfile/timeZone``, the
@@ -11,7 +11,7 @@ public struct WeeklyStats: Identifiable, Sendable, Hashable {
     public var id: Date { weekStart }
     /// Start of the week, in the athlete's timezone.
     public let weekStart: Date
-    /// `true` if any part of this week's totals came from planned activities rather than
+    /// `true` if any part of this week's totals came from planned activities or races rather than
     /// completed ones.
     public let isProjected: Bool
     /// Totals broken down by sport.
@@ -37,8 +37,8 @@ public struct WeeklyStats: Identifiable, Sendable, Hashable {
     ///
     /// - Parameters:
     ///   - weekStart: Start of the week, in the athlete's timezone.
-    ///   - isProjected: `true` if any part of this week's totals came from planned activities
-    ///     rather than completed ones.
+    ///   - isProjected: `true` if any part of this week's totals came from planned activities or
+    ///     races rather than completed ones.
     ///   - bySport: Totals broken down by sport.
     ///   - totalDistanceMeters: Total distance covered across every sport.
     ///   - totalTime: Total time across every sport.

@@ -151,11 +151,26 @@ struct PlanSandboxTests {
     func engineWithRaces() {
         let athlete = AthleteProfile.fixture()
         let race = Race(name: "Race", date: day(3), priority: .primary, distanceMeters: 42_195)
-        let without = DefaultSeriesEngine().metrics(activities: [], plans: [], workouts: [], athlete: athlete, today: day(0))
-        let with = DefaultSeriesEngine(races: [race]).metrics(activities: [], plans: [], workouts: [], athlete: athlete, today: day(0))
+        let without = DefaultSeriesEngine().metrics(activities: [], plans: [], workouts: [], races: [], athlete: athlete, today: day(0))
+        let with = DefaultSeriesEngine().metrics(activities: [], plans: [], workouts: [], races: [race], athlete: athlete, today: day(0))
 
         #expect(without.allSatisfy { $0.load == 0 })
         #expect(with.contains { $0.load > 0 })
+    }
+
+    @Test("simulate adds the sandbox's races to the series it evaluates")
+    func simulateAddsRaceLoad() async throws {
+        let (_, stores, _) = try await makeStores()
+        let race = Race(name: "Race", date: day(3), priority: .primary, distanceMeters: 42_195)
+
+        let withRace = try await PlanSandbox(snapshotOf: stores, races: [race])
+        let without = try await PlanSandbox(snapshotOf: stores)
+        let engine = DefaultSeriesEngine()
+        let a = await withRace.simulate(engine: engine, evaluator: PlanEvaluator(), today: day(0))
+        let b = await without.simulate(engine: engine, evaluator: PlanEvaluator(), today: day(0))
+
+        #expect(a.metrics.contains { $0.load > 0 })
+        #expect(b.metrics.allSatisfy { $0.load == 0 })
     }
 
     @Test("simulate surfaces PlanEvaluator findings for a guardrail-tripping plan")

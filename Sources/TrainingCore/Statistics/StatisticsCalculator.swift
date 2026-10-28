@@ -91,6 +91,11 @@ public struct StatisticsCalculator: Sendable {
     ///   - plans: Planned activities to project with `estimator`/`durationEstimator` for weeks that
     ///     aren't fully in the past.
     ///   - workouts: The library workouts `plans` reference, looked up by id.
+    ///   - races: Races to project like planned activities from `today` on, with their distance, their
+    ///     time (the goal time, or the time at the athlete's pace model), their load (``Race/expectedLoadOverride``
+    ///     or an estimate, as ``DailyLoadSeries`` adds it) and their time in zone (MVP5-149); defaults to none.
+    ///     A plan on the race day is counted as well, as in the series. Pass the races that matter for the
+    ///     weeks shown: a race far ahead adds the empty weeks up to it.
     ///   - athlete: Supplies the timezone, week-start day, and zone settings used throughout.
     ///   - today: The boundary between "actual" and "estimated" days; injected rather than
     ///     `Date()` so the result is deterministic.
@@ -99,6 +104,7 @@ public struct StatisticsCalculator: Sendable {
         activities: [Activity],
         plans: [PlannedActivity],
         workouts: [StructuredWorkout],
+        races: [Race] = [],
         athlete: AthleteProfile,
         asOf today: Date
     ) -> [WeeklyStats] {
@@ -106,7 +112,7 @@ public struct StatisticsCalculator: Sendable {
         calendar.timeZone = athlete.timeZone
         calendar.firstWeekday = athlete.weekStartsOn.rawValue
 
-        let allDays = activities.map(\.start) + plans.map(\.date) + [today]
+        let allDays = activities.map(\.start) + plans.map(\.date) + races.map(\.date).filter { calendar.startOfDay(for: $0) >= calendar.startOfDay(for: today) } + [today]
         guard let firstDay = allDays.min(), let lastDay = allDays.max() else { return [] }
 
         let firstWeekStart = weekStart(containing: firstDay, calendar: calendar)
@@ -121,6 +127,7 @@ public struct StatisticsCalculator: Sendable {
                 activities: activities,
                 plans: plans,
                 workouts: workouts,
+                races: races,
                 athlete: athlete,
                 range: weekStartDate...weekEnd,
                 asOf: today,
@@ -142,6 +149,8 @@ public struct StatisticsCalculator: Sendable {
     ///   - plans: Planned activities to project with `estimator`/`durationEstimator` for days in
     ///     `range` that aren't in the past.
     ///   - workouts: The library workouts `plans` reference, looked up by id.
+    ///   - races: Races to project like planned activities, on the same rule as plans: on `today` only if
+    ///     nothing was completed that day, and on days after it (MVP5-149); defaults to none.
     ///   - athlete: Supplies the timezone and zone settings used throughout.
     ///   - range: The calendar-day range to summarize, in the athlete's timezone. Both bounds are
     ///     inclusive whole days.
@@ -154,6 +163,7 @@ public struct StatisticsCalculator: Sendable {
         activities: [Activity],
         plans: [PlannedActivity],
         workouts: [StructuredWorkout],
+        races: [Race] = [],
         athlete: AthleteProfile,
         range: ClosedRange<Date>,
         asOf today: Date,
@@ -187,6 +197,12 @@ public struct StatisticsCalculator: Sendable {
             if day == todayStart { return !daysWithActivity.contains(day) }
             return true
         }
+        // A race counts like a plan, as in ``DailyLoadSeries``.
+        let racesInRange = races.filter { race in
+            let day = calendar.startOfDay(for: race.date)
+            guard day >= rangeStart && day <= rangeEnd && day >= todayStart else { return false }
+            return day != todayStart || !daysWithActivity.contains(day)
+        }
 
         var itemsBySport: [Sport: [StatItem]] = [:]
         for (sport, item) in activityItems(activitiesInRange, athlete: athlete) {
@@ -195,8 +211,11 @@ public struct StatisticsCalculator: Sendable {
         for (sport, item) in plannedItems(plansInRange, workoutsByID: workoutsByID, athlete: athlete, paceHistory: paceHistory) {
             itemsBySport[sport, default: []].append(item)
         }
+        for (sport, item) in raceItems(racesInRange, athlete: athlete) {
+            itemsBySport[sport, default: []].append(item)
+        }
 
-        let isProjected = rangeEnd > todayStart || (rangeEnd == todayStart && !plansInRange.isEmpty)
+        let isProjected = rangeEnd > todayStart || (rangeEnd == todayStart && !(plansInRange.isEmpty && racesInRange.isEmpty))
 
         let bySport = bySport(itemsBySport)
 
@@ -234,7 +253,7 @@ public struct StatisticsCalculator: Sendable {
     }
 
     /// Computes `range`'s performed and planned totals independently, per sport, rather than
-    /// ``periodStats(activities:plans:workouts:athlete:range:asOf:previous:paceHistory:)``'s single merged
+    /// ``periodStats(activities:plans:workouts:races:athlete:range:asOf:previous:paceHistory:)``'s single merged
     /// figure.
     ///
     /// `periodStats` follows the same either/or rule ``DailyLoadSeries`` uses for CTL/ATL: a plan
@@ -256,6 +275,9 @@ public struct StatisticsCalculator: Sendable {
     ///     `today` or later and to those not yet matched to a completed activity
     ///     (`completedActivityID == nil`) — a matched plan is already counted as that activity.
     ///   - workouts: The library workouts `plans` reference, looked up by id.
+    ///   - races: Races dated `today` or later, projected on the planned side like unmatched plans: a race
+    ///     has no link to the activity that records it, so on its day it counts on both sides (MVP5-149);
+    ///     defaults to none.
     ///   - athlete: Supplies the timezone and zone settings used throughout.
     ///   - range: The calendar-day range to summarize, in the athlete's timezone. Both bounds are
     ///     inclusive whole days.
@@ -268,6 +290,7 @@ public struct StatisticsCalculator: Sendable {
         activities: [Activity],
         plans: [PlannedActivity],
         workouts: [StructuredWorkout],
+        races: [Race] = [],
         athlete: AthleteProfile,
         range: ClosedRange<Date>,
         asOf today: Date,
@@ -296,6 +319,13 @@ public struct StatisticsCalculator: Sendable {
         }
         var plannedBySport: [Sport: [StatItem]] = [:]
         for (sport, item) in plannedItems(plansInRange, workoutsByID: workoutsByID, athlete: athlete, paceHistory: paceHistory) {
+            plannedBySport[sport, default: []].append(item)
+        }
+        let racesInRange = races.filter { race in
+            let day = calendar.startOfDay(for: race.date)
+            return day >= rangeStart && day <= rangeEnd && day >= todayStart
+        }
+        for (sport, item) in raceItems(racesInRange, athlete: athlete) {
             plannedBySport[sport, default: []].append(item)
         }
 
@@ -343,6 +373,23 @@ public struct StatisticsCalculator: Sendable {
                 distanceMeters: projection.distanceMeters,
                 time: projection.duration,
                 load: load,
+                timeInZone: projection.timeInZone
+            )
+            return (workout.sport, item)
+        }
+    }
+
+    /// `races`, each turned into a `StatItem` the way a planned activity is (MVP5-149): the race's own
+    /// distance, the duration and time in zone of the one-step workout it stands for (``RaceLoad``), and
+    /// its load. The pace history is not used: a race is not like the athlete's earlier workouts.
+    private func raceItems(_ races: [Race], athlete: AthleteProfile) -> [(Sport, StatItem)] {
+        races.map { race in
+            let workout = RaceLoad.workout(for: race, athlete: athlete)
+            let projection = project(workout: workout, athlete: athlete, paceHistory: .empty, before: race.date, excluding: nil)
+            let item = StatItem(
+                distanceMeters: race.distanceMeters,
+                time: projection.duration,
+                load: RaceLoad.load(for: race, estimator: estimator, athlete: athlete),
                 timeInZone: projection.timeInZone
             )
             return (workout.sport, item)
@@ -427,8 +474,8 @@ public struct StatisticsCalculator: Sendable {
     /// the time it took before; see ``PaceHistory``. Without a similar earlier workout this is
     /// ``projection(for:athlete:)``.
     ///
-    /// Pass the same `paceHistory` to ``periodStats(activities:plans:workouts:athlete:range:asOf:previous:paceHistory:)``
-    /// and ``periodStatsSplit(activities:plans:workouts:athlete:range:asOf:paceHistory:)``, with the
+    /// Pass the same `paceHistory` to ``periodStats(activities:plans:workouts:races:athlete:range:asOf:previous:paceHistory:)``
+    /// and ``periodStatsSplit(activities:plans:workouts:races:athlete:range:asOf:paceHistory:)``, with the
     /// plan's date as `cutoff`, so a per-workout figure agrees with the totals it rolls into.
     ///
     /// - Parameters:

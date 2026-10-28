@@ -1,7 +1,7 @@
 import Foundation
 
 /// Descriptive totals for one calendar week, the special case of ``PeriodStats`` that
-/// ``StatisticsCalculator/weeklyStats(activities:plans:workouts:athlete:asOf:)`` returns for every
+/// ``StatisticsCalculator/weeklyStats(activities:plans:workouts:races:athlete:asOf:)`` returns for every
 /// week touched by `activities`/`plans`, from the earliest through `today`.
 ///
 /// Week boundaries come from ``AthleteProfile/weekStartsOn`` and ``AthleteProfile/timeZone``, the

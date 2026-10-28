@@ -24,6 +24,9 @@ extension CalendarExport {
         /// The template's session type (`easy`, `long`, ...); absent for an untagged one, and in files
         /// written before session types existed.
         public let sessionType: String?
+        /// The days the template wants free around it, if it says; absent for the default of its
+        /// session type, and in files written before recovery days existed.
+        public let recoveryDays: RecoveryDays?
         /// The parameters the blocks may refer to.
         public let parameters: [Parameter]
         /// The template's blocks, in order.
@@ -86,6 +89,7 @@ extension CalendarExport.Template {
             venue: template.venue,
             purpose: template.purpose == .general ? nil : template.purpose.rawValue,
             sessionType: template.sessionType?.rawValue,
+            recoveryDays: template.recoveryDays,
             parameters: template.parameters.map { parameter in
                 Parameter(
                     key: parameter.key, name: parameter.name, unit: Self.unitIdentifier(parameter.unit),
@@ -154,7 +158,8 @@ extension CalendarExport.Template {
             // An unknown purpose from a newer file is read as general rather than rejecting the template.
             purpose: purpose.flatMap(WorkoutPurpose.init(rawValue:)) ?? .general,
             // Likewise an unknown session type is read as untagged.
-            sessionType: sessionType.flatMap(SessionType.init(rawValue:))
+            sessionType: sessionType.flatMap(SessionType.init(rawValue:)),
+            recoveryDays: recoveryDays
         )
         // Resolves every reference, so one to an undeclared parameter is caught here, and checks
         // the defaults give a workout that makes sense.

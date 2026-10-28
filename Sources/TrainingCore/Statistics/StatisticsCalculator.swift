@@ -94,6 +94,8 @@ public struct StatisticsCalculator: Sendable {
     ///   - races: Races to project like planned activities from `today` on, with their distance, their
     ///     time (the goal time, or the time at the athlete's pace model), their load (``Race/expectedLoadOverride``
     ///     or an estimate, as ``DailyLoadSeries`` adds it) and their time in zone (MVP5-149); defaults to none.
+    ///     A plan on the race day is counted as well, as in the series. Pass the races that matter for the
+    ///     weeks shown: a race far ahead adds the empty weeks up to it.
     ///   - athlete: Supplies the timezone, week-start day, and zone settings used throughout.
     ///   - today: The boundary between "actual" and "estimated" days; injected rather than
     ///     `Date()` so the result is deterministic.

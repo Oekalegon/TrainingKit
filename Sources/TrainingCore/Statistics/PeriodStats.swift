@@ -7,7 +7,7 @@ import Foundation
 public struct PeriodStats: Sendable, Hashable {
     /// The calendar-day range these totals cover, in the athlete's timezone.
     public let range: ClosedRange<Date>
-    /// `true` if any part of this period's totals came from planned activities rather than
+    /// `true` if any part of this period's totals came from planned activities or races rather than
     /// completed ones.
     public let isProjected: Bool
     /// Totals broken down by sport.

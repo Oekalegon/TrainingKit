@@ -110,4 +110,98 @@ struct StatisticsCalculatorRaceTests {
         #expect(with.activityCount == 0)
         #expect(with.totalLoad == 0)
     }
+
+    @Test("a race with a pace target is timed at its goal pace; its distance is the race's own, not the pace model's")
+    func paceTargetRace() {
+        let asked = Race(
+            name: "Half", date: day(3), priority: .primary, distanceMeters: 21_097.5,
+            specificPhaseTarget: .pace(secondsPerKilometer: 300)
+        )
+        let period = stats(races: [asked], range: day(0)...day(6), today: day(0))
+
+        #expect(period.totalDistanceMeters == 21_097.5)
+        #expect(abs(period.totalTime - 21.0975 * 300) < 1)
+        #expect(period.timeInZone.seconds.values.reduce(0, +) > 0)
+        #expect(period.totalLoad > 0)
+    }
+
+    @Test("a race with a heart-rate or an effort target still counts its own distance and a duration")
+    func otherTargets() {
+        let targets: [SpecificPhaseTarget?] = [.heartRate(beatsPerMinute: 150...160), .perceivedEffort(6), nil, .predictedFromFitness]
+        for target in targets {
+            let asked = Race(name: "Race", date: day(3), priority: .primary, distanceMeters: 10_000, specificPhaseTarget: target)
+            let period = stats(races: [asked], range: day(0)...day(6), today: day(0))
+            #expect(period.totalDistanceMeters == 10_000, "\(String(describing: target))")
+            #expect(period.totalTime > 0, "\(String(describing: target))")
+        }
+    }
+
+    @Test("an athlete without heart-rate zone settings still gets the race's distance, with no time in zone and the override as load")
+    func noZoneSettings() {
+        var bare = athlete
+        bare.heartRateZoneHistory = []
+        let period = calculator.periodStats(
+            activities: [], plans: [], workouts: [], races: [race(on: 3, load: 250)], athlete: bare,
+            range: day(0)...day(6), asOf: day(0), previous: nil
+        )
+
+        #expect(period.totalDistanceMeters == 21_097.5)
+        #expect(period.totalLoad == 250)
+        #expect(period.timeInZone.seconds.values.reduce(0, +) == 0)
+    }
+
+    @Test("a race late in the evening counts on its own day in the athlete's time zone")
+    func raceDayInTimeZone() {
+        let amsterdam = AthleteProfile.fixture(timeZoneIdentifier: "Europe/Amsterdam")
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = amsterdam.timeZone
+        // 23:30 on Saturday 31 October 2026 in Amsterdam is 22:30 UTC, still the same day there, and a Sunday week start follows.
+        let evening = calendar.date(from: DateComponents(year: 2026, month: 10, day: 31, hour: 23, minute: 30))!
+        let saturday = calendar.startOfDay(for: evening)
+        let sunday = calendar.date(byAdding: .day, value: 1, to: saturday)!
+        let asked = Race(name: "Night race", date: evening, priority: .primary, distanceMeters: 10_000, expectedLoadOverride: 100)
+
+        func load(in range: ClosedRange<Date>) -> Double {
+            calculator.periodStats(
+                activities: [], plans: [], workouts: [], races: [asked], athlete: amsterdam,
+                range: range, asOf: calendar.date(byAdding: .day, value: -3, to: saturday)!, previous: nil
+            ).totalLoad
+        }
+        #expect(load(in: saturday...saturday) == 100)
+        #expect(load(in: sunday...sunday) == 0)
+    }
+
+    @Test("weekly stats ignore a race in the past, as the series does")
+    func weeklyStatsIgnorePastRace() {
+        let weeks = calculator.weeklyStats(
+            activities: [], plans: [], workouts: [], races: [race(on: -30, load: 250)], athlete: athlete, asOf: day(0)
+        )
+        #expect(weeks.reduce(0) { $0 + $1.totalLoad } == 0)
+        #expect(weeks.count == 1)
+    }
+
+    @Test("a race in the second week shows in that week's delta against the first")
+    func raceInDelta() {
+        let weeks = calculator.weeklyStats(
+            activities: [], plans: [], workouts: [], races: [race(on: 9, load: 250)], athlete: athlete, asOf: day(0)
+        )
+        let withRace = weeks.filter { $0.totalLoad > 0 }
+        #expect(withRace.count == 1)
+        #expect(withRace.first?.totalLoad == 250)
+        #expect(withRace.first?.activityCount == 1)
+    }
+
+    @Test("a plan on the race day is counted as well: a race and a workout planned that day are two activities")
+    func planOnRaceDayCountsToo() {
+        let workout = StructuredWorkout(
+            name: "Shakeout", sport: .running,
+            blocks: [WorkoutBlock(steps: [WorkoutStep(kind: .work, goal: .time(900), target: .heartRateZone(1))])]
+        )
+        let plan = PlannedActivity(workoutID: workout.id, date: day(3))
+        let period = calculator.periodStats(
+            activities: [], plans: [plan], workouts: [workout], races: [race(on: 3, load: 250)], athlete: athlete,
+            range: day(0)...day(6), asOf: day(0), previous: nil
+        )
+        #expect(period.activityCount == 2)
+    }
 }

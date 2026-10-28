@@ -68,8 +68,6 @@ public struct PlanGenerator: PlanCandidateProvider {
     public let request: PlanRequest
     /// The request's templates by id, for the recovery days of a fitted run.
     private let templatesByID: [UUID: WorkoutTemplate]
-    /// The templates the fitter can use, prepared once for every fit of every candidate (MVP5-151).
-    private let preparedTemplates: [TemplateFitter.Prepared]
 
     /// The request's paradigm with the spacing the plan's preferences ask for
     /// (``PlanPreferences/minDaysBetweenHardSessions``), which the day assignment and the evaluation share.
@@ -86,7 +84,6 @@ public struct PlanGenerator: PlanCandidateProvider {
     public init(request: PlanRequest) {
         self.request = request
         templatesByID = Dictionary(request.templates.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        preparedTemplates = TemplateFitter.prepare(request.templates, athlete: request.athlete)
     }
 
     /// Builds the proposal for `request` with a new generator.
@@ -142,6 +139,8 @@ public struct PlanGenerator: PlanCandidateProvider {
         let microCycles = cycles.filter { $0.level == .micro }
         let volumes = try volumeTargets(for: micros, curve: request.volumeCurve)
         let ceilings = try volumeTargets(for: micros, curve: ceilingCurve)
+        // Analysing the templates does not depend on the micro, the volume or the levers: once per candidate.
+        let prepared = TemplateFitter.prepare(request.templates, athlete: request.athlete)
 
         var planned: [PlannedActivity] = []
         var workouts: [StructuredWorkout] = []
@@ -180,7 +179,7 @@ public struct PlanGenerator: PlanCandidateProvider {
             func build(_ seconds: TimeInterval) throws -> MicroBuild {
                 try buildMicro(
                     assignment, micro: micro, cycleID: microCycles[index].id, seconds: seconds, position: position,
-                    phaseCount: phaseMicros.count, previous: previousTemplates, levers: levers, carried: demands, calendar: calendar
+                    phaseCount: phaseMicros.count, previous: previousTemplates, levers: levers, carried: demands, prepared: prepared, calendar: calendar
                 )
             }
             func endTSB(of built: MicroBuild, on day: Date) -> FitnessMetrics? {
@@ -322,10 +321,10 @@ public struct PlanGenerator: PlanCandidateProvider {
     /// shortfall is a ``PlanCompromise/recoveryDaysShort(day:template:neededDays:availableDays:)``.
     private func buildMicro(
         _ assignment: DayAssignmentResult, micro: Microcycle, cycleID: UUID, seconds: TimeInterval, position: Int,
-        phaseCount: Int, previous: [UUID], levers: PlanLevers, carried: [Demand], calendar: Calendar
+        phaseCount: Int, previous: [UUID], levers: PlanLevers, carried: [Demand], prepared: [TemplateFitter.Prepared], calendar: Calendar
     ) throws -> MicroBuild {
         var built = MicroBuild()
-        let fits = TemplateFits()
+        let fits = TemplateFits(prepared: prepared)
         let share = seconds / Double(max(assignment.assignments.count, 1))
         var hardIndex = 0
         let runs = assignment.assignments.filter { !levers.droppedDays.contains($0.day) }
@@ -474,7 +473,13 @@ public struct PlanGenerator: PlanCandidateProvider {
     /// The ``TemplateFit``s made while building one micro, so equal runs (the easy runs of a micro, say)
     /// are fitted once (MVP5-151). A fit is a pure function of its key, so nothing changes but the time.
     private final class TemplateFits {
+        /// The request's templates the fitter can use, prepared once per candidate.
+        let prepared: [TemplateFitter.Prepared]
         private var fits: [FitKey: TemplateFit] = [:]
+
+        init(prepared: [TemplateFitter.Prepared]) {
+            self.prepared = prepared
+        }
 
         func fit(for key: FitKey, make: () -> TemplateFit) -> TemplateFit {
             if let known = fits[key] { return known }
@@ -509,7 +514,7 @@ public struct PlanGenerator: PlanCandidateProvider {
             TemplateFitter.fit(
                 profile: profile,
                 targetSeconds: share,
-                prepared: excluded.isEmpty ? preparedTemplates : preparedTemplates.filter { !excluded.contains($0.template.id) },
+                prepared: excluded.isEmpty ? fits.prepared : fits.prepared.filter { !excluded.contains($0.template.id) },
                 previous: previous,
                 workLength: workLength,
                 athlete: request.athlete

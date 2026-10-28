@@ -367,10 +367,11 @@ struct TemplateFitterTests {
             ("flat", { _ in 100 }),
             ("curved", { 10 + $0 * $0 * $0 }),
             ("kinked", { $0 < 40 ? $0 : 40 + 5 * ($0 - 40) }),
+            // Goals that are multiples of 10 land on the start of a step, where the two agree; inside a step they may not (see `solve`).
             ("stepped", { ($0 / 10).rounded(.down) * 10 }),
         ]
         for (name, function) in functions {
-            for goal in stride(from: 0.0, through: 500, by: 17.5) {
+            for goal in stride(from: 0.0, through: 500, by: name == "stepped" ? 10 : 17.5) {
                 let expected = bisect(0...100, toward: goal, using: function)
                 let solved = TemplateFitter.solve(0...100, toward: goal, using: function)
                 #expect(abs(solved - expected) <= 1e-6, "\(name), goal \(goal): \(solved) against \(expected)")

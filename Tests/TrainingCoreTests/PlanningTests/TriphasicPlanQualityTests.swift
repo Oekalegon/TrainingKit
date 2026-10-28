@@ -530,10 +530,44 @@ struct TriphasicPlanQualityTests {
         #expect(Set(keys).count == keys.count)
     }
 
-    @Test("a plan with no race target reports the hard steps that could not be given the phase pace")
-    func noRaceTargetIsReported() async throws {
+    private func unresolvedPlanTargets(_ candidate: PlanCandidate) -> [UnresolvedReason] {
+        candidate.compromises.compactMap { compromise in
+            if case .unresolvedPlanTarget(let reason) = compromise { reason } else { nil }
+        }
+    }
+
+    @Test("a plan with no race target says so once, not for every micro and template")
+    func noRaceTargetIsReportedOnce() async throws {
         let asked = generous(tenDayRequest(distance: Race.marathonDistanceMeters))
         let candidate = try await PlanGenerator.generate(asked).candidate
-        #expect(unresolvedSteps(candidate).contains { $0.reason == .noRaceTarget })
+        #expect(unresolvedPlanTargets(candidate) == [.noRaceTarget])
+        #expect(!unresolvedSteps(candidate).contains { $0.reason == .noRaceTarget })
+    }
+
+    @Test("a race target that is not a pace is reported once as well")
+    func unsupportedRaceTargetIsReportedOnce() async throws {
+        var asked = generous(tenDayRequest(distance: Race.marathonDistanceMeters))
+        asked.targetRace.specificPhaseTarget = .heartRate(beatsPerMinute: 150...160)
+        let candidate = try await PlanGenerator.generate(asked).candidate
+        #expect(unresolvedPlanTargets(candidate) == [.unsupportedRaceTarget])
+    }
+
+    @Test("a pace target gives no plan-level report")
+    func paceTargetGivesNoPlanReport() async throws {
+        var asked = generous(tenDayRequest(distance: Race.marathonDistanceMeters))
+        asked.targetRace.specificPhaseTarget = .pace(secondsPerKilometer: 270)
+        let candidate = try await PlanGenerator.generate(asked).candidate
+        #expect(unresolvedPlanTargets(candidate).isEmpty)
+    }
+
+    @Test("open: for a zone 3 race pace no built-in template holds the structural endurance quality pace (86 % of it), so it is reported")
+    func structuralEnduranceQualityIsReported() async throws {
+        var asked = generous(tenDayRequest(distance: Race.marathonDistanceMeters))
+        asked.targetRace.specificPhaseTarget = .pace(secondsPerKilometer: 270)
+        let candidate = try await PlanGenerator.generate(asked).candidate
+
+        let phases = Dictionary(uniqueKeysWithValues: micros(candidate).map { ($0.dateRange.lowerBound, $0.phase) })
+        // Update this when a template or the fractions make the pace reachable.
+        #expect(unresolvedSteps(candidate).contains { phases[$0.start] == .structural })
     }
 }

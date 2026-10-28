@@ -439,18 +439,68 @@ struct TemplateFitterTests {
         #expect(try fit(phasePace: 240, templates: [effort, z4]).template.id == effort.id)
     }
 
-    @Test("the holding templates are judged on the day's pace model, not a fixed one")
+    @Test("the holding templates are judged on the pace model they are given, not the athlete's current one")
     func phasePaceUsesTheGivenPaceModel() throws {
-        let z3 = repeats("A Zone 3", zone: 3)
-        let z4 = repeats("B Zone 4", zone: 4)
+        let zone4 = repeats("A Zone 4", zone: 4)
+        let zone2 = repeats("B Zone 2", zone: 2)
         let faster = PaceModel(thresholdPaceSecondsPerKilometer: 200)
-        let phase = TemplateFitter.PhasePace(secondsPerKilometer: 260, paceModel: faster)
-        // 260 s/km is slower than zone 3 for a 200 s/km threshold athlete, so neither holds and the tie goes to the name.
+        let pace = 240.0
+        // The premise: 240 s/km is a zone 4 pace for the fixture athlete and a zone 2 pace for a 200 s/km threshold.
+        #expect(StepTargetResolver.paceRange(zone: 4, in: athlete.paceModel)?.contains(pace) == true)
+        #expect(StepTargetResolver.paceRange(zone: 2, in: faster)?.contains(pace) == true)
+        let prepared = TemplateFitter.prepare([zone4, zone2], athlete: athlete)
+
+        func picked(_ model: PaceModel) throws -> TemplateChoice {
+            try choice(TemplateFitter.fit(
+                profile: SessionProfile(sessionType: .interval), targetSeconds: 1800, prepared: prepared,
+                phase: TemplateFitter.PhasePace(secondsPerKilometer: pace, paceModel: model), athlete: athlete
+            ))
+        }
+        #expect(try picked(athlete.paceModel).template.id == zone4.id)
+        // The name would pick the zone 4 template; the faster athlete's zone decides.
+        #expect(try picked(faster).template.id == zone2.id)
+    }
+
+    @Test("rotation moves to another template that holds the pace, never to one that does not")
+    func rotationStaysInTheHoldingPool() throws {
+        let outside = repeats("A Zone 4", zone: 4)
+        let first = repeats("B Zone 3 first", zone: 3)
+        let second = repeats("C Zone 3 second", zone: 3)
+        let prepared = TemplateFitter.prepare([outside, first, second], athlete: athlete)
+        let phase = TemplateFitter.PhasePace(secondsPerKilometer: 260, paceModel: athlete.paceModel)
+
         let picked = try choice(TemplateFitter.fit(
-            profile: SessionProfile(sessionType: .interval), targetSeconds: 1800,
-            prepared: TemplateFitter.prepare([z4, z3], athlete: athlete), phase: phase, athlete: athlete
+            profile: SessionProfile(sessionType: .interval), targetSeconds: 1800, prepared: prepared,
+            phase: phase, previous: [first.id], athlete: athlete
         ))
-        #expect(picked.template.id == z3.id)
+        #expect(picked.template.id == second.id)
+    }
+
+    @Test("a template with no hard step cannot do work at the phase pace: it takes part only when none holds")
+    func templateWithoutHardStep() throws {
+        var easy = repeats("A Easy only", zone: 1)
+        easy.blocks[0].repetitions = .fixed(1)
+        easy.blocks[0].steps = [TemplateStep(kind: .work, goal: .time(.fixed(1800)), target: .heartRateZone(1))]
+        let z3 = repeats("B Zone 3", zone: 3)
+        let phase = TemplateFitter.PhasePace(secondsPerKilometer: 260, paceModel: athlete.paceModel)
+
+        func picked(_ templates: [WorkoutTemplate]) throws -> TemplateChoice {
+            try choice(TemplateFitter.fit(
+                profile: SessionProfile(sessionType: .interval), targetSeconds: 1800,
+                prepared: TemplateFitter.prepare(templates, athlete: athlete), phase: phase, athlete: athlete
+            ))
+        }
+        #expect(try picked([easy, z3]).template.id == z3.id)
+        #expect(try picked([easy]).template.id == easy.id)
+    }
+
+    @Test("instantiating a built-in template keeps its blocks and steps, so a workout step can be traced to its template step")
+    func instantiateKeepsBlocksAndSteps() throws {
+        for template in BuiltInWorkoutTemplates.all {
+            let workout = try template.instantiate(values: Dictionary(uniqueKeysWithValues: template.parameters.map { ($0.key, $0.defaultValue) }))
+            #expect(workout.blocks.count == template.blocks.count, "\(template.name)")
+            #expect(zip(workout.blocks, template.blocks).allSatisfy { $0.steps.count == $1.steps.count }, "\(template.name)")
+        }
     }
 }
 

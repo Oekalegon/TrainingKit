@@ -78,10 +78,12 @@ public enum TemplateFitter {
 
         /// Whether the phase pace is a pace of one of the template's hard work steps, which is what a
         /// race-pace profile asks of a template: ``StepTargetResolver`` puts the phase pace on a step whose zone
-        /// holds it and keeps the zone's own pace on the others. A template with no hard step that has
-        /// a zone says nothing about it.
+        /// holds it and keeps the zone's own pace on the others. A hard step with another target (an
+        /// effort) is kept as it is and does not exclude the template; a template with no hard step at all
+        /// cannot do work at the phase pace and takes part only when none holds.
         func holds(_ phase: PhasePace) -> Bool {
-            if hasOtherHardTarget || hardZones.isEmpty { return true }
+            if hasOtherHardTarget { return true }
+            if hardZones.isEmpty { return false }
             return hardZones.contains { StepTargetResolver.paceRange(zone: $0, in: phase.paceModel)?.contains(phase.secondsPerKilometer) == true }
         }
     }

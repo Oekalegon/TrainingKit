@@ -153,6 +153,7 @@ public struct PlanGenerator: PlanCandidateProvider {
         var longDates: [Date] = []
         var previousTemplates: [UUID] = []
         var demands: [Demand] = []
+        var reportedPlanProblems: Set<UnresolvedReason> = []
         let spacesLong = paradigm.resolved(for: request.targetRace).spacesLongRunsAsHard
         let assigner = DayAssigner(paradigm: paradigm)
         let weeklyLimitSeconds = try request.preferences.maxWeeklyVolume[.running].map(durationSeconds(of:))
@@ -233,6 +234,9 @@ public struct PlanGenerator: PlanCandidateProvider {
 
             compromises += assignment.dropped.map { .unplacedSession(microStart: microStart, $0) }
             compromises += built.compromises
+            for reason in built.planProblems where reportedPlanProblems.insert(reason).inserted {
+                compromises.append(.unresolvedPlanTarget(reason: reason))
+            }
             compromises += missedZone.map { [$0] } ?? []
             workouts += built.workouts
             planned += built.planned
@@ -307,6 +311,8 @@ public struct PlanGenerator: PlanCandidateProvider {
         var longDays: [Date] = []
         var demands: [Demand] = []
         var compromises: [PlanCompromise] = []
+        /// Reasons a hard step could not be given its target that do not depend on the template, for the plan to report once.
+        var planProblems: [UnresolvedReason] = []
     }
 
     /// A demanding workout of the plan: its day and the days it wants free around it.
@@ -370,8 +376,14 @@ public struct PlanGenerator: PlanCandidateProvider {
             built.planned.append(result.planned)
             built.sessions.append(result.session)
             built.templates.append(result.templateID)
-            if let reason = result.unresolvedReason, reportedProblems.insert(ProblemKey(template: result.templateName, reason: reason)).inserted {
-                built.compromises.append(.unresolvedStep(microStart: micro.dateRange.lowerBound, template: result.templateName, reason: reason))
+            if let reason = result.unresolvedReason {
+                if reason.dependsOnTemplate {
+                    if reportedProblems.insert(ProblemKey(template: result.templateName, reason: reason)).inserted {
+                        built.compromises.append(.unresolvedStep(microStart: micro.dateRange.lowerBound, template: result.templateName, reason: reason))
+                    }
+                } else if !built.planProblems.contains(reason) {
+                    built.planProblems.append(reason)
+                }
             }
             built.fittedSeconds += result.seconds
             if let recovery = recoveryDays(of: result.templateID, defaultAfter: defaultAfter, longNeedsRecovery: longNeedsRecovery) {
@@ -682,5 +694,13 @@ public struct PlanGenerator: PlanCandidateProvider {
             days.append(DayLoad(day: next, load: 0, isProjected: true))
         }
         return FitnessMetricsCalculator().metrics(for: days, parameters: LoadModelParameters(), seed: nil)
+    }
+}
+
+private extension UnresolvedReason {
+    /// Whether the reason is about the template (its zone does not hold the phase pace) and not about the plan
+    /// (no race target, no zone settings): the second kind is the same for every template.
+    var dependsOnTemplate: Bool {
+        if case .paceOutsideZone = self { true } else { false }
     }
 }

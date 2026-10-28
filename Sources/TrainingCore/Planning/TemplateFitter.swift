@@ -215,11 +215,12 @@ public enum TemplateFitter {
 
     /// The value in `range` at which the non-decreasing `function` is nearest `goal`.
     ///
-    /// A function that is linear in the value, like the duration of a step against its length or
-    /// distance, is solved in closed form from its ends: the answer is taken when the function is at
-    /// `goal` there (within ``solveTolerance``). Otherwise, and when `goal` lies outside the function's
-    /// range, it is found by bisection, so the result is the same as bisection gives, only reached in
-    /// three evaluations instead of fifty for the common case (MVP5-151).
+    /// For a continuous function, one that is linear in the value (like the duration of a step against
+    /// its length or distance) is solved in closed form from its ends: the answer is taken when the
+    /// function is at `goal` there (within ``solveTolerance``). Otherwise, and when `goal` lies outside
+    /// the function's range, it is found by bisection, which the closed form agrees with, only reached in
+    /// three evaluations instead of fifty (MVP5-151). A function with a flat stretch at `goal` may give
+    /// another point of the stretch than bisection does; no duration does that.
     static func solve(_ range: ClosedRange<Double>, toward goal: Double, using function: (Double) -> Double) -> Double {
         let atLower = function(range.lowerBound)
         if atLower >= goal { return range.lowerBound }

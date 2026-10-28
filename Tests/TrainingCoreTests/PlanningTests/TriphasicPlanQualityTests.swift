@@ -416,27 +416,82 @@ struct TriphasicPlanQualityTests {
         #expect(raceDay.tsb > 20, "race-day TSB \(raceDay.tsb)")
     }
 
-    @Test("a micro that ends in another zone than the one of its role is reported, and one that ends in it is not", arguments: [false, true])
-    func missedZoneIsReported(generousVolumes: Bool) async throws {
-        // Without generous volumes the ceiling cannot reach the training zone: build micros end fresher.
-        let base = tenDayRequest(distance: Race.marathonDistanceMeters)
-        let proposal = try await PlanGenerator.generate(generousVolumes ? generous(base) : base)
-        let candidate = proposal.candidate
+    /// Every micro that ends in another zone than the one of its role is reported, with the zone it reached,
+    /// and no other is: not one the adjust loop or a lever lowered, and not one whose aimed day is warming up.
+    private func expectReports(_ candidate: PlanCandidate, levers: PlanLevers, guardrails: PlanGuardrails) throws {
         let reported = candidate.compromises.compactMap { compromise -> (Date, TSBZone, TSBZone)? in
             if case .sizingMissedZone(let start, let aimed, let reached) = compromise { (start, aimed, reached) } else { nil }
         }
-        #expect(generousVolumes || !reported.isEmpty, "a plan from low volumes reports no micro that misses its zone")
-
-        for micro in micros(candidate).dropLast() where proposal.levers.volumeScale(forMicro: micro.dateRange.lowerBound) == 1 {
-            let endZone = try #require(candidate.metrics.last { micro.dateRange.contains($0.day) }).tsbZone()
-            let aimed: TSBZone = micro.loadRole == .recovery ? .recovery : .training
-            let report = reported.first { $0.0 == micro.dateRange.lowerBound }
-            // Warming up (no history to aim from) is not reported; the history here covers it.
-            if endZone == aimed {
-                #expect(report == nil, "micro at \(micro.dateRange.lowerBound) ends in \(endZone) as aimed but is reported")
+        for micro in micros(candidate) {
+            let start = micro.dateRange.lowerBound
+            let end = try #require(candidate.metrics.last { micro.dateRange.contains($0.day) })
+            let report = reported.first { $0.0 == start }
+            if end.isWarmingUp || levers.volumeScale(forMicro: start) != 1 {
+                #expect(report == nil, "micro at \(start) is warming up or lowered but is reported")
+                continue
+            }
+            let aimed: TSBZone = switch micro.loadRole {
+            case .build: .training
+            case .recovery: .recovery
+            default: .race
+            }
+            let zone = end.tsbZone(guardrails: guardrails)
+            if zone == aimed {
+                #expect(report == nil, "micro at \(start) ends in \(zone) as aimed but is reported")
             } else {
-                #expect(report?.1 == aimed && report?.2 == endZone, "micro at \(micro.dateRange.lowerBound) ends in \(endZone), not \(aimed), and is reported as \(String(describing: report))")
+                #expect(report?.1 == aimed && report?.2 == zone, "micro at \(start) ends in \(zone), not \(aimed), and is reported as \(String(describing: report))")
             }
         }
+    }
+
+    private func guardrails(of asked: PlanRequest) -> PlanGuardrails {
+        asked.paradigm.resolved(for: asked.targetRace).guardrailOverrides.applied(to: asked.guardrails)
+    }
+
+    private func missedZones(_ candidate: PlanCandidate) -> [PlanCompromise] {
+        candidate.compromises.filter { if case .sizingMissedZone = $0 { true } else { false } }
+    }
+
+    @Test("a micro that ends in another zone than the one of its role is reported, and one that ends in it is not, the taper micro too", arguments: [false, true])
+    func missedZoneIsReported(generousVolumes: Bool) async throws {
+        // Without generous volumes the ceiling cannot reach the training zone: build micros end fresher.
+        let base = tenDayRequest(distance: Race.marathonDistanceMeters)
+        let asked = generousVolumes ? generous(base) : base
+        let proposal = try await PlanGenerator.generate(asked)
+        #expect(generousVolumes || !missedZones(proposal.candidate).isEmpty, "a plan from low volumes reports a micro that misses its zone")
+        try expectReports(proposal.candidate, levers: proposal.levers, guardrails: guardrails(of: asked))
+    }
+
+    @Test("a micro whose aimed day is still warming up is not reported")
+    func missedZoneNotReportedWhileWarmingUp() async throws {
+        var asked = generous(tenDayRequest(distance: Race.marathonDistanceMeters))
+        asked.activities = []
+        let proposal = try await PlanGenerator.generate(asked)
+        #expect(proposal.candidate.metrics.contains { $0.isWarmingUp })
+        let first = try #require(micros(proposal.candidate).first)
+        #expect(!proposal.candidate.compromises.contains { if case .sizingMissedZone(let start, _, _) = $0 { start == first.dateRange.lowerBound } else { false } })
+        try expectReports(proposal.candidate, levers: proposal.levers, guardrails: guardrails(of: asked))
+    }
+
+    @Test("a micro lowered by a lever is not reported, the others are")
+    func missedZoneNotReportedForLoweredMicro() async throws {
+        let asked = tenDayRequest(distance: Race.marathonDistanceMeters)
+        let generator = PlanGenerator(request: asked)
+        let first = try await generator.candidate(levers: .none, today: monday)
+        let lowered = micros(first)[5].dateRange.lowerBound
+        let levers = PlanLevers(volumeScales: [lowered: 0.5])
+        let candidate = try await generator.candidate(levers: levers, today: monday)
+        #expect(!candidate.compromises.contains { if case .sizingMissedZone(let start, _, _) = $0 { start == lowered } else { false } })
+        #expect(!missedZones(candidate).isEmpty)
+        try expectReports(candidate, levers: levers, guardrails: guardrails(of: asked))
+    }
+
+    @Test("the reached zone is judged with the paradigm's guardrail overrides, like the evaluator")
+    func missedZoneFollowsOverrides() async throws {
+        var asked = tenDayRequest(distance: Race.marathonDistanceMeters)
+        asked.paradigm.guardrailOverrides.minTSBOnRaceDay = 15
+        asked.paradigm.guardrailOverrides.maxTSBOnRaceDay = 35
+        let proposal = try await PlanGenerator.generate(asked)
+        try expectReports(proposal.candidate, levers: proposal.levers, guardrails: guardrails(of: asked))
     }
 }

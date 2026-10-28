@@ -494,4 +494,46 @@ struct TriphasicPlanQualityTests {
         let proposal = try await PlanGenerator.generate(asked)
         try expectReports(proposal.candidate, levers: proposal.levers, guardrails: guardrails(of: asked))
     }
+
+    // MARK: Race pace and the zone of the work (MVP5-150)
+
+    private func unresolvedSteps(_ candidate: PlanCandidate) -> [(start: Date, template: String, reason: UnresolvedReason)] {
+        candidate.compromises.compactMap { compromise in
+            if case .unresolvedStep(let start, let template, let reason) = compromise { (start, template, reason) } else { nil }
+        }
+    }
+
+    @Test("a race pace that is a pace of a template's zone gives race-pace work without an unresolved step in the specific phase and the taper")
+    func racePaceHeldByATemplate() async throws {
+        var asked = generous(tenDayRequest(distance: Race.marathonDistanceMeters))
+        // The fixture athlete's zone 3 runs from 249 to 273 s/km: a marathon at 270 is a zone 3 pace.
+        asked.targetRace.specificPhaseTarget = .pace(secondsPerKilometer: 270)
+        let candidate = try await PlanGenerator.generate(asked).candidate
+
+        let phases = Dictionary(uniqueKeysWithValues: micros(candidate).map { ($0.dateRange.lowerBound, $0.phase) })
+        let late = unresolvedSteps(candidate).filter { phases[$0.start] == .specific || phases[$0.start] == .taper }
+        #expect(late.isEmpty, "\(late)")
+    }
+
+    @Test("a race pace in no zone of any template is reported, once per template and reason in a micro")
+    func racePaceOutsideEveryZone() async throws {
+        var asked = generous(tenDayRequest(distance: 100_000))
+        // 400 s/km is slower than every zone of the fixture athlete.
+        asked.targetRace.specificPhaseTarget = .pace(secondsPerKilometer: 400)
+        let candidate = try await PlanGenerator.generate(asked).candidate
+
+        let phases = Dictionary(uniqueKeysWithValues: micros(candidate).map { ($0.dateRange.lowerBound, $0.phase) })
+        let reported = unresolvedSteps(candidate).filter { phases[$0.start] == .specific }
+        #expect(!reported.isEmpty)
+        #expect(reported.allSatisfy { if case .paceOutsideZone = $0.reason { true } else { false } })
+        let keys = reported.map { "\($0.start)|\($0.template)|\($0.reason)" }
+        #expect(Set(keys).count == keys.count)
+    }
+
+    @Test("a plan with no race target reports the hard steps that could not be given the phase pace")
+    func noRaceTargetIsReported() async throws {
+        let asked = generous(tenDayRequest(distance: Race.marathonDistanceMeters))
+        let candidate = try await PlanGenerator.generate(asked).candidate
+        #expect(unresolvedSteps(candidate).contains { $0.reason == .noRaceTarget })
+    }
 }

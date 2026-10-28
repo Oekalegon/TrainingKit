@@ -43,6 +43,9 @@ import Foundation
 ///    template wants more days free of demanding workouts around it than its neighbours leave
 ///    (``RecoveryDays``) is fitted again without that template; when no other template fits it keeps the
 ///    day and the shortfall is a ``PlanCompromise/recoveryDaysShort(day:template:neededDays:availableDays:)``.
+///    A profile with a race-target fraction on a pace target only takes templates whose hard work zone holds
+///    the phase pace; when none does, a hard step that could not be given its target is
+///    ``PlanCompromise/unresolvedStep(microStart:template:reason:)``, once per template and reason in a micro.
 /// 7. ``StepTargetResolver`` writes the athlete's zones and the profile's race-target fraction into the
 ///    steps, and the run becomes a ``PlannedActivity`` in the micro's cycle.
 /// 8. ``PlannedIntensityClassifier`` makes the ``PlanSession``s, and ``DailyLoadSeries`` with
@@ -325,6 +328,7 @@ public struct PlanGenerator: PlanCandidateProvider {
     ) throws -> MicroBuild {
         var built = MicroBuild()
         let fits = TemplateFits(prepared: prepared)
+        var reportedProblems: Set<ProblemKey> = []
         let share = seconds / Double(max(assignment.assignments.count, 1))
         var hardIndex = 0
         let runs = assignment.assignments.filter { !levers.droppedDays.contains($0.day) }
@@ -366,6 +370,9 @@ public struct PlanGenerator: PlanCandidateProvider {
             built.planned.append(result.planned)
             built.sessions.append(result.session)
             built.templates.append(result.templateID)
+            if let reason = result.unresolvedReason, reportedProblems.insert(ProblemKey(template: result.templateName, reason: reason)).inserted {
+                built.compromises.append(.unresolvedStep(microStart: micro.dateRange.lowerBound, template: result.templateName, reason: reason))
+            }
             built.fittedSeconds += result.seconds
             if let recovery = recoveryDays(of: result.templateID, defaultAfter: defaultAfter, longNeedsRecovery: longNeedsRecovery) {
                 built.demands.append(Demand(date: run.day, recovery: recovery))
@@ -460,6 +467,12 @@ public struct PlanGenerator: PlanCandidateProvider {
         return worst.map { RecoveryShortfall(template: name, needed: $0.needed, available: $0.available) }
     }
 
+    /// A template and why one of its hard steps could not be resolved: reported once per micro.
+    private struct ProblemKey: Hashable {
+        let template: String
+        let reason: UnresolvedReason
+    }
+
     /// What a fit depends on: runs of one micro with the same profile, work length and rotation memory
     /// get the same ``TemplateFit`` for the same share of the volume.
     private struct FitKey: Hashable {
@@ -468,6 +481,8 @@ public struct PlanGenerator: PlanCandidateProvider {
         let workLength: TimeInterval?
         let previous: [UUID]
         let excluded: Set<UUID>
+        /// The pace the phase asks for, which decides which templates take part.
+        let phase: TemplateFitter.PhasePace?
     }
 
     /// The ``TemplateFit``s made while building one micro, so equal runs (the easy runs of a micro, say)
@@ -499,7 +514,10 @@ public struct PlanGenerator: PlanCandidateProvider {
         let planned: PlannedActivity
         let session: PlanSession
         let templateID: UUID
+        let templateName: String
         let seconds: TimeInterval
+        /// Why a hard work step could not be given the target it was asked for, if one could not.
+        let unresolvedReason: UnresolvedReason?
     }
 
     /// Steps 6 and 7 for one run: profile, template fit, instantiation, step targets, and the
@@ -510,11 +528,20 @@ public struct PlanGenerator: PlanCandidateProvider {
     ) throws -> RunFit {
         let profile = profile(for: run, eased: eased, hardIndex: hardIndex, position: position, phase: micro.phase)
         let workLength = profile.progressedWorkLength(microIndex: position, of: phaseCount)
-        let fit = fits.fit(for: FitKey(profile: profile, targetSeconds: share, workLength: workLength, previous: previous, excluded: excluded)) {
+        let raceTargetFraction = profile.progressedRaceTargetFraction(microIndex: position, of: phaseCount)
+        // The pace the resolver puts on the work steps, as it works it out: a pace target divided by the fraction.
+        var phase: TemplateFitter.PhasePace?
+        if let fraction = raceTargetFraction, fraction.isFinite, fraction > 0,
+           case .pace(let seconds)? = request.targetRace.specificPhaseTarget, seconds.isFinite, seconds > 0 {
+            phase = TemplateFitter.PhasePace(secondsPerKilometer: seconds / fraction, paceModel: request.athlete.paceModel(asOf: run.day))
+        }
+        let key = FitKey(profile: profile, targetSeconds: share, workLength: workLength, previous: previous, excluded: excluded, phase: phase)
+        let fit = fits.fit(for: key) {
             TemplateFitter.fit(
                 profile: profile,
                 targetSeconds: share,
                 prepared: excluded.isEmpty ? fits.prepared : fits.prepared.filter { !excluded.contains($0.template.id) },
+                phase: phase,
                 previous: previous,
                 workLength: workLength,
                 athlete: request.athlete
@@ -527,19 +554,28 @@ public struct PlanGenerator: PlanCandidateProvider {
         } catch {
             throw PlanGeneratorError.workoutTemplate(error)
         }
-        let resolved = StepTargetResolver.resolve(
+        let resolution = StepTargetResolver.resolve(
             workout,
             on: run.day,
             athlete: request.athlete,
             raceTarget: request.targetRace.specificPhaseTarget,
-            raceTargetFraction: profile.progressedRaceTargetFraction(microIndex: position, of: phaseCount)
-        ).workout
+            raceTargetFraction: raceTargetFraction
+        )
+        let resolved = resolution.workout
+        // Only a hard work step is meant to be at the phase's pace (or any zone pace); the other steps are not reported.
+        let unresolvedReason = resolution.unresolved.first { step in
+            guard choice.template.blocks.indices.contains(step.blockIndex) else { return false }
+            let block = choice.template.blocks[step.blockIndex]
+            return block.steps.indices.contains(step.stepIndex) && block.steps[step.stepIndex].isHardWork(in: block)
+        }?.reason
         return .run(FittedRun(
             workout: resolved,
             planned: PlannedActivity(workoutID: resolved.id, date: run.day, cycleID: cycleID),
             session: PlannedIntensityClassifier().session(on: run.day, for: resolved, athlete: request.athlete),
             templateID: choice.template.id,
-            seconds: choice.seconds
+            templateName: choice.template.name,
+            seconds: choice.seconds,
+            unresolvedReason: unresolvedReason
         ))
     }
 

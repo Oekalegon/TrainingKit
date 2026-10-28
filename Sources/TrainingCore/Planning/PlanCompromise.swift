@@ -29,6 +29,12 @@ public enum PlanCompromise: Sendable, Codable, Hashable {
     /// than aimed means even the lightest volume tried leaves them tired, as after a race or a heavy history.
     /// A micro the adjust loop lowered is not reported here: the adjustment is.
     case sizingMissedZone(microStart: Date, aimed: TSBZone, reached: TSBZone)
+    /// A hard work step of `template`, in the micro starting on `microStart`, could not be given the target
+    /// the plan asked for (MVP5-150), for the reason `reason`: most often the phase's pace is not a pace of
+    /// the step's zone (``UnresolvedReason/paceOutsideZone(zone:paceZone:)``) and no template of the session
+    /// type has a zone that holds it, so the work is not at the phase pace. Reported once per template and
+    /// reason in a micro. Steps that are not hard work are not reported.
+    case unresolvedStep(microStart: Date, template: String, reason: UnresolvedReason)
     /// A workout wants more days free of demanding workouts around it than the plan could give it, and
     /// no other template fitted better: the workout on `day` made from `template` keeps its place with
     /// `availableDays` instead of `neededDays` days to its nearest demanding neighbour (MVP5-147,

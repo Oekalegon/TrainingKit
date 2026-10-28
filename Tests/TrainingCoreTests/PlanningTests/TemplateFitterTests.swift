@@ -386,6 +386,72 @@ struct TemplateFitterTests {
         #expect(abs(value - 0.3) < 1e-12)
         #expect(calls == 3)
     }
+
+    // MARK: Phase pace (MVP5-150)
+
+    /// An interval template with one hard step in `zone`, named so that "A" sorts before "B" when the fit is a tie.
+    private func repeats(_ name: String, zone: Int) -> WorkoutTemplate {
+        WorkoutTemplate(
+            name: name, sport: .running,
+            parameters: [WorkoutTemplateParameter(key: "reps", name: "Reps", unit: .count, defaultValue: 4, range: 2...10)],
+            blocks: [TemplateBlock(steps: [
+                TemplateStep(kind: .work, goal: .time(.fixed(240)), target: .heartRateZone(zone)),
+                TemplateStep(kind: .recovery, goal: .time(.fixed(120)), target: .heartRateZone(1)),
+            ], repetitions: .parameter("reps"))],
+            sessionType: .interval
+        )
+    }
+
+    private func fit(phasePace: Double?, templates: [WorkoutTemplate]) throws -> TemplateChoice {
+        let phase = phasePace.map { TemplateFitter.PhasePace(secondsPerKilometer: $0, paceModel: athlete.paceModel) }
+        return try choice(TemplateFitter.fit(
+            profile: SessionProfile(sessionType: .interval), targetSeconds: 1800,
+            prepared: TemplateFitter.prepare(templates, athlete: athlete), phase: phase, athlete: athlete
+        ))
+    }
+
+    @Test("a race-pace profile picks the template whose zone holds the phase pace, whatever the zone is")
+    func phasePaceDecidesByZone() throws {
+        let z3 = repeats("A Zone 3", zone: 3)
+        let z4 = repeats("B Zone 4", zone: 4)
+        // The fixture athlete: zone 3 is 249 to 273 s/km, zone 4 230 to 249.
+        #expect(try fit(phasePace: nil, templates: [z3, z4]).template.id == z3.id)
+        #expect(try fit(phasePace: 260, templates: [z4, z3]).template.id == z3.id)
+        #expect(try fit(phasePace: 240, templates: [z3, z4]).template.id == z4.id)
+        // A race pace in zone 3 is no reason to avoid a zone 3 template.
+        #expect(try fit(phasePace: 270, templates: [z4, z3]).template.id == z3.id)
+    }
+
+    @Test("when no template's zone holds the phase pace the best fit is kept, to be reported by the resolver")
+    func phasePaceNoTemplateHolds() throws {
+        let z3 = repeats("A Zone 3", zone: 3)
+        let z4 = repeats("B Zone 4", zone: 4)
+        #expect(try fit(phasePace: 400, templates: [z3, z4]).template.id == z3.id)
+        // Faster than every zone.
+        #expect(try fit(phasePace: 150, templates: [z3, z4]).template.id == z3.id)
+    }
+
+    @Test("a hard step with another target than a zone, or no hard step with a zone, does not exclude a template")
+    func phasePaceNeutralTemplates() throws {
+        var effort = repeats("A Effort", zone: 3)
+        effort.blocks[0].steps[0].target = .rpe(8)
+        let z4 = repeats("B Zone 4", zone: 4)
+        #expect(try fit(phasePace: 240, templates: [effort, z4]).template.id == effort.id)
+    }
+
+    @Test("the holding templates are judged on the day's pace model, not a fixed one")
+    func phasePaceUsesTheGivenPaceModel() throws {
+        let z3 = repeats("A Zone 3", zone: 3)
+        let z4 = repeats("B Zone 4", zone: 4)
+        let faster = PaceModel(thresholdPaceSecondsPerKilometer: 200)
+        let phase = TemplateFitter.PhasePace(secondsPerKilometer: 260, paceModel: faster)
+        // 260 s/km is slower than zone 3 for a 200 s/km threshold athlete, so neither holds and the tie goes to the name.
+        let picked = try choice(TemplateFitter.fit(
+            profile: SessionProfile(sessionType: .interval), targetSeconds: 1800,
+            prepared: TemplateFitter.prepare([z4, z3], athlete: athlete), phase: phase, athlete: athlete
+        ))
+        #expect(picked.template.id == z3.id)
+    }
 }
 
 private enum FitterTestError: Error { case missing }

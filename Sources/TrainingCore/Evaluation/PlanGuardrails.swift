@@ -8,7 +8,8 @@ public struct PlanGuardrails: Sendable, Codable, Hashable {
     public var maxMonotony: Double
     /// The percentile within the athlete's own trailing ``strainTrailingWindowDays`` of strain
     /// values above which a day's strain is flagged — absolute TRIMP thresholds don't transfer
-    /// across athletes, so this compares against the athlete's own distribution instead.
+    /// across athletes, so this compares against the athlete's own distribution instead. The rule
+    /// is skipped for a series with fewer than 14 days of real (not projected) strain.
     public var maxStrainPercentile: Double
     /// How many days of trailing strain history to compare a day against for
     /// ``maxStrainPercentile``; defaults to 84 (12 weeks).

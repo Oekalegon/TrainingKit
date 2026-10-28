@@ -711,7 +711,7 @@ Rules, all computed from the projected series:
 | Rule | Signal | Why |
 |---|---|---|
 | Monotony | 7-day mean / stdev | > 2.0 means the week has no easy/hard contrast, even at moderate volume |
-| Strain | weekly load × monotony | Absolute thresholds don't transfer across athletes in TRIMP units, so compare against the athlete's own trailing distribution. Skipped for a series with fewer than 14 days of real (not projected) strain: a ramp from no history is only compared with itself |
+| Strain | weekly load × monotony | Absolute thresholds don't transfer across athletes in TRIMP units, so compare against the athlete's own trailing distribution. Skipped for a series with fewer than 14 days of real (not projected) strain: a ramp from no history is only compared with itself. With 14 or more real days the rule is unchanged, so a build plan that raises load well above its history can still get strain risks in its later weeks (each rising week ranks above the weeks before it) |
 | Race-day TSB | TSB on `Race.date` | Taper landed: positive but not so high that fitness was lost (a warning, not a risk) |
 | TSB band | TSB on any day | Below `minAcceptableTSB` (−30) is the injury-risk band; above `maxAcceptableTSB` (25) reads as detraining (a warning) |
 | Longest run | a run's planned duration vs the longest run of the previous 28 days (any type, the day itself excluded) | at most +10 % (`maxLongestRunIncreaseFraction`) within `longestRunLookBackDays` (28); a chain of runs each within the limit of the last passes; risk; a run with no earlier run in the look-back is not checked; needs `sessions`, not cycles |

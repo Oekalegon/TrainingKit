@@ -7,7 +7,8 @@ import Foundation
 /// `PlanEvaluator` → adjust → repeat until ``PlanEvaluation/isAcceptable``, but this also works as a
 /// read-only "how does my current plan look" check.
 ///
-/// The metric rules (TSB band, monotony, strain, race-day TSB) always run, and the longest-run
+/// The metric rules (TSB band, monotony, strain, race-day TSB) always run, except that strain is
+/// skipped for a series with fewer than 14 days of real (not projected) strain, and the longest-run
 /// rule runs on whatever `sessions` it is given. The three
 /// paradigm rules (intensity distribution, hard-session spacing, hard sessions per micro) run
 /// when a ``TrainingParadigm`` is supplied; see
@@ -21,7 +22,8 @@ public struct PlanEvaluator: Sendable {
     /// - Parameters:
     ///   - metrics: The projected fitness series to evaluate. Must be gap-free and chronologically
     ///     ordered, as produced by ``FitnessMetricsCalculator``, so the rules don't re-derive day boundaries from a timezone
-    ///     this type never receives.
+    ///     this type never receives. ``FitnessMetrics/isProjected`` must be set honestly: the strain rule
+    ///     counts the days that are not projected as real history.
     ///   - races: Races to check race-day TSB for. A race whose `date` doesn't match a day in
     ///     `metrics` exactly is skipped.
     ///   - cycles: The macro/meso/micro cycles the plan is laid out against, e.g. from
@@ -103,9 +105,13 @@ public struct PlanEvaluator: Sendable {
     /// *prior* (non-`.nan`) strain values than `maxStrainPercentile` — today is never compared
     /// against itself, and ties don't count as "exceeding," so a perfectly flat run of identical
     /// strain values (e.g. a steady, unchanging week) never trivially ranks at its own 100th
-    /// percentile. Skipped when there isn't enough trailing history yet to judge against.
+    /// percentile. Skipped when there isn't enough trailing history yet to judge against, and for
+    /// the whole series when it holds fewer than 14 days of real (not projected) strain: a plan that
+    /// ramps up from no history only has itself to be compared with, and every week of a ramp
+    /// exceeds the weeks before it.
     private func strainFindings(metrics: [FitnessMetrics], guardrails: PlanGuardrails) -> [PlanFinding] {
         let minimumSamples = 14
+        guard metrics.filter({ !$0.isProjected && !$0.strain.isNaN }).count >= minimumSamples else { return [] }
         var findings: [PlanFinding] = []
         for index in metrics.indices {
             let current = metrics[index]

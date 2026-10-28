@@ -257,6 +257,12 @@ struct TriphasicPlanQualityTests {
         }
     }
 
+    @Test("the strain rule does not flag a plan that ramps up from no history")
+    func strainOnRamp() async throws {
+        let proposal = try await PlanGenerator.generate(request(distance: Race.marathonDistanceMeters, withHistory: false))
+        #expect(!proposal.risks.contains { $0.rule == .strain })
+    }
+
     // MARK: Race-target fractions reach the steps
 
     /// The fractions of race pace (250 s/km) the work steps of the structural interval sessions were given,

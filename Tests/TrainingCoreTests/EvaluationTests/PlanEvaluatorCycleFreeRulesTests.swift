@@ -129,6 +129,60 @@ struct PlanEvaluatorCycleFreeRulesTests {
         #expect(!evaluation.findings.contains { $0.rule == .strain })
     }
 
+    @Test("strain is skipped for a series that is all projected, however steeply it ramps")
+    func strainSkippedOnProjectedRamp() {
+        let metrics = (0..<40).map { offset in
+            FitnessMetrics(
+                day: day(offset), load: 50, ctl: 50, atl: 50, tsb: 0, monotony: 1, strain: 100 + Double(offset) * 50,
+                isProjected: true, isWarmingUp: false
+            )
+        }
+
+        #expect(!evaluator.evaluate(metrics, races: []).findings.contains { $0.rule == .strain })
+    }
+
+    @Test("strain still fires on a projected spike when 14 or more days of the series are real history")
+    func strainRunsWithRealHistory() {
+        let history = (0..<20).map { metric($0, strain: 100) }
+        let plan = (20..<30).map { offset in
+            FitnessMetrics(
+                day: day(offset), load: 50, ctl: 50, atl: 50, tsb: 0, monotony: 1, strain: offset == 29 ? 1000 : 100,
+                isProjected: true, isWarmingUp: false
+            )
+        }
+
+        let findings = evaluator.evaluate(history + plan, races: []).findings.filter { $0.rule == .strain }
+        #expect(findings.map(\.day) == [day(29)])
+    }
+
+    @Test("strain runs from 14 real strain values on: 13 skip it, 14 and 15 do not", arguments: [13, 14, 15])
+    func strainRealHistoryBoundary(realDays: Int) {
+        // `realDays` of flat real strain, then 20 projected days with a spike on the last one.
+        let history = (0..<realDays).map { metric($0, strain: 100) }
+        let plan = (realDays..<realDays + 20).map { offset in
+            FitnessMetrics(
+                day: day(offset), load: 50, ctl: 50, atl: 50, tsb: 0, monotony: 1, strain: offset == realDays + 19 ? 1000 : 100,
+                isProjected: true, isWarmingUp: false
+            )
+        }
+
+        let findings = evaluator.evaluate(history + plan, races: []).findings.filter { $0.rule == .strain }
+        #expect(findings.isEmpty == (realDays < 14))
+    }
+
+    @Test("real days with no strain (the monotony warm-up) do not count as history")
+    func strainNaNRealDaysDoNotCount() {
+        let warmUp = (0..<20).map { metric($0, strain: .nan) }
+        let plan = (20..<45).map { offset in
+            FitnessMetrics(
+                day: day(offset), load: 50, ctl: 50, atl: 50, tsb: 0, monotony: 1, strain: offset == 44 ? 1000 : 100,
+                isProjected: true, isWarmingUp: false
+            )
+        }
+
+        #expect(!evaluator.evaluate(warmUp + plan, races: []).findings.contains { $0.rule == .strain })
+    }
+
     // MARK: - Race-day TSB
 
     @Test("race-day TSB below the minimum or above the maximum fires warning, not risk; within range doesn't")

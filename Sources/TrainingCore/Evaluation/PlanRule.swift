@@ -8,7 +8,8 @@ public enum PlanRule: Sendable, Codable, Hashable {
     /// A day's monotony against ``PlanGuardrails/maxMonotony``.
     case monotony
     /// A day's strain percentile within the athlete's own trailing distribution, against
-    /// ``PlanGuardrails/maxStrainPercentile``.
+    /// ``PlanGuardrails/maxStrainPercentile``. Not checked for a series with fewer than 14 days of
+    /// real strain: a plan that ramps up from no history has only itself to be compared with.
     case strain
     /// TSB on a ``Race/date`` against ``PlanGuardrails/minTSBOnRaceDay``/``PlanGuardrails/maxTSBOnRaceDay``.
     case raceDayTSB

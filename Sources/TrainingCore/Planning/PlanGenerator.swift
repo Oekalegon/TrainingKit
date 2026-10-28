@@ -137,6 +137,7 @@ public struct PlanGenerator: PlanCandidateProvider {
         var hardDates: [Date] = []
         var longDates: [Date] = []
         var previousTemplates: [UUID] = []
+        var demands: [Demand] = []
         let spacesLong = paradigm.resolved(for: request.targetRace).spacesLongRunsAsHard
         let assigner = DayAssigner(paradigm: paradigm)
         let weeklyLimitSeconds = try request.preferences.maxWeeklyVolume[.running].map(durationSeconds(of:))
@@ -155,6 +156,7 @@ public struct PlanGenerator: PlanCandidateProvider {
                 longCount: request.longRunsPerMicro,
                 preceding: hardDates + (spacesLong ? longDates : []),
                 precedingLongRuns: longDates,
+                recoveryAfter: Dictionary(demands.map { ($0.date, $0.recovery.after) }, uniquingKeysWith: max),
                 raceDays: raceDays,
                 targetRace: request.targetRace,
                 calendar: calendar
@@ -165,7 +167,7 @@ public struct PlanGenerator: PlanCandidateProvider {
             func build(_ seconds: TimeInterval) throws -> MicroBuild {
                 try buildMicro(
                     assignment, micro: micro, cycleID: microCycles[index].id, seconds: seconds, position: position,
-                    phaseCount: phaseMicros.count, previous: previousTemplates, levers: levers
+                    phaseCount: phaseMicros.count, previous: previousTemplates, levers: levers, carried: demands, calendar: calendar
                 )
             }
             func endTSB(of built: MicroBuild, on day: Date) -> FitnessMetrics? {
@@ -216,6 +218,7 @@ public struct PlanGenerator: PlanCandidateProvider {
             hardDates += built.hardDays
             longDates += built.longDays
             previousTemplates = built.templates
+            demands += built.demands
             if let weeklyLimitSeconds, built.fittedSeconds * 7 / Double(volume.lengthDays) > weeklyLimitSeconds * (1 + 1e-9) {
                 overWeeklyLimit = true
             }
@@ -278,24 +281,79 @@ public struct PlanGenerator: PlanCandidateProvider {
         var fittedSeconds: TimeInterval = 0
         var hardDays: [Date] = []
         var longDays: [Date] = []
+        var demands: [Demand] = []
         var compromises: [PlanCompromise] = []
     }
 
+    /// A demanding workout of the plan: its day and the days it wants free around it.
+    private struct Demand {
+        let date: Date
+        let recovery: RecoveryDays
+    }
+
     /// Steps 5 and 6 for one micro: the runs of `assignment` fitted to an equal share of `seconds`.
+    ///
+    /// A run whose template wants more days around it than its neighbours leave (``RecoveryDays``:
+    /// the demanding workouts `carried` in from earlier micros, the ones already fitted in this micro
+    /// and the ones still to come, which count with their default) is fitted again without that
+    /// template, until one fits or none is left. When none is left the best fit keeps the day and the
+    /// shortfall is a ``PlanCompromise/recoveryDaysShort(day:template:neededDays:availableDays:)``.
     private func buildMicro(
         _ assignment: DayAssignmentResult, micro: Microcycle, cycleID: UUID, seconds: TimeInterval, position: Int,
-        phaseCount: Int, previous: [UUID], levers: PlanLevers
+        phaseCount: Int, previous: [UUID], levers: PlanLevers, carried: [Demand], calendar: Calendar
     ) throws -> MicroBuild {
         var built = MicroBuild()
         let share = seconds / Double(max(assignment.assignments.count, 1))
         var hardIndex = 0
-        for run in assignment.assignments where !levers.droppedDays.contains(run.day) {
-            let eased = levers.easedDays.contains(run.day) && Self.easedTypes.contains(run.runType)
-            let fitted = try fitRun(
-                run, eased: eased, hardIndex: hardIndex, micro: micro, position: position, phaseCount: phaseCount,
-                share: share, previous: previous, cycleID: cycleID
+        let runs = assignment.assignments.filter { !levers.droppedDays.contains($0.day) }
+        let defaultAfter = paradigm.minDaysBetweenHardSessions.flatMap { $0 > 0 ? $0 : nil }
+        let longNeedsRecovery = paradigm.resolved(for: request.targetRace).spacesLongRunsAsHard
+        func isEased(_ run: DayAssignment) -> Bool {
+            levers.easedDays.contains(run.day) && Self.easedTypes.contains(run.runType)
+        }
+        /// What a run still to be fitted wants: the default of its run type.
+        func defaultDemand(of run: DayAssignment) -> Demand? {
+            guard !isEased(run), let defaultAfter else { return nil }
+            let demanding = Self.hardTypes.contains(run.runType) || (run.runType == .long && longNeedsRecovery)
+            return demanding ? Demand(date: run.day, recovery: RecoveryDays(before: 0, after: defaultAfter)) : nil
+        }
+
+        for (index, run) in runs.enumerated() {
+            let eased = isEased(run)
+            let later = runs[(index + 1)...].compactMap(defaultDemand(of:))
+            var excluded: Set<UUID> = []
+            let thisHardIndex = hardIndex
+            var fitted = try fitRun(
+                run, eased: eased, hardIndex: thisHardIndex, micro: micro, position: position, phaseCount: phaseCount,
+                share: share, previous: previous, cycleID: cycleID, excluded: excluded
             )
             if Self.hardTypes.contains(run.runType) && !eased { hardIndex += 1 }
+            var shortfall: (template: String, needed: Int, available: Int)?
+            if case .run(let first) = fitted {
+                var attempt = first
+                while let missing = recoveryShortfall(of: attempt, on: run.day, carried: carried, inMicro: built.demands, later: later, calendar: calendar) {
+                    if shortfall == nil { shortfall = (missing.template, missing.needed, missing.available) }
+                    excluded.insert(attempt.templateID)
+                    let again = try fitRun(
+                        run, eased: eased, hardIndex: thisHardIndex, micro: micro, position: position, phaseCount: phaseCount,
+                        share: share, previous: previous, cycleID: cycleID, excluded: excluded
+                    )
+                    guard case .run(let next) = again else {
+                        // Nothing else fits: the best fit keeps the day, and the shortfall is reported.
+                        if let shortfall {
+                            built.compromises.append(.recoveryDaysShort(
+                                day: run.day, template: shortfall.template, neededDays: shortfall.needed, availableDays: shortfall.available
+                            ))
+                        }
+                        shortfall = nil
+                        attempt = first
+                        fitted = .run(first)
+                        break
+                    }
+                    attempt = next
+                    fitted = .run(next)
+                }
+            }
             guard case .run(let result) = fitted else {
                 if case .missing(let profile) = fitted { built.compromises.append(.missingTemplate(microStart: micro.dateRange.lowerBound, profile)) }
                 continue
@@ -305,10 +363,55 @@ public struct PlanGenerator: PlanCandidateProvider {
             built.sessions.append(result.session)
             built.templates.append(result.templateID)
             built.fittedSeconds += result.seconds
+            if let recovery = recoveryDays(of: result.templateID, defaultAfter: defaultAfter, longNeedsRecovery: longNeedsRecovery) {
+                built.demands.append(Demand(date: run.day, recovery: recovery))
+            }
             if Self.hardTypes.contains(run.runType) && !eased { built.hardDays.append(run.day) }
             if run.runType == .long && !eased { built.longDays.append(run.day) }
         }
         return built
+    }
+
+    /// The days the template `id` wants free around its workouts in this plan, or `nil` for none.
+    private func recoveryDays(of id: UUID, defaultAfter: Int?, longNeedsRecovery: Bool) -> RecoveryDays? {
+        request.templates.first { $0.id == id }?
+            .effectiveRecoveryDays(defaultAfter: defaultAfter, longRunsNeedRecovery: longNeedsRecovery)
+    }
+
+    /// How far a fitted run is from the days its template wants free, against the demanding workouts
+    /// around `day`: the template's name, the days needed and the days available to the neighbour that
+    /// falls shortest. `nil` when the template wants nothing or gets enough.
+    ///
+    /// A workout `carried` in from an earlier micro is compared in full, as it was fitted without
+    /// knowing this day. One already fitted `inMicro` was fitted knowing this day by its default, so
+    /// only what this template adds (its days before) can be short here; the rest is that workout's own
+    /// report. `later` workouts are not fitted yet and count with their default.
+    private func recoveryShortfall(
+        of run: FittedRun, on day: Date, carried: [Demand], inMicro: [Demand], later: [Demand], calendar: Calendar
+    ) -> (template: String, needed: Int, available: Int)? {
+        let defaultAfter = paradigm.minDaysBetweenHardSessions.flatMap { $0 > 0 ? $0 : nil }
+        let longNeedsRecovery = paradigm.resolved(for: request.targetRace).spacesLongRunsAsHard
+        guard let own = recoveryDays(of: run.templateID, defaultAfter: defaultAfter, longNeedsRecovery: longNeedsRecovery),
+              let name = request.templates.first(where: { $0.id == run.templateID })?.name else { return nil }
+        func days(from start: Date, to end: Date) -> Int { calendar.dateComponents([.day], from: start, to: end).day ?? Int.max }
+        var worst: (needed: Int, available: Int)?
+        func note(needed: Int, available: Int) {
+            guard available < needed else { return }
+            if let current = worst, needed - available <= current.needed - current.available { return }
+            worst = (needed, available)
+        }
+        for neighbour in carried {
+            note(needed: neighbour.recovery.after + own.before, available: days(from: neighbour.date, to: day))
+        }
+        for neighbour in inMicro {
+            let available = days(from: neighbour.date, to: day)
+            // Its own days after are its report; only the days this template wants before it are added here.
+            if available >= neighbour.recovery.after { note(needed: neighbour.recovery.after + own.before, available: available) }
+        }
+        for neighbour in later {
+            note(needed: own.after + neighbour.recovery.before, available: days(from: day, to: neighbour.date))
+        }
+        return worst.map { (name, $0.needed, $0.available) }
     }
 
     private enum RunFit {
@@ -328,13 +431,13 @@ public struct PlanGenerator: PlanCandidateProvider {
     /// planned workout and session that come of it.
     private func fitRun(
         _ run: DayAssignment, eased: Bool, hardIndex: Int, micro: Microcycle, position: Int, phaseCount: Int,
-        share: TimeInterval, previous: [UUID], cycleID: UUID
+        share: TimeInterval, previous: [UUID], cycleID: UUID, excluded: Set<UUID> = []
     ) throws -> RunFit {
         let profile = profile(for: run, eased: eased, hardIndex: hardIndex, position: position, phase: micro.phase)
         let fit = TemplateFitter.fit(
             profile: profile,
             targetSeconds: share,
-            templates: request.templates,
+            templates: excluded.isEmpty ? request.templates : request.templates.filter { !excluded.contains($0.id) },
             previous: previous,
             workLength: profile.progressedWorkLength(microIndex: position, of: phaseCount),
             athlete: request.athlete

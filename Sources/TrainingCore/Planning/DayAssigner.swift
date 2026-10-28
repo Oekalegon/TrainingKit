@@ -49,6 +49,10 @@ public struct DayAssigner: Sendable, Hashable {
     ///   - precedingLongRuns: The days of the long runs just before the micro, so a long run on the
     ///     micro's first day next to one counts as a back-to-back pair; used only for the pair limit of
     ///     an ultra target, and independent of `preceding`. Defaults to none.
+    ///   - recoveryAfter: For days of workouts just before the micro, the days they want free after
+    ///     them (``RecoveryDays/after``), so a hard session is not placed sooner after them. A minimum
+    ///     to aim for: when no day has the days wanted, the paradigm's spacing alone decides and the
+    ///     generator reports the shortfall. Defaults to none.
     ///   - raceDays: The days of the races; nothing is placed on them. Defaults to none.
     ///   - targetRace: The race the plan builds towards; for an ultra the paradigm's long runs are not
     ///     spaced and at most ``TrainingParadigm/maxBackToBackLongRunPairsPerMicro`` pairs of long
@@ -63,6 +67,7 @@ public struct DayAssigner: Sendable, Hashable {
         longCount: Int,
         preceding: [Date] = [],
         precedingLongRuns: [Date] = [],
+        recoveryAfter: [Date: Int] = [:],
         raceDays: [Date] = [],
         targetRace: Race? = nil,
         calendar: Calendar
@@ -96,7 +101,11 @@ public struct DayAssigner: Sendable, Hashable {
         }
         func newPairs(on date: Date) -> Int { longDates.filter { isNextDay($0, date) }.count }
 
-        func spacingAllows(_ date: Date) -> Bool {
+        func spacingAllows(_ date: Date, honouringWanted: Bool = true) -> Bool {
+            let wanted = !honouringWanted || recoveryAfter.allSatisfy { earlier, after in
+                date <= earlier || (calendar.dateComponents([.day], from: earlier, to: date).day ?? Int.max) >= after
+            }
+            guard wanted else { return false }
             guard let minGap else { return true }
             return spaced.allSatisfy { abs(calendar.dateComponents([.day], from: $0, to: date).day ?? Int.max) >= minGap }
         }
@@ -108,10 +117,14 @@ public struct DayAssigner: Sendable, Hashable {
             let withSlot: [(index: Int, slot: DaySlot)] = allowing.compactMap { index in
                 days[index].freeSlots.first { availability[days[index].weekday, $0].longRunPossible }.map { (index, $0) }
             }
-            let candidates = withSlot.filter { candidate in
-                let date = days[candidate.index].date
-                return (!spacesLong || spacingAllows(date)) && pairs + newPairs(on: date) <= (pairLimit ?? Int.max)
+            func candidates(honouringWanted: Bool) -> [(index: Int, slot: DaySlot)] {
+                withSlot.filter { candidate in
+                    let date = days[candidate.index].date
+                    return (!spacesLong || spacingAllows(date, honouringWanted: honouringWanted)) && pairs + newPairs(on: date) <= (pairLimit ?? Int.max)
+                }
             }
+            // The days wanted after an earlier workout are a minimum to aim for: without a day that has them, the paradigm's own spacing decides.
+            let candidates = candidates(honouringWanted: true).isEmpty ? candidates(honouringWanted: false) : candidates(honouringWanted: true)
             let best = candidates.min { lhs, rhs in
                 let (named0, named1) = (availability.dayRunTypes[days[lhs.index].weekday]?.contains(.long) == true, availability.dayRunTypes[days[rhs.index].weekday]?.contains(.long) == true)
                 if named0 != named1 { return named0 }
@@ -146,10 +159,14 @@ public struct DayAssigner: Sendable, Hashable {
                 guard let type = namedType ?? hardTypes.first(where: { allowed.contains($0) }), let slot = days[index].freeSlots.first else { return nil }
                 return (index, type, slot, namedType != nil)
             }
-            let best = allowing.filter { spacingAllows(days[$0.index].date) }.min { lhs, rhs in
-                if lhs.named != rhs.named { return lhs.named }
-                return days[lhs.index].date < days[rhs.index].date
+            func pick(honouringWanted: Bool) -> (index: Int, type: RunType, slot: DaySlot, named: Bool)? {
+                allowing.filter { spacingAllows(days[$0.index].date, honouringWanted: honouringWanted) }.min { lhs, rhs in
+                    if lhs.named != rhs.named { return lhs.named }
+                    return days[lhs.index].date < days[rhs.index].date
+                }
             }
+            // The days wanted after an earlier workout are a minimum to aim for: without a day that has them, the paradigm's own spacing decides.
+            let best = pick(honouringWanted: true) ?? pick(honouringWanted: false)
             guard let best else {
                 dropped.append(DroppedSession(kind: .hard, reason: withCapacity.isEmpty ? .noFreeDay : allowing.isEmpty ? .runTypeNotAllowed : .spacing))
                 continue

@@ -686,7 +686,8 @@ public enum BuiltInWorkoutTemplates {
     /// A fixed 5-minute Zone 1 warmup, an easy Zone 2 run of `build` (10-20 km) metres, then `reps`
     /// (4-10) times 1 km in Zone 4 (about 106 % of race speed) and 1 km in Zone 3 (about 95 %, the
     /// recovery that is almost race pace), then a fixed 5-minute Zone 1 cooldown. The notes' example is 15 km
-    /// of build and 15 km of alternation (7.5 pairs); the default of 8 pairs rounds up. The first half
+    /// of build and 15 km of alternation (7.5 pairs); the default of 8 pairs rounds up. It wants 1 day free
+    /// before it and 3 after (``RecoveryDays``): at least one very easy day before and several recovery days after. The first half
     /// "builds" in speed, which a single Zone 2 step cannot show; the athlete eases into it.
     public static let alternationRun = WorkoutTemplate(
         id: UUID(uuidString: "8F5D6E4E-6E0E-4B8B-9C1A-9E6F9F1C1A14")!,
@@ -716,7 +717,8 @@ public enum BuiltInWorkoutTemplates {
                 TemplateStep(kind: .cooldown, goal: .time(.fixed(5 * 60)), target: .heartRateZone(1)),
             ]),
         ],
-        sessionType: .long
+        sessionType: .long,
+        recoveryDays: RecoveryDays(before: 1, after: 3)
     )
 
     /// Muscular endurance repeats (Run Elite, Support endurance quality): repeats at 86-94 % of race speed

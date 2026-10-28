@@ -30,6 +30,12 @@ public struct WorkoutTemplate: Identifiable, Sendable, Codable, Hashable {
     /// ``SessionType/long`` makes long runs, whatever day they are planned on. Absent from templates
     /// saved before this field existed, which decode as `nil`; an unknown value also reads as `nil`.
     public var sessionType: SessionType?
+    /// The days this template's workouts want free of other demanding workouts around them
+    /// (MVP5-147), or `nil` for the default of its ``sessionType``: see
+    /// ``effectiveRecoveryDays(defaultAfter:longRunsNeedRecovery:)``. Set it for a workout that needs
+    /// more (the alternation run wants 1 day before and 3 after) or less than an ordinary intense one.
+    /// Absent from templates saved before this field existed, which decode as `nil`.
+    public var recoveryDays: RecoveryDays?
     /// When the athlete deleted this template while plans still used it (MVP2-142), or `nil` for one
     /// in use. An archived template stays in the store so those plans can still open its parameters,
     /// but libraries and pickers don't offer it. Absent from templates saved before this field existed.
@@ -49,6 +55,7 @@ public struct WorkoutTemplate: Identifiable, Sendable, Codable, Hashable {
     ///   - blocks: The ordered blocks making up this template.
     ///   - purpose: What workouts made from it are for; defaults to ``WorkoutPurpose/general``.
     ///   - sessionType: The broad kind of session it makes; defaults to `nil` (untagged).
+    ///   - recoveryDays: The days it wants free around it; defaults to `nil` (the default of its session type).
     ///   - archivedDate: When the template was archived; defaults to `nil`.
     public init(
         id: UUID = UUID(),
@@ -60,6 +67,7 @@ public struct WorkoutTemplate: Identifiable, Sendable, Codable, Hashable {
         blocks: [TemplateBlock],
         purpose: WorkoutPurpose = .general,
         sessionType: SessionType? = nil,
+        recoveryDays: RecoveryDays? = nil,
         archivedDate: Date? = nil
     ) {
         self.id = id
@@ -71,7 +79,35 @@ public struct WorkoutTemplate: Identifiable, Sendable, Codable, Hashable {
         self.blocks = blocks
         self.purpose = purpose
         self.sessionType = sessionType
+        self.recoveryDays = recoveryDays
         self.archivedDate = archivedDate
+    }
+}
+
+extension WorkoutTemplate {
+    /// The days a workout made from this template wants free of other demanding workouts, or `nil`
+    /// when it is not demanding (MVP5-147).
+    ///
+    /// ``recoveryDays`` wins when set. Otherwise the template's ``sessionType`` decides: interval,
+    /// tempo and hill sessions are intense and want 0 days before and `defaultAfter` after; a long run
+    /// wants the same when `longRunsNeedRecovery` is set (a paradigm that spaces long runs like hard
+    /// sessions, and not for an ultra); easy runs, recovery runs and untagged templates want nothing.
+    ///
+    /// - Parameters:
+    ///   - defaultAfter: The days an intense workout wants after it, normally the paradigm's
+    ///     ``TrainingParadigm/minDaysBetweenHardSessions``; `nil` for none.
+    ///   - longRunsNeedRecovery: Whether a long run counts as intense.
+    /// - Returns: The days wanted, or `nil` for a workout that wants nothing on either side.
+    public func effectiveRecoveryDays(defaultAfter: Int?, longRunsNeedRecovery: Bool) -> RecoveryDays? {
+        if let recoveryDays { return recoveryDays.isNone ? nil : recoveryDays }
+        let intense: Bool
+        switch sessionType {
+        case .interval, .tempo, .hillRepeats: intense = true
+        case .long: intense = longRunsNeedRecovery
+        default: intense = false
+        }
+        guard intense, let defaultAfter, defaultAfter > 0 else { return nil }
+        return RecoveryDays(before: 0, after: defaultAfter)
     }
 }
 
@@ -216,12 +252,13 @@ extension TemplateStepGoal {
 
 extension WorkoutTemplate {
     private enum CodingKeys: String, CodingKey {
-        case id, name, titleName, sport, venue, parameters, blocks, purpose, sessionType, archivedDate
+        case id, name, titleName, sport, venue, parameters, blocks, purpose, sessionType, recoveryDays, archivedDate
     }
 
     /// Decodes a template, reading the venue an older version stored inside the sport
     /// (`indoorRunning`/`outdoorRunning`) when there's no `venue` of its own, and treating a missing
-    /// `purpose` as ``WorkoutPurpose/general`` and a missing or unknown `sessionType` as `nil`.
+    /// `purpose` as ``WorkoutPurpose/general``, a missing or unknown `sessionType` as `nil` and a missing
+    /// or undecodable `recoveryDays` as `nil`.
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(UUID.self, forKey: .id)
@@ -234,6 +271,7 @@ extension WorkoutTemplate {
         blocks = try container.decode([TemplateBlock].self, forKey: .blocks)
         purpose = try container.decodeIfPresent(WorkoutPurpose.self, forKey: .purpose) ?? .general
         sessionType = (try? container.decodeIfPresent(SessionType.self, forKey: .sessionType)) ?? nil
+        recoveryDays = (try? container.decodeIfPresent(RecoveryDays.self, forKey: .recoveryDays)) ?? nil
         archivedDate = try container.decodeIfPresent(Date.self, forKey: .archivedDate)
     }
 }

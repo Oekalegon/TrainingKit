@@ -23,6 +23,11 @@ public enum PlanCompromise: Sendable, Codable, Hashable {
     /// No library template meets `profile` for the micro starting on `microStart`; see
     /// ``TemplateFit/missingTemplate(_:)``.
     case missingTemplate(microStart: Date, SessionProfile)
+    /// A workout wants more days free of demanding workouts around it than the plan could give it, and
+    /// no other template fitted better: the workout on `day` made from `template` keeps its place with
+    /// `availableDays` instead of `neededDays` days to its nearest demanding neighbour (MVP5-147,
+    /// ``RecoveryDays``). The limits are minimums to aim for, so the plan keeps the workout and says so.
+    case recoveryDaysShort(day: Date, template: String, neededDays: Int, availableDays: Int)
     /// The plan overrides one of the athlete's preferences.
     case overriddenPreference(OverriddenPreference)
     /// ``PlanAdjuster`` made `adjustment` to clear a ``Severity/risk`` finding of `rule`.

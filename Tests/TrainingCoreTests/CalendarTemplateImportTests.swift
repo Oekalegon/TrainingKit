@@ -113,6 +113,18 @@ struct CalendarTemplateImportTests {
         #expect(read == template)
     }
 
+    @Test("a template's recovery days survive the calendar file, and a file without them reads as the default")
+    func recoveryDaysRoundTrip() throws {
+        var template = intervals()
+        template.recoveryDays = RecoveryDays(before: 1, after: 3)
+        let file = try roundTripped(export([try template.instantiate()], templates: [template]))
+        #expect(file.templates.first?.recoveryDays == RecoveryDays(before: 1, after: 3))
+        #expect(try #require(file.templates.first?.workoutTemplate()) == template)
+
+        let plain = try roundTripped(export([try intervals().instantiate()], templates: [intervals()]))
+        #expect(plain.templates.first?.recoveryDays == nil)
+    }
+
     @Test("a file written before templates were exported still reads, with no templates")
     func oldFileReads() throws {
         let data = try export([try intervals().instantiate()], templates: []).jsonData()

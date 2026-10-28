@@ -87,7 +87,13 @@ struct PlanGeneratorTests {
         let cycleIDs = Set(candidate.cycles.map(\.id))
 
         // Three runs a micro, less the runs the adjust loop dropped and the ones with no place or template.
-        #expect(candidate.plannedActivities.count == 16 * 3 - proposal.levers.droppedDays.count - candidate.compromises.count)
+        let lostRuns = candidate.compromises.filter {
+            switch $0 {
+            case .unplacedSession, .missingTemplate: true
+            default: false
+            }
+        }
+        #expect(candidate.plannedActivities.count == 16 * 3 - proposal.levers.droppedDays.count - lostRuns.count)
         for planned in candidate.plannedActivities {
             let workout = try #require(workouts[planned.workoutID])
             #expect(templateIDs.contains(try #require(workout.templateID)))

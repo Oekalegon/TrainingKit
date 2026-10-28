@@ -23,6 +23,12 @@ public enum PlanCompromise: Sendable, Codable, Hashable {
     /// No library template meets `profile` for the micro starting on `microStart`; see
     /// ``TemplateFit/missingTemplate(_:)``.
     case missingTemplate(microStart: Date, SessionProfile)
+    /// The volume could not bring the micro starting on `microStart` to the TSB zone of its role (MVP5-151):
+    /// it ends in `reached` instead of `aimed`. Fresher than aimed means even the athlete's own volume (the
+    /// ceiling of the micro) leaves them fresh, so a higher starting or peak volume would be needed; more tired
+    /// than aimed means even the lightest volume tried leaves them tired, as after a race or a heavy history.
+    /// A micro the adjust loop lowered is not reported here: the adjustment is.
+    case sizingMissedZone(microStart: Date, aimed: TSBZone, reached: TSBZone)
     /// A workout wants more days free of demanding workouts around it than the plan could give it, and
     /// no other template fitted better: the workout on `day` made from `template` keeps its place with
     /// `availableDays` instead of `neededDays` days to its nearest demanding neighbour (MVP5-147,

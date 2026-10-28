@@ -45,12 +45,75 @@ public enum TemplateFitter {
         workLength: TimeInterval? = nil,
         athlete: AthleteProfile
     ) -> TemplateFit {
+        fit(
+            profile: profile, targetSeconds: targetSeconds, prepared: prepare(templates, athlete: athlete),
+            previous: previous, workLength: workLength, athlete: athlete
+        )
+    }
+
+    /// A running template that can be fitted, with what the fit needs from it that does not depend on
+    /// the profile or the target: its analysis and the parameters by role. Made once by
+    /// ``prepare(_:athlete:)`` so the plan generator, which fits the same templates thousands of times
+    /// while it sizes a plan, does not work them out again (MVP5-151).
+    struct Prepared: Sendable {
+        let template: WorkoutTemplate
+        let analysis: TemplateAnalysis
+        /// The hard work steps by the key of the parameter their goal uses.
+        let workKeys: [String: TemplateStep]
+        /// The parameters of the easy work steps' goals.
+        let volumeKeys: [String]
+        /// The parameters of the blocks' repetitions.
+        let repetitionKeys: [String]
+        let parameters: [String: WorkoutTemplateParameter]
+        /// Every parameter at its default.
+        let defaults: [String: Double]
+    }
+
+    /// The templates a fit can use: running, not archived, with an analysis.
+    static func prepare(_ templates: [WorkoutTemplate], athlete: AthleteProfile) -> [Prepared] {
+        templates.compactMap { template in
+            guard template.sport == .running, !template.isArchived, let analysis = try? template.analysis(athlete: athlete) else { return nil }
+            func key<Value>(_ value: TemplateValue<Value>) -> String? {
+                if case .parameter(let key) = value { key } else { nil }
+            }
+            var workKeys: [String: TemplateStep] = [:]
+            var volumeKeys: [String] = []
+            var repetitionKeys: [String] = []
+            for block in template.blocks {
+                if let repetitionKey = key(block.repetitions) { repetitionKeys.append(repetitionKey) }
+                for step in block.steps where step.kind == .work {
+                    let goalKey: String? = switch step.goal {
+                    case .time(let value): key(value)
+                    case .distance(let value): key(value)
+                    case .open: nil
+                    }
+                    guard let goalKey else { continue }
+                    if step.isHardWork(in: block) { workKeys[goalKey] = step } else { volumeKeys.append(goalKey) }
+                }
+            }
+            volumeKeys.removeAll { workKeys[$0] != nil }
+            return Prepared(
+                template: template, analysis: analysis, workKeys: workKeys, volumeKeys: volumeKeys, repetitionKeys: repetitionKeys,
+                parameters: Dictionary(uniqueKeysWithValues: template.parameters.map { ($0.key, $0) }),
+                defaults: Dictionary(uniqueKeysWithValues: template.parameters.map { ($0.key, $0.defaultValue) })
+            )
+        }
+    }
+
+    /// ``fit(profile:targetSeconds:templates:previous:workLength:athlete:)`` over templates already
+    /// prepared with ``prepare(_:athlete:)``.
+    static func fit(
+        profile: SessionProfile,
+        targetSeconds: TimeInterval,
+        prepared: [Prepared],
+        previous: [UUID] = [],
+        workLength: TimeInterval? = nil,
+        athlete: AthleteProfile
+    ) -> TemplateFit {
         let aim = workLength ?? profile.workLength.map { ($0.lowerBound + $0.upperBound) / 2 }
-        let candidates: [TemplateChoice] = templates.compactMap { template in
-            guard template.sport == .running, !template.isArchived, template.sessionType == profile.sessionType,
-                  let analysis = try? template.analysis(athlete: athlete),
-                  accepts(profile, analysis) else { return nil }
-            return choice(for: template, analysis: analysis, profile: profile, target: targetSeconds, workLength: aim, athlete: athlete)
+        let candidates: [TemplateChoice] = prepared.compactMap { template in
+            guard template.template.sessionType == profile.sessionType, accepts(profile, template.analysis) else { return nil }
+            return choice(for: template, profile: profile, target: targetSeconds, workLength: aim, athlete: athlete)
         }.sorted { lhs, rhs in
             if abs(lhs.error - rhs.error) > 1e-9 { return lhs.error < rhs.error }
             if lhs.template.name != rhs.template.name { return lhs.template.name < rhs.template.name }
@@ -73,36 +136,17 @@ public enum TemplateFitter {
     }
 
     private static func choice(
-        for template: WorkoutTemplate, analysis: TemplateAnalysis, profile: SessionProfile,
+        for prepared: Prepared, profile: SessionProfile,
         target: TimeInterval, workLength: TimeInterval?, athlete: AthleteProfile
     ) -> TemplateChoice? {
+        let template = prepared.template
         let estimator = WorkoutDurationEstimator()
         func range(_ parameter: WorkoutTemplateParameter) -> ClosedRange<Double> {
             parameter.range ?? parameter.defaultValue...parameter.defaultValue
         }
-        func key<Value>(_ value: TemplateValue<Value>) -> String? {
-            if case .parameter(let key) = value { key } else { nil }
-        }
-        // The parameters of each role, from the steps that reference them.
-        var workKeys: [String: TemplateStep] = [:]
-        var volumeKeys: [String] = []
-        var repetitionKeys: [String] = []
-        for block in template.blocks {
-            if let repetitionKey = key(block.repetitions) { repetitionKeys.append(repetitionKey) }
-            for step in block.steps where step.kind == .work {
-                let goalKey: String? = switch step.goal {
-                case .time(let value): key(value)
-                case .distance(let value): key(value)
-                case .open: nil
-                }
-                guard let goalKey else { continue }
-                if step.isHardWork(in: block) { workKeys[goalKey] = step } else { volumeKeys.append(goalKey) }
-            }
-        }
-        volumeKeys.removeAll { workKeys[$0] != nil }
-        let parameters = Dictionary(uniqueKeysWithValues: template.parameters.map { ($0.key, $0) })
+        let (workKeys, volumeKeys, repetitionKeys, parameters) = (prepared.workKeys, prepared.volumeKeys, prepared.repetitionKeys, prepared.parameters)
 
-        var base = Dictionary(uniqueKeysWithValues: template.parameters.map { ($0.key, $0.defaultValue) })
+        var base = prepared.defaults
         // The work length: solve each hard step's duration for its parameter.
         if let workLength {
             for (key, step) in workKeys {
@@ -166,13 +210,26 @@ public enum TemplateFitter {
             best = (values, measured.seconds, error, distance)
         }
         guard let best else { return nil }
-        return TemplateChoice(template: template, values: best.values, seconds: best.seconds, error: best.error, analysis: analysis)
+        return TemplateChoice(template: template, values: best.values, seconds: best.seconds, error: best.error, analysis: prepared.analysis)
     }
 
-    /// The value in `range` at which the non-decreasing `function` is nearest `goal`, by bisection.
-    private static func solve(_ range: ClosedRange<Double>, toward goal: Double, using function: (Double) -> Double) -> Double {
-        if function(range.lowerBound) >= goal { return range.lowerBound }
-        if function(range.upperBound) <= goal { return range.upperBound }
+    /// The value in `range` at which the non-decreasing `function` is nearest `goal`.
+    ///
+    /// A function that is linear in the value, like the duration of a step against its length or
+    /// distance, is solved in closed form from its ends: the answer is taken when the function is at
+    /// `goal` there (within ``solveTolerance``). Otherwise, and when `goal` lies outside the function's
+    /// range, it is found by bisection, so the result is the same as bisection gives, only reached in
+    /// three evaluations instead of fifty for the common case (MVP5-151).
+    static func solve(_ range: ClosedRange<Double>, toward goal: Double, using function: (Double) -> Double) -> Double {
+        let atLower = function(range.lowerBound)
+        if atLower >= goal { return range.lowerBound }
+        let atUpper = function(range.upperBound)
+        if atUpper <= goal { return range.upperBound }
+        // Both ends are finite and apart here: atLower < goal < atUpper.
+        if atLower.isFinite, atUpper.isFinite {
+            let guess = range.lowerBound + (goal - atLower) / (atUpper - atLower) * (range.upperBound - range.lowerBound)
+            if range.contains(guess), abs(function(guess) - goal) <= solveTolerance * max(abs(goal), 1) { return guess }
+        }
         var (low, high) = (range.lowerBound, range.upperBound)
         for _ in 0..<50 {
             let middle = (low + high) / 2
@@ -180,4 +237,7 @@ public enum TemplateFitter {
         }
         return (low + high) / 2
     }
+
+    /// How near `goal` (relative, in seconds) a closed-form answer of ``solve(_:toward:using:)`` must be.
+    private static let solveTolerance = 1e-9
 }

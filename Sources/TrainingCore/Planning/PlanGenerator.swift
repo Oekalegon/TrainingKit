@@ -26,7 +26,9 @@ import Foundation
 ///    and while the aimed day is still warming up (no history) the curve's own volume, with its
 ///    recovery and taper fractions, is used. The aim uses the paradigm's guardrail overrides, like the
 ///    evaluator. With volumes close to the athlete's history the ceiling is often not enough to reach
-///    -20, and the micros then end fresher than that.
+///    -20, and the micros then end fresher than that. A micro that ends in another TSB zone than its
+///    role aims at is ``PlanCompromise/sizingMissedZone(microStart:aimed:reached:)``, unless the adjust loop
+///    lowered it on purpose.
 /// 5. ``DayAssigner`` places the micro's hard sessions, long runs and easy runs on the athlete's days
 ///    and day parts, with the spacing of earlier micros passed as `preceding` and the days the demanding
 ///    workouts of earlier micros want free after them (``RecoveryDays/after``) as `recoveryAfter`, a
@@ -66,6 +68,8 @@ public struct PlanGenerator: PlanCandidateProvider {
     public let request: PlanRequest
     /// The request's templates by id, for the recovery days of a fitted run.
     private let templatesByID: [UUID: WorkoutTemplate]
+    /// The templates the fitter can use, prepared once for every fit of every candidate (MVP5-151).
+    private let preparedTemplates: [TemplateFitter.Prepared]
 
     /// The request's paradigm with the spacing the plan's preferences ask for
     /// (``PlanPreferences/minDaysBetweenHardSessions``), which the day assignment and the evaluation share.
@@ -82,6 +86,7 @@ public struct PlanGenerator: PlanCandidateProvider {
     public init(request: PlanRequest) {
         self.request = request
         templatesByID = Dictionary(request.templates.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        preparedTemplates = TemplateFitter.prepare(request.templates, athlete: request.athlete)
     }
 
     /// Builds the proposal for `request` with a new generator.
@@ -189,27 +194,33 @@ public struct PlanGenerator: PlanCandidateProvider {
             let curveSeconds = try durationSeconds(of: volume.target) * leverScale
             let ceilingSeconds = try durationSeconds(of: ceilings[index].target)
             var built: MicroBuild
+            var missedZone: PlanCompromise?
             if let aim = sizingAim(for: micro, raceDays: raceDays, calendar: calendar) {
                 let top = try build(ceilingSeconds)
                 if let topMetric = endTSB(of: top, on: aim.day), !topMetric.isWarmingUp {
-                    var chosen = (scale: 1.0, build: top)
+                    var chosen = (scale: 1.0, build: top, tsb: topMetric.tsb)
                     if topMetric.tsb < aim.tsb {
                         // Too tired at the ceiling: the largest volume that still ends at the aim, found by
                         // bisection; when no volume reaches it, the lightest one tried.
                         var (low, high) = (0.0, 1.0)
-                        var reached: (scale: Double, build: MicroBuild)?
+                        var reached: (scale: Double, build: MicroBuild, tsb: Double)?
                         var lightest = chosen
                         for _ in 0..<Self.sizingSteps {
                             let scale = (low + high) / 2
                             let probe = try build(ceilingSeconds * scale)
                             guard let metric = endTSB(of: probe, on: aim.day) else { break }
-                            if scale < lightest.scale { lightest = (scale, probe) }
-                            if metric.tsb < aim.tsb { high = scale } else { low = scale; reached = (scale, probe) }
-                            if abs(metric.tsb - aim.tsb) < Self.sizingTolerance { reached = (scale, probe); break }
+                            if scale < lightest.scale { lightest = (scale, probe, metric.tsb) }
+                            if metric.tsb < aim.tsb { high = scale } else { low = scale; reached = (scale, probe, metric.tsb) }
+                            if abs(metric.tsb - aim.tsb) < Self.sizingTolerance { reached = (scale, probe, metric.tsb); break }
                         }
                         chosen = reached ?? lightest
                     }
                     built = leverScale == 1 ? chosen.build : try build(ceilingSeconds * chosen.scale * leverScale)
+                    // A micro the adjust loop lowered ends fresher than its aim on purpose, and that adjustment is reported.
+                    let reachedZone = TSBZone(tsb: chosen.tsb, guardrails: aim.guardrails)
+                    if leverScale == 1, reachedZone != aim.zone {
+                        missedZone = .sizingMissedZone(microStart: microStart, aimed: aim.zone, reached: reachedZone)
+                    }
                 } else {
                     // Still warming up (no history to aim from): the curve's own volume.
                     built = try build(curveSeconds)
@@ -220,6 +231,7 @@ public struct PlanGenerator: PlanCandidateProvider {
 
             compromises += assignment.dropped.map { .unplacedSession(microStart: microStart, $0) }
             compromises += built.compromises
+            compromises += missedZone.map { [$0] } ?? []
             workouts += built.workouts
             planned += built.planned
             planSessions += built.sessions
@@ -265,7 +277,9 @@ public struct PlanGenerator: PlanCandidateProvider {
     /// Where a micro should end: the middle of the TSB zone of its role (training for a build micro,
     /// recovery for a recovery micro) on its last day, and the middle of the race zone on race day for
     /// a taper micro (the race inside it, else its last day). `nil` for a micro with no zone.
-    private func sizingAim(for micro: Microcycle, raceDays: [Date], calendar: Calendar) -> (day: Date, tsb: Double)? {
+    private func sizingAim(
+        for micro: Microcycle, raceDays: [Date], calendar: Calendar
+    ) -> (day: Date, tsb: Double, zone: TSBZone, guardrails: PlanGuardrails)? {
         // The evaluator's guardrails: the paradigm's overrides applied, as `PlanEvaluator` does.
         let guardrails = paradigm.resolved(for: request.targetRace).guardrailOverrides.applied(to: request.guardrails)
         let zone: TSBZone
@@ -277,7 +291,7 @@ public struct PlanGenerator: PlanCandidateProvider {
             zone = .race
             if let raceDay = raceDays.filter({ micro.dateRange.contains($0) }).min() { day = raceDay }
         }
-        return zone.midpoint(guardrails: guardrails).map { (day, $0) }
+        return zone.midpoint(guardrails: guardrails).map { (day, $0, zone, guardrails) }
     }
 
     /// One micro's runs, fitted for `seconds`, before they are added to the plan.
@@ -311,6 +325,7 @@ public struct PlanGenerator: PlanCandidateProvider {
         phaseCount: Int, previous: [UUID], levers: PlanLevers, carried: [Demand], calendar: Calendar
     ) throws -> MicroBuild {
         var built = MicroBuild()
+        let fits = TemplateFits()
         let share = seconds / Double(max(assignment.assignments.count, 1))
         var hardIndex = 0
         let runs = assignment.assignments.filter { !levers.droppedDays.contains($0.day) }
@@ -336,7 +351,7 @@ public struct PlanGenerator: PlanCandidateProvider {
             ) { excluded in
                 try fitRun(
                     run, eased: eased, hardIndex: thisHardIndex, micro: micro, position: position, phaseCount: phaseCount,
-                    share: share, previous: previous, cycleID: cycleID, excluded: excluded
+                    share: share, previous: previous, cycleID: cycleID, excluded: excluded, fits: fits
                 )
             }
             if let shortfall {
@@ -446,6 +461,29 @@ public struct PlanGenerator: PlanCandidateProvider {
         return worst.map { RecoveryShortfall(template: name, needed: $0.needed, available: $0.available) }
     }
 
+    /// What a fit depends on: runs of one micro with the same profile, work length and rotation memory
+    /// get the same ``TemplateFit`` for the same share of the volume.
+    private struct FitKey: Hashable {
+        let profile: SessionProfile
+        let targetSeconds: TimeInterval
+        let workLength: TimeInterval?
+        let previous: [UUID]
+        let excluded: Set<UUID>
+    }
+
+    /// The ``TemplateFit``s made while building one micro, so equal runs (the easy runs of a micro, say)
+    /// are fitted once (MVP5-151). A fit is a pure function of its key, so nothing changes but the time.
+    private final class TemplateFits {
+        private var fits: [FitKey: TemplateFit] = [:]
+
+        func fit(for key: FitKey, make: () -> TemplateFit) -> TemplateFit {
+            if let known = fits[key] { return known }
+            let made = make()
+            fits[key] = made
+            return made
+        }
+    }
+
     private enum RunFit {
         case run(FittedRun)
         case missing(SessionProfile)
@@ -463,17 +501,20 @@ public struct PlanGenerator: PlanCandidateProvider {
     /// planned workout and session that come of it.
     private func fitRun(
         _ run: DayAssignment, eased: Bool, hardIndex: Int, micro: Microcycle, position: Int, phaseCount: Int,
-        share: TimeInterval, previous: [UUID], cycleID: UUID, excluded: Set<UUID> = []
+        share: TimeInterval, previous: [UUID], cycleID: UUID, excluded: Set<UUID> = [], fits: TemplateFits
     ) throws -> RunFit {
         let profile = profile(for: run, eased: eased, hardIndex: hardIndex, position: position, phase: micro.phase)
-        let fit = TemplateFitter.fit(
-            profile: profile,
-            targetSeconds: share,
-            templates: excluded.isEmpty ? request.templates : request.templates.filter { !excluded.contains($0.id) },
-            previous: previous,
-            workLength: profile.progressedWorkLength(microIndex: position, of: phaseCount),
-            athlete: request.athlete
-        )
+        let workLength = profile.progressedWorkLength(microIndex: position, of: phaseCount)
+        let fit = fits.fit(for: FitKey(profile: profile, targetSeconds: share, workLength: workLength, previous: previous, excluded: excluded)) {
+            TemplateFitter.fit(
+                profile: profile,
+                targetSeconds: share,
+                prepared: excluded.isEmpty ? preparedTemplates : preparedTemplates.filter { !excluded.contains($0.template.id) },
+                previous: previous,
+                workLength: workLength,
+                athlete: request.athlete
+            )
+        }
         guard case .fit(let choice) = fit else { return .missing(profile) }
         let workout: StructuredWorkout
         do {

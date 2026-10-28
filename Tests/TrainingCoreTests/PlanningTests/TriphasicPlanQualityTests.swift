@@ -415,4 +415,28 @@ struct TriphasicPlanQualityTests {
         // The middle of 15...35 is 25; the default zone's middle, 15, is not what it aims at.
         #expect(raceDay.tsb > 20, "race-day TSB \(raceDay.tsb)")
     }
+
+    @Test("a micro that ends in another zone than the one of its role is reported, and one that ends in it is not", arguments: [false, true])
+    func missedZoneIsReported(generousVolumes: Bool) async throws {
+        // Without generous volumes the ceiling cannot reach the training zone: build micros end fresher.
+        let base = tenDayRequest(distance: Race.marathonDistanceMeters)
+        let proposal = try await PlanGenerator.generate(generousVolumes ? generous(base) : base)
+        let candidate = proposal.candidate
+        let reported = candidate.compromises.compactMap { compromise -> (Date, TSBZone, TSBZone)? in
+            if case .sizingMissedZone(let start, let aimed, let reached) = compromise { (start, aimed, reached) } else { nil }
+        }
+        #expect(generousVolumes || !reported.isEmpty, "a plan from low volumes reports no micro that misses its zone")
+
+        for micro in micros(candidate).dropLast() where proposal.levers.volumeScale(forMicro: micro.dateRange.lowerBound) == 1 {
+            let endZone = try #require(candidate.metrics.last { micro.dateRange.contains($0.day) }).tsbZone()
+            let aimed: TSBZone = micro.loadRole == .recovery ? .recovery : .training
+            let report = reported.first { $0.0 == micro.dateRange.lowerBound }
+            // Warming up (no history to aim from) is not reported; the history here covers it.
+            if endZone == aimed {
+                #expect(report == nil, "micro at \(micro.dateRange.lowerBound) ends in \(endZone) as aimed but is reported")
+            } else {
+                #expect(report?.1 == aimed && report?.2 == endZone, "micro at \(micro.dateRange.lowerBound) ends in \(endZone), not \(aimed), and is reported as \(String(describing: report))")
+            }
+        }
+    }
 }

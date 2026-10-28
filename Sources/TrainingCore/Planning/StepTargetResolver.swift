@@ -117,7 +117,7 @@ public enum StepTargetResolver {
 
     /// The zone (1...5) whose ``paceRange(zone:in:)`` contains `pace`, the slower zone at a shared
     /// boundary, or `nil` when it is faster or slower than every zone.
-    private static func zone(forPace pace: Double, in paceModel: PaceModel) -> Int? {
+    static func zone(forPace pace: Double, in paceModel: PaceModel) -> Int? {
         (1...5).first { paceRange(zone: $0, in: paceModel)?.contains(pace) == true }
     }
 

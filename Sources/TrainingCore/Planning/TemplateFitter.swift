@@ -6,7 +6,11 @@ import Foundation
 /// 1. **Hard filter.** A template takes part when it is running, not archived, tagged with the
 ///    profile's ``SessionProfile/sessionType`` (an untagged template never matches), and, when the
 ///    profile asks for them, its ``TemplateAnalysis/workLength`` and ``TemplateAnalysis/workCount``
-///    overlap the profile's ranges. Athlete templates take part like built-in ones.
+///    overlap the profile's ranges. Athlete templates take part like built-in ones. For a profile with a
+///    race-target fraction on a pace target (the plan generator's fits), a template also has to have a hard work
+///    step in a zone whose pace range holds the phase pace (MVP5-150), so race-pace work is not made from a
+///    workout whose zone is another pace; when no template does, all of them take part and the step resolver
+///    reports the step.
 /// 2. **Closest fit.** Each remaining template gets the parameter values that bring it nearest the
 ///    profile: the work-length parameters (those of hard work steps) are set so each hard step
 ///    lasts the work length asked for, then the duration parameters of the easy work steps (when
@@ -67,6 +71,28 @@ public enum TemplateFitter {
         let parameters: [String: WorkoutTemplateParameter]
         /// Every parameter at its default.
         let defaults: [String: Double]
+        /// The heart-rate zones of the hard work steps.
+        let hardZones: [Int]
+        /// Whether a hard work step has another target (an effort, say), which the step resolver keeps as it is.
+        let hasOtherHardTarget: Bool
+
+        /// Whether the phase pace is a pace of one of the template's hard work steps, which is what a
+        /// race-pace profile asks of a template: ``StepTargetResolver`` puts the phase pace on a step whose zone
+        /// holds it and keeps the zone's own pace on the others. A hard step with another target (an
+        /// effort) is kept as it is and does not exclude the template; a template with no hard step at all
+        /// cannot do work at the phase pace and takes part only when none holds.
+        func holds(_ phase: PhasePace) -> Bool {
+            if hasOtherHardTarget { return true }
+            if hardZones.isEmpty { return false }
+            return hardZones.contains { StepTargetResolver.paceRange(zone: $0, in: phase.paceModel)?.contains(phase.secondsPerKilometer) == true }
+        }
+    }
+
+    /// The pace a phase asks for (the race pace divided by the profile's race-target fraction) and the
+    /// pace model in effect on the day, for ``fit(profile:targetSeconds:prepared:phase:previous:workLength:athlete:)``.
+    struct PhasePace: Sendable, Hashable {
+        let secondsPerKilometer: Double
+        let paceModel: PaceModel
     }
 
     /// The templates a fit can use: running, not archived, with an analysis.
@@ -92,33 +118,53 @@ public enum TemplateFitter {
                 }
             }
             volumeKeys.removeAll { workKeys[$0] != nil }
+            var hardZones: [Int] = []
+            var hasOtherHardTarget = false
+            for block in template.blocks {
+                for step in block.steps where step.isHardWork(in: block) {
+                    if case .heartRateZone(let zone) = step.target { hardZones.append(zone) } else { hasOtherHardTarget = true }
+                }
+            }
             return Prepared(
                 template: template, analysis: analysis, workKeys: workKeys, volumeKeys: volumeKeys, repetitionKeys: repetitionKeys,
                 parameters: Dictionary(uniqueKeysWithValues: template.parameters.map { ($0.key, $0) }),
-                defaults: Dictionary(uniqueKeysWithValues: template.parameters.map { ($0.key, $0.defaultValue) })
+                defaults: Dictionary(uniqueKeysWithValues: template.parameters.map { ($0.key, $0.defaultValue) }),
+                hardZones: hardZones, hasOtherHardTarget: hasOtherHardTarget
             )
         }
     }
 
     /// ``fit(profile:targetSeconds:templates:previous:workLength:athlete:)`` over templates already
     /// prepared with ``prepare(_:athlete:)``.
+    ///
+    /// - Parameter phase: The pace the profile's race-target fraction asks for, when it asks for one. Only the
+    ///   templates with a hard work step in a zone that holds it take part, so a race-pace profile does not get a
+    ///   workout whose zone is another pace (MVP5-150); when no template qualifies they all take part, and the
+    ///   step resolver reports the step.
     static func fit(
         profile: SessionProfile,
         targetSeconds: TimeInterval,
         prepared: [Prepared],
+        phase: PhasePace? = nil,
         previous: [UUID] = [],
         workLength: TimeInterval? = nil,
         athlete: AthleteProfile
     ) -> TemplateFit {
         let aim = workLength ?? profile.workLength.map { ($0.lowerBound + $0.upperBound) / 2 }
-        let candidates: [TemplateChoice] = prepared.compactMap { template in
-            guard template.template.sessionType == profile.sessionType, accepts(profile, template.analysis) else { return nil }
-            return choice(for: template, profile: profile, target: targetSeconds, workLength: aim, athlete: athlete)
-        }.sorted { lhs, rhs in
-            if abs(lhs.error - rhs.error) > 1e-9 { return lhs.error < rhs.error }
-            if lhs.template.name != rhs.template.name { return lhs.template.name < rhs.template.name }
-            return lhs.template.id.uuidString < rhs.template.id.uuidString
+        let passing = prepared.filter { $0.template.sessionType == profile.sessionType && accepts(profile, $0.analysis) }
+        func choices(_ pool: [Prepared]) -> [TemplateChoice] {
+            pool.compactMap { choice(for: $0, profile: profile, target: targetSeconds, workLength: aim, athlete: athlete) }.sorted { lhs, rhs in
+                if abs(lhs.error - rhs.error) > 1e-9 { return lhs.error < rhs.error }
+                if lhs.template.name != rhs.template.name { return lhs.template.name < rhs.template.name }
+                return lhs.template.id.uuidString < rhs.template.id.uuidString
+            }
         }
+        var candidates: [TemplateChoice] = []
+        if let phase {
+            let holding = passing.filter { $0.holds(phase) }
+            candidates = holding.isEmpty ? [] : choices(holding)
+        }
+        if candidates.isEmpty { candidates = choices(passing) }
         guard let best = candidates.first else { return .missingTemplate(profile) }
         if previous.contains(best.template.id),
            let other = candidates.first(where: { !previous.contains($0.template.id) && $0.error <= best.error + rotationTolerance }) {

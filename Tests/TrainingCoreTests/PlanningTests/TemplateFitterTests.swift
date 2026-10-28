@@ -347,6 +347,44 @@ struct TemplateFitterTests {
         }
         #expect(fit(SessionProfile(sessionType: .race)) == .missingTemplate(SessionProfile(sessionType: .race)))
     }
+
+    /// The solver as it was before the closed-form step (MVP5-151): bisection only.
+    private func bisect(_ range: ClosedRange<Double>, toward goal: Double, using function: (Double) -> Double) -> Double {
+        if function(range.lowerBound) >= goal { return range.lowerBound }
+        if function(range.upperBound) <= goal { return range.upperBound }
+        var (low, high) = (range.lowerBound, range.upperBound)
+        for _ in 0..<50 {
+            let middle = (low + high) / 2
+            if function(middle) < goal { low = middle } else { high = middle }
+        }
+        return (low + high) / 2
+    }
+
+    @Test("the solver gives what bisection gives: for linear, curved and kinked functions and for goals outside the range")
+    func solveMatchesBisection() {
+        let functions: [(String, (Double) -> Double)] = [
+            ("linear", { 60 + 3 * $0 }),
+            ("flat", { _ in 100 }),
+            ("curved", { 10 + $0 * $0 * $0 }),
+            ("kinked", { $0 < 40 ? $0 : 40 + 5 * ($0 - 40) }),
+            ("stepped", { ($0 / 10).rounded(.down) * 10 }),
+        ]
+        for (name, function) in functions {
+            for goal in stride(from: 0.0, through: 500, by: 17.5) {
+                let expected = bisect(0...100, toward: goal, using: function)
+                let solved = TemplateFitter.solve(0...100, toward: goal, using: function)
+                #expect(abs(solved - expected) <= 1e-6, "\(name), goal \(goal): \(solved) against \(expected)")
+            }
+        }
+    }
+
+    @Test("a linear function is solved in three evaluations, not fifty")
+    func solveIsCheapForLinear() {
+        var calls = 0
+        let value = TemplateFitter.solve(0...1, toward: 150, using: { calls += 1; return 60 + 300 * $0 })
+        #expect(abs(value - 0.3) < 1e-12)
+        #expect(calls == 3)
+    }
 }
 
 private enum FitterTestError: Error { case missing }

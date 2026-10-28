@@ -15,7 +15,8 @@ import Foundation
 /// A day allows a run type when ``RunAvailability/runTypes(on:)`` contains it. Hard sessions, and
 /// long runs when ``TrainingParadigm/spacesLongRunsAsHard`` is set (not for an ultra target), keep at least
 /// ``TrainingParadigm/minDaysBetweenHardSessions`` days from each other and from the sessions of
-/// the preceding micro. A micro never gets more hard sessions than
+/// the preceding micro, and aim for the days that workouts of the preceding micro want free after them
+/// (`recoveryAfter`, from ``RecoveryDays``): without a day that has them, the spacing alone decides. A micro never gets more hard sessions than
 /// ``TrainingParadigm/maxHardSessionsPerMicro`` allows for its length. Within a day, a run takes
 /// the first free part in the order morning, afternoon, evening (a long run the first one where a
 /// long run is possible). A session that cannot be placed is returned as dropped, never
@@ -117,14 +118,15 @@ public struct DayAssigner: Sendable, Hashable {
             let withSlot: [(index: Int, slot: DaySlot)] = allowing.compactMap { index in
                 days[index].freeSlots.first { availability[days[index].weekday, $0].longRunPossible }.map { (index, $0) }
             }
-            func candidates(honouringWanted: Bool) -> [(index: Int, slot: DaySlot)] {
+            func eligible(honouringWanted: Bool) -> [(index: Int, slot: DaySlot)] {
                 withSlot.filter { candidate in
                     let date = days[candidate.index].date
                     return (!spacesLong || spacingAllows(date, honouringWanted: honouringWanted)) && pairs + newPairs(on: date) <= (pairLimit ?? Int.max)
                 }
             }
             // The days wanted after an earlier workout are a minimum to aim for: without a day that has them, the paradigm's own spacing decides.
-            let candidates = candidates(honouringWanted: true).isEmpty ? candidates(honouringWanted: false) : candidates(honouringWanted: true)
+            let wantedCandidates = eligible(honouringWanted: true)
+            let candidates = wantedCandidates.isEmpty ? eligible(honouringWanted: false) : wantedCandidates
             let best = candidates.min { lhs, rhs in
                 let (named0, named1) = (availability.dayRunTypes[days[lhs.index].weekday]?.contains(.long) == true, availability.dayRunTypes[days[rhs.index].weekday]?.contains(.long) == true)
                 if named0 != named1 { return named0 }

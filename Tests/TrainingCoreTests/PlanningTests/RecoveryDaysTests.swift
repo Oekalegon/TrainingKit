@@ -105,19 +105,23 @@ struct RecoveryDaysPlanTests {
 
     /// A 9-week triphasic plan with the given hard and long weekdays (one run each, morning), the easy
     /// runs on the other days, and only the given templates.
-    private func request(hard: [Weekday], long: [Weekday], templates: [WorkoutTemplate], hardSessions: Int = 1) -> PlanRequest {
+    private func request(
+        hard: [Weekday], long: [Weekday], templates: [WorkoutTemplate], hardSessions: Int = 1,
+        distance: Double = Race.marathonDistanceMeters, longRuns: Int = 1
+    ) -> PlanRequest {
         var availability = RunAvailability()
         for weekday in Weekday.allCases { availability[weekday] = [.morning] }
         for weekday in hard { availability.setRunTypes([.interval, .threshold, .easy], on: weekday) }
         for weekday in long { availability.setRunTypes([.long, .easy], on: weekday) }
-        let race = Race(name: "A race", date: day(9 * 7 - 1), priority: .primary, distanceMeters: Race.marathonDistanceMeters)
+        let race = Race(name: "A race", date: day(9 * 7 - 1), priority: .primary, distanceMeters: distance)
         return PlanRequest(
             targetRace: race, paradigm: .triphasic, macro: macro, meso: .threeToOne,
             preferences: PlanPreferences(runAvailability: availability), athlete: athlete, today: monday, start: monday,
             templates: templates,
             startingVolume: VolumeTarget(measure: .durationSeconds, amount: 14_400)!,
             peakVolume: VolumeTarget(measure: .durationSeconds, amount: 21_600)!,
-            hardSessionsPerMicro: hardSessions
+            hardSessionsPerMicro: hardSessions,
+            longRunsPerMicro: longRuns
         )
     }
 
@@ -129,6 +133,23 @@ struct RecoveryDaysPlanTests {
         }
     }
 
+    /// The demanding workouts of the plan in date order, with the days they want free.
+    private func demands(of candidate: PlanCandidate, templates: [WorkoutTemplate]) -> [(date: Date, days: RecoveryDays)] {
+        let workouts = Dictionary(uniqueKeysWithValues: candidate.workouts.map { ($0.id, $0) })
+        return candidate.plannedActivities.sorted { $0.date < $1.date }.compactMap { planned in
+            guard let id = workouts[planned.workoutID]?.templateID,
+                  let days = templates.first(where: { $0.id == id })?.effectiveRecoveryDays(defaultAfter: 2, longRunsNeedRecovery: true)
+            else { return nil }
+            return (planned.date, days)
+        }
+    }
+
+    private func shortfalls(_ proposal: PlanProposal) -> [(template: String, needed: Int, available: Int)] {
+        proposal.compromises.compactMap { compromise in
+            if case .recoveryDaysShort(_, let template, let needed, let available) = compromise { (template, needed, available) } else { nil }
+        }
+    }
+
     @Test("an alternation run is planned where its neighbours leave it 1 day before and 3 after")
     func alternationFits() async throws {
         // Hard on Wednesday, long on Sunday: Wednesday to Sunday is 4 days, Sunday to Wednesday 3.
@@ -137,6 +158,14 @@ struct RecoveryDaysPlanTests {
 
         #expect(names(proposal.candidate).contains("Alternation Run"))
         #expect(!proposal.compromises.contains { if case .recoveryDaysShort = $0 { true } else { false } })
+        // Every pair of demanding workouts is at least the earlier one's days after plus the later one's days before apart.
+        let all = demands(of: proposal.candidate, templates: asked.templates)
+        for (offset, earlier) in all.enumerated() {
+            for later in all[(offset + 1)...] {
+                let gap = calendar.dateComponents([.day], from: earlier.date, to: later.date).day ?? 0
+                #expect(gap >= earlier.days.after + later.days.before, "\(gap) days from \(earlier.date) to \(later.date)")
+            }
+        }
     }
 
     @Test("an alternation run that would sit too close to the next hard session is left out for another long run")
@@ -197,6 +226,46 @@ struct RecoveryDaysPlanTests {
                 #expect(gap >= 3 || gap == 0, "hard session \(gap) days after the alternation run on \(alternation)")
             }
         }
+    }
+
+    @Test("an alternation run right after a hard session of the micro before is short of the day it wants before it")
+    func carriedBefore() async throws {
+        // Hard on Sunday (the last day of a micro), long on Tuesday: 2 days, and the hard session wants 2 after and the
+        // alternation run 1 before. The hard session of the micro before is carried in and compared in full.
+        let asked = request(hard: [.sunday], long: [.tuesday], templates: basics + [BuiltInWorkoutTemplates.alternationRun])
+        let proposal = try await PlanGenerator.generate(asked)
+
+        let reported = shortfalls(proposal)
+        #expect(!reported.isEmpty)
+        #expect(reported.allSatisfy { $0.template == "Alternation Run" && $0.needed == 3 && $0.available == 2 })
+    }
+
+    @Test("a template of any kind can ask for its own days: a long run that wants 5 after it is short where the next hard session is 2 away")
+    func customTemplate() async throws {
+        let longRun = BuiltInWorkoutTemplates.longRun
+        let heavy = WorkoutTemplate(
+            name: "Heavy long", sport: longRun.sport, parameters: longRun.parameters, blocks: longRun.blocks,
+            sessionType: .long, recoveryDays: RecoveryDays(before: 0, after: 5)
+        )
+        let proposal = try await PlanGenerator.generate(request(hard: [.wednesday], long: [.monday], templates: basics + [heavy]))
+
+        let reported = shortfalls(proposal)
+        #expect(!reported.isEmpty)
+        #expect(reported.allSatisfy { $0.template == "Heavy long" && $0.needed == 5 && $0.available == 2 })
+    }
+
+    @Test("an ultra does not ask its long runs for recovery days: they may sit next to a hard session and to each other")
+    func ultraLongRuns() async throws {
+        let templates = basics + [BuiltInWorkoutTemplates.longRun]
+        let marathon = try await PlanGenerator.generate(request(hard: [.tuesday], long: [.saturday, .sunday], templates: templates, longRuns: 2))
+        let ultra = try await PlanGenerator.generate(request(hard: [.tuesday], long: [.saturday, .sunday], templates: templates, distance: 100_000, longRuns: 2))
+
+        func longRuns(_ proposal: PlanProposal) -> Int {
+            proposal.candidate.workouts.filter { $0.sessionType == .long }.count
+        }
+        #expect(shortfalls(ultra).isEmpty)
+        // A marathon spaces its long runs like hard sessions, so Saturday and Sunday cannot both be used.
+        #expect(longRuns(ultra) > longRuns(marathon))
     }
 
     @Test("a plan without alternation runs is unchanged: the default days are the paradigm's spacing")

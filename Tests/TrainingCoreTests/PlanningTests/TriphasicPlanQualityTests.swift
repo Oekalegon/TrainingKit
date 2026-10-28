@@ -339,11 +339,16 @@ struct TriphasicPlanQualityTests {
         let builds = all.dropLast().filter { $0.loadRole == .build }
         let training = builds.filter { micro in candidate.metrics.last { micro.dateRange.contains($0.day) }?.tsbZone() == .training }
         // A short micro can't always move TSB to the middle of its zone, and a template has a longest duration.
-        #expect(Double(training.count) >= 0.6 * Double(builds.count), "\(length)-day: \(training.count) of \(builds.count) build micros end in training")
+        // With hard days on Tuesday and Thursday and long runs on Saturday and Sunday the alternation run (MVP5-147) never
+        // fits: a Saturday is 2 days after a hard session, which wants 3 before it, and a Sunday 2 before the next, which
+        // it wants 3 after. The long runs then come from the shorter templates, which absorb less volume in a 14-day micro
+        // (9 of 13 build micros end in training; the same on develop with the alternation run left out of the templates).
+        #expect(Double(training.count) >= 0.65 * Double(builds.count), "\(length)-day: \(training.count) of \(builds.count) build micros end in training")
         for (index, micro) in all.enumerated() where micro.loadRole == .recovery {
-            // Lighter than the build micro before it, even where the micro is too short to reach the recovery zone.
+            // About as heavy or lighter than the build micro before it: its ceiling is the curve's, not the volume the build micro was
+            // sized to, so a 14-day recovery micro can be a little heavier (measured: 1.11 at most).
             guard let previous = all[..<index].last(where: { $0.loadRole == .build }) else { continue }
-            #expect(seconds(in: micro, of: candidate) <= seconds(in: previous, of: candidate) * 1.15, "\(length)-day recovery micro at \(micro.dateRange.lowerBound)")
+            #expect(seconds(in: micro, of: candidate) <= seconds(in: previous, of: candidate) * 1.12, "\(length)-day recovery micro at \(micro.dateRange.lowerBound)")
         }
         #expect(try #require(candidate.metrics.last).tsbZone() == .race)
     }

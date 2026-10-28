@@ -31,9 +31,11 @@ public struct WorkoutTemplate: Identifiable, Sendable, Codable, Hashable {
     /// saved before this field existed, which decode as `nil`; an unknown value also reads as `nil`.
     public var sessionType: SessionType?
     /// The days this template's workouts want free of other demanding workouts around them
-    /// (MVP5-147), or `nil` for the default of its ``sessionType``: see
-    /// ``effectiveRecoveryDays(defaultAfter:longRunsNeedRecovery:)``. Set it for a workout that needs
-    /// more (the alternation run wants 1 day before and 3 after) or less than an ordinary intense one.
+    /// (MVP5-147), or `nil` for the default of its ``sessionType``: intense
+    /// sessions (interval, tempo, hill repeats) want 0 days before and the paradigm's spacing after, a long run
+    /// the same where the paradigm spaces long runs like hard sessions, and easy and recovery runs nothing.
+    /// Set it for a workout that needs more (the alternation run wants 1 day before and 3 after) or less
+    /// than an ordinary intense one.
     /// Absent from templates saved before this field existed, which decode as `nil`.
     public var recoveryDays: RecoveryDays?
     /// When the athlete deleted this template while plans still used it (MVP2-142), or `nil` for one
@@ -98,7 +100,7 @@ extension WorkoutTemplate {
     ///     ``TrainingParadigm/minDaysBetweenHardSessions``; `nil` for none.
     ///   - longRunsNeedRecovery: Whether a long run counts as intense.
     /// - Returns: The days wanted, or `nil` for a workout that wants nothing on either side.
-    public func effectiveRecoveryDays(defaultAfter: Int?, longRunsNeedRecovery: Bool) -> RecoveryDays? {
+    func effectiveRecoveryDays(defaultAfter: Int?, longRunsNeedRecovery: Bool) -> RecoveryDays? {
         if let recoveryDays { return recoveryDays.isNone ? nil : recoveryDays }
         let intense: Bool
         switch sessionType {

@@ -39,6 +39,12 @@ race pace of the athlete (1000 m at 3:50/km is 230 s).
 
 ## 3. The sessions per distance (draft)
 
+**Which phase has race-pace work.** Only the specific phase and the taper work at race pace (fraction about 1.00),
+as in the triphasic paradigm. The structural phase works either side of it: below race pace for endurance quality
+and threshold (fraction under 1.00 for the 5k and 10k, a little over 1.00 for the half marathon, where threshold
+pace is faster than half-marathon pace), and above it for fast quality (1.04 to 1.10). The base phase has no race-pace
+work. The tables say the phase of every row.
+
 Fractions are of the race speed of that distance. The recovery between repetitions is not in a profile today (a
 template parameter at its default); it is written here so the templates can be checked.
 
@@ -77,7 +83,7 @@ Hard sessions per micro: 2, plus the long run, 75 to 105 min, easy.
 | Phase | Session | Work | Count | Fraction | Recovery | Note |
 |---|---|---|---|---|---|---|
 | Base | Hill sprints, strides, easy volume | as 5k | | | | |
-| Structural | Tempo / threshold | 15 to 40 min continuous, or 3 x 10 min | 1 | 1.00 to 1.04 | 2 min if split | grows in length |
+| Structural | Tempo / threshold | 15 to 40 min continuous, or 3 x 10 min | 1 | 1.02 to 1.05 | 2 min if split | grows in length; above race pace, not at it |
 | Structural | Fast quality | 800 to 1200 m | 5 to 8 | 1.06 to 1.10 | 90 s | |
 | Specific | Race-pace blocks | 3 to 5 km | 2 to 3 | 1.00 | 2 to 3 min | the key session |
 | Specific | Long run with fast finish | last 4 to 8 km | 1 | 1.00 | | the marathon's, shorter |
@@ -110,7 +116,7 @@ fast-finish template should take km, or the profile converts at the race pace (3
 
 ## 6. Questions for the user
 
-1. Are the key sessions right: 5k 4 to 6 x 1000 m, 10k 3 to 5 x 1600 to 2400 m, half 2 to 3 x 3 to 5 km at race pace?
+1. Are the **specific-phase** key sessions right (the only race-pace work): 5k 4 to 6 x 1000 to 1200 m, 10k 3 to 5 x 1600 to 2400 m, half 2 to 3 x 3 to 5 km? And the **structural** sessions in section 3 (below and above race pace)?
 2. Do you want the profiles per distance in one paradigm chosen by the race distance (my suggestion), or one paradigm
    per distance?
 3. Do you confirm the phase-intensity steps (section 2), so the templates do not fix a zone?

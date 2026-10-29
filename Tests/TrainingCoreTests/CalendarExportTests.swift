@@ -270,6 +270,18 @@ struct CalendarExportTests {
         }
     }
 
+    @Test("a phase-intensity step is exported as that and read back")
+    func phaseIntensityRoundTrip() throws {
+        let workout = StructuredWorkout(name: "Phase", sport: .running, blocks: [WorkoutBlock(steps: [
+            WorkoutStep(kind: .work, goal: .time(300), target: .phaseIntensity),
+        ])])
+        let export = build(plans: [PlannedActivity(workoutID: workout.id, date: day(4))], workouts: [workout])
+        let step = try #require(export.days[4].activities.first).steps[0]
+        let target = try #require(step.target)
+        #expect(target == CalendarExport.Target(type: "phaseIntensity", zone: nil, rpe: nil, min: nil, max: nil))
+        #expect(CalendarImportPlanner.target(from: target) == .phaseIntensity)
+    }
+
     @Test("steps survive a JSON round trip")
     func stepsRoundTrip() throws {
         let workout = intervals()

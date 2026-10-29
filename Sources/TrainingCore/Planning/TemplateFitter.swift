@@ -75,6 +75,9 @@ public enum TemplateFitter {
         let hardPositions: [ClosedRange<Double>]
         /// Whether a hard work step has another target (an effort, say), which the step resolver keeps as it is.
         let hasOtherHardTarget: Bool
+        /// Whether a hard work step asks for the intensity of the phase (``IntensityTarget/phaseIntensity``): it holds
+        /// any phase pace, because the plan works out its zone from that pace, and it needs a phase pace.
+        let hasPhaseStep: Bool
 
         /// Whether the phase pace is a pace of one of the template's hard work steps, which is what a
         /// race-pace profile asks of a template: ``StepTargetResolver`` puts the phase pace on a step whose zone
@@ -82,7 +85,7 @@ public enum TemplateFitter {
         /// effort) is kept as it is and does not exclude the template; a template with no hard step at all
         /// cannot do work at the phase pace and takes part only when none holds.
         func holds(_ phase: PhasePace) -> Bool {
-            if hasOtherHardTarget { return true }
+            if hasPhaseStep || hasOtherHardTarget { return true }
             if hardPositions.isEmpty { return false }
             return hardPositions.contains { StepTargetResolver.paceRange(zonePositions: $0, in: phase.paceModel)?.contains(phase.secondsPerKilometer) == true }
         }
@@ -120,16 +123,23 @@ public enum TemplateFitter {
             volumeKeys.removeAll { workKeys[$0] != nil }
             var hardPositions: [ClosedRange<Double>] = []
             var hasOtherHardTarget = false
+            var hasPhaseStep = false
             for block in template.blocks {
                 for step in block.steps where step.isHardWork(in: block) {
-                    if let positions = StepTargetResolver.zonePositions(of: step.target) { hardPositions.append(positions) } else { hasOtherHardTarget = true }
+                    if step.target == .phaseIntensity {
+                        hasPhaseStep = true
+                    } else if let positions = StepTargetResolver.zonePositions(of: step.target) {
+                        hardPositions.append(positions)
+                    } else {
+                        hasOtherHardTarget = true
+                    }
                 }
             }
             return Prepared(
                 template: template, analysis: analysis, workKeys: workKeys, volumeKeys: volumeKeys, repetitionKeys: repetitionKeys,
                 parameters: Dictionary(uniqueKeysWithValues: template.parameters.map { ($0.key, $0) }),
                 defaults: Dictionary(uniqueKeysWithValues: template.parameters.map { ($0.key, $0.defaultValue) }),
-                hardPositions: hardPositions, hasOtherHardTarget: hasOtherHardTarget
+                hardPositions: hardPositions, hasOtherHardTarget: hasOtherHardTarget, hasPhaseStep: hasPhaseStep
             )
         }
     }
@@ -151,7 +161,9 @@ public enum TemplateFitter {
         athlete: AthleteProfile
     ) -> TemplateFit {
         let aim = workLength ?? profile.workLength.map { ($0.lowerBound + $0.upperBound) / 2 }
-        let passing = prepared.filter { $0.template.sessionType == profile.sessionType && accepts(profile, $0.analysis) }
+        var passing = prepared.filter { $0.template.sessionType == profile.sessionType && accepts(profile, $0.analysis) }
+        // A template that asks for the phase's intensity needs a phase pace; without one it takes part only when nothing else does.
+        if phase == nil, passing.contains(where: { !$0.hasPhaseStep }) { passing.removeAll { $0.hasPhaseStep } }
         func choices(_ pool: [Prepared]) -> [TemplateChoice] {
             pool.compactMap { choice(for: $0, profile: profile, target: targetSeconds, workLength: aim, athlete: athlete) }.sorted { lhs, rhs in
                 if abs(lhs.error - rhs.error) > 1e-9 { return lhs.error < rhs.error }

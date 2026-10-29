@@ -15,6 +15,12 @@ public enum IntensityTarget: Sendable, Codable, Hashable {
     /// whole workout fails, so nothing is half-read and written back without the target): update every device
     /// that syncs the library together. Generated plans keep using ``heartRateZone(_:)``.
     case heartRateZoneRange(ClosedRange<Double>)
+    /// The intensity of the plan's phase (MVP5-153): a template step that fixes no zone, because the zone depends on the
+    /// race. In a plan, ``StepTargetResolver`` turns it into the pace of the race pace divided by the phase's
+    /// race-target fraction and into the zone positions that pace sits at in the athlete's pace model, so 86 % of a
+    /// marathon pace is an easy zone and 86 % of a 5k pace a threshold one. Outside a plan, or without a fraction, it
+    /// stays as it is and reads as a moderate effort (zone 3), with no WorkoutKit alert.
+    case phaseIntensity
     case heartRateRange(Double, Double)
     case pace(ClosedRange<Double>)
     case power(ClosedRange<Double>)

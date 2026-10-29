@@ -160,6 +160,83 @@ struct StepTargetResolverTests {
         #expect(fast.unresolved.first?.reason == .paceOutsideZone(zone: 4, paceZone: nil))
     }
 
+    // MARK: Phase intensity (MVP5-153)
+
+    @Test("a phase-intensity step becomes the zone positions of the phase pace, with that pace as its companion")
+    func phaseIntensityStep() throws {
+        // 240 / 0.9 = 266.7 s/km, in zone 3 (249.6 to 270.4 s/km) for the fixture athlete.
+        let result = resolve([step(target: .phaseIntensity)], fraction: 0.9)
+        let resolved = result.workout.blocks[0].steps[0]
+        let phasePace = 240 / 0.9
+        guard case .pace(let pace)? = resolved.companionTarget, case .heartRateZoneRange(let positions)? = resolved.target else {
+            Issue.record("not resolved: \(String(describing: resolved.target))"); return
+        }
+        #expect(abs((pace.lowerBound + pace.upperBound) / 2 - phasePace) < 1e-9)
+        #expect(abs(pace.upperBound - phasePace * 1.02) < 1e-9)
+        // The positions give back the pace band: the lower position is the slow end, the upper the fast end.
+        let back = try #require(StepTargetResolver.paceRange(zonePositions: positions, in: athlete.paceModel))
+        #expect(abs(back.lowerBound - pace.lowerBound) < 1e-6 && abs(back.upperBound - pace.upperBound) < 1e-6)
+        #expect(positions.lowerBound >= 2.9 && positions.upperBound <= 3.6)
+        #expect(result.unresolved.isEmpty)
+    }
+
+    @Test("the same fraction is another zone for another race: 86 % of a marathon pace is easy, 86 % of a 5k pace is moderate")
+    func phaseIntensityFollowsTheRace() {
+        func positions(racePace: Double) -> ClosedRange<Double> {
+            let result = resolve([step(target: .phaseIntensity)], race: .pace(secondsPerKilometer: racePace), fraction: 0.86)
+            guard case .heartRateZoneRange(let range)? = result.workout.blocks[0].steps[0].target else {
+                Issue.record("not resolved"); return 0...0
+            }
+            return range
+        }
+        let marathon = positions(racePace: 270)   // 86 % is 314 s/km
+        let fiveK = positions(racePace: 230)      // 86 % is 267 s/km
+        #expect(marathon.upperBound < 2.5)
+        #expect(fiveK.lowerBound > 2.9 && fiveK.upperBound < 3.7)
+    }
+
+    @Test("a phase-intensity step without a fraction, or without a pace race target, is reported and kept")
+    func phaseIntensityProblems() {
+        let phase = step(target: .phaseIntensity)
+        let noFraction = resolve([phase], fraction: nil)
+        #expect(noFraction.unresolved.map(\.reason) == [.noPhaseFraction])
+        #expect(noFraction.workout.blocks[0].steps[0].target == .phaseIntensity)
+        #expect(resolve([phase], race: nil, fraction: 1).unresolved.map(\.reason) == [.noRaceTarget])
+        #expect(resolve([phase], race: .heartRate(beatsPerMinute: 150...160), fraction: 1).unresolved.map(\.reason) == [.unsupportedRaceTarget])
+    }
+
+    @Test("a phase pace outside every zone is clamped to the nearest edge and reported")
+    func phaseIntensityOutsideTheZones() {
+        // 240 / 0.4 = 600 s/km, much slower than zone 1; 240 / 2 = 120 s/km, much faster than zone 5.
+        let slow = resolve([step(target: .phaseIntensity)], fraction: 0.4)
+        #expect(slow.unresolved.map(\.reason) == [.paceOutsideZone(zone: 1, paceZone: nil)])
+        #expect(slow.workout.blocks[0].steps[0].target == .heartRateZoneRange(1.0...1.0))
+        let fast = resolve([step(target: .phaseIntensity)], fraction: 2)
+        #expect(fast.unresolved.map(\.reason) == [.paceOutsideZone(zone: 5, paceZone: nil)])
+        #expect(fast.workout.blocks[0].steps[0].target == .heartRateZoneRange(6.0...6.0))
+    }
+
+    @Test("without zone settings a phase-intensity step still gets its positions and is reported")
+    func phaseIntensityWithoutZones() {
+        var bare = athlete
+        bare.heartRateZoneHistory = []
+        let result = resolve([step(target: .phaseIntensity)], athlete: bare, fraction: 0.9)
+        #expect(result.unresolved.map(\.reason) == [.noHeartRateZones])
+        guard case .heartRateZoneRange? = result.workout.blocks[0].steps[0].target else { Issue.record("no positions"); return }
+    }
+
+    @Test("a phase-intensity step is sent as bpm like any zone target, and its estimate is the same before and after")
+    func phaseIntensitySentAsBPM() {
+        let planned = resolve([step(target: .phaseIntensity)], fraction: 0.9).workout
+        let sent = StepTargetResolver.resolveBPM(planned, on: date, athlete: athlete)
+        #expect(sent.unresolved.isEmpty)
+        guard case .heartRateRange(let low, let high)? = sent.workout.blocks[0].steps[0].target else { Issue.record("no bpm"); return }
+        // Zone 3 is 148 to 162 bpm: the pace band sits around its middle.
+        #expect(low > 140 && high < 170 && low < high)
+        let estimator = TRIMPPlanEstimator()
+        #expect(abs(estimator.estimatedLoad(for: planned, athlete: athlete).value - estimator.estimatedLoad(for: sent.workout, athlete: athlete).value) < 1e-6)
+    }
+
     @Test("only work steps use the phase pace")
     func warmupIgnoresPhase() {
         let result = resolve([step(.warmup, target: .heartRateZone(1)), step(.cooldown, target: nil)], fraction: 1.05)

@@ -1,8 +1,9 @@
 # Plans for the 5k, 10k and half marathon (MVP5-152)
 
-**Status: draft for the user to correct. Nothing in the code is built from it.** The user asked on 2026-10-29
-for plans for these three distances, and chose that the session content is drafted here and corrected before it
-is built. The content below is my summary of common coaching practice, not a quotation of a source: no
+**Status (2026-10-29): the user confirmed the sessions below (specific and structural), one paradigm that chooses its
+profile set from the race distance, and the phase-intensity steps.** The phase-intensity steps are built (MVP5-153);
+the profiles per distance are the next step (MVP5-154). The user asked on 2026-10-29 for plans for these three
+distances, and chose that the session content is drafted here and corrected before it is built. The content below is my summary of common coaching practice, not a quotation of a source: no
 book, plan or course is cited because none was given. Every number is a starting point to confirm or change.
 Where the user already decided something, it is marked *decided*.
 
@@ -24,13 +25,13 @@ The fitter takes the templates whose work lengths fit the profile.
 
 Two things proposed here are not in the code yet, and are separate decisions:
 
-- **Phase-intensity steps** (*proposed, not yet confirmed by the user*). A hard step of a template has no fixed
+- **Phase-intensity steps** (*decided 2026-10-29, built in MVP5-153*). A hard step of a template has no fixed
   zone: it is "work at this phase's intensity". The plan works out the pace from the race pace and the fraction,
   finds where that pace sits in the athlete's zones (a zone position, MVP5-148), and writes it as the target
   and as the heart rate when the workout is sent. The same template then fits a 5k and a marathon: 86 % of a
   marathon pace is an easy zone, 86 % of a 5k pace is a threshold zone. The zone check of MVP5-150 stays for
   templates with a fixed zone.
-- **Profiles per distance class.** One paradigm chooses its profile set from the target race, the way
+- **Profiles per distance class** (*decided 2026-10-29: one paradigm*). One paradigm chooses its profile set from the target race, the way
   `resolved(for:)` already does for an ultra. The classes proposed: 5k and 10k share the structure (they differ in
   the lengths and the fractions); the half marathon is its own; the marathon and ultra stay as they are.
 
@@ -114,11 +115,11 @@ fast-finish template should take km, or the profile converts at the race pace (3
 3. **The lengths of the taper** for the 5k (one micro of 7 days may be too long or too short).
 4. **Whether 5k and 10k are the same class** with different lengths, or two classes.
 
-## 6. Questions for the user
+## 6. Decisions (2026-10-29)
 
-1. Are the **specific-phase** key sessions right (the only race-pace work): 5k 4 to 6 x 1000 to 1200 m, 10k 3 to 5 x 1600 to 2400 m, half 2 to 3 x 3 to 5 km? And the **structural** sessions in section 3 (below and above race pace)?
-2. Do you want the profiles per distance in one paradigm chosen by the race distance (my suggestion), or one paradigm
-   per distance?
-3. Do you confirm the phase-intensity steps (section 2), so the templates do not fix a zone?
+1. The key sessions are right: specific-phase race-pace work (5k 4 to 6 x 1000 to 1200 m, 10k 3 to 5 x 1600 to 2400 m,
+   half 2 to 3 x 3 to 5 km) and the structural sessions of section 3 (below and above race pace).
+2. One paradigm, with the profile set chosen by the race distance, as `resolved(for:)` does for an ultra.
+3. Phase-intensity steps, so the templates do not fix a zone.
 
-Nothing is built until these are answered.
+Open: the points of section 5 stay open until the plans can be looked at; they are starting numbers, not decisions.

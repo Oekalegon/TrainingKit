@@ -122,6 +122,13 @@ struct WorkoutKitMappingTests {
         #expect(abs(high - 150) < 1e-6)
     }
 
+    @Test("zone positions have no alert without the athlete's zones: the plan converts them to a heart-rate range before sending")
+    func zonePositionsHaveNoAlertOfTheirOwn() {
+        #expect(IntensityTarget.heartRateZoneRange(3.0...3.4).workoutAlert == nil)
+        // The converted range (StepTargetResolver.resolveBPM) maps as any heart-rate range does.
+        #expect(IntensityTarget.heartRateRange(148, 153.6).workoutAlert is HeartRateRangeAlert)
+    }
+
     @Test("a heart-rate range given with reversed bounds doesn't trap building the WorkoutKit ClosedRange")
     func heartRateRangeWithReversedBoundsDoesNotCrash() throws {
         let alert = try #require(IntensityTarget.heartRateRange(150, 120).workoutAlert as? HeartRateRangeAlert)

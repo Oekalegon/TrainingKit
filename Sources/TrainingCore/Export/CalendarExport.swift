@@ -173,13 +173,13 @@ public struct CalendarExport: Sendable, Codable, Hashable {
 
     /// The intensity a ``Step`` targets.
     public struct Target: Sendable, Codable, Hashable {
-        /// `heartRateZone`, `heartRateRange`, `pace`, `power` or `rpe`.
+        /// `heartRateZone`, `heartRateZoneRange`, `heartRateRange`, `pace`, `power` or `rpe`.
         public let type: String
         /// The zone, for `heartRateZone`.
         public let zone: Int?
         /// The perceived exertion, for `rpe`.
         public let rpe: Int?
-        /// The lower bound of a range: bpm for `heartRateRange`, watts for `power`, and for `pace` the
+        /// The lower bound of a range: zone position for `heartRateZoneRange`, bpm for `heartRateRange`, watts for `power`, and for `pace` the
         /// unit the workout was authored in (``IntensityTarget`` doesn't fix one).
         public let min: Double?
         /// The upper bound of a range.

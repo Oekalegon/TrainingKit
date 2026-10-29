@@ -145,6 +145,16 @@ struct PlannedIntensityClassifierTests {
         #expect(result.confidence == .high)
     }
 
+    @Test("zone positions are classified by the zone of their middle, like the zone they sit in")
+    func zonePositionsClassifyByTheirMiddle() {
+        func category(_ target: IntensityTarget) -> IntensityCategory {
+            assess(workout([step(.work, minutes: 20, target: target)])).category
+        }
+        #expect(category(.heartRateZoneRange(3.0...3.4)) == category(.heartRateZone(3)))
+        #expect(category(.heartRateZoneRange(4.2...4.8)) == category(.heartRateZone(4)))
+        #expect(assess(workout([step(.work, minutes: 20, target: .heartRateZoneRange(4.2...4.8))])).confidence == .high)
+    }
+
     @Test("a work step with no target defaults to tempo effort and lowers confidence")
     func untargetedWorkStepDefaultsToTempo() {
         let result = assess(workout([step(.work, minutes: 30, target: nil)]))

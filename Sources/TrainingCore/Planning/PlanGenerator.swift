@@ -46,8 +46,10 @@ import Foundation
 ///    A profile with a race-target fraction on a pace target only takes templates whose hard work zone holds
 ///    the phase pace; when none does, a hard step that could not be given its target is
 ///    ``PlanCompromise/unresolvedStep(microStart:template:reason:)``, once per template and reason in a micro.
-/// 7. ``StepTargetResolver`` writes the athlete's zones and the profile's race-target fraction into the
-///    steps, and the run becomes a ``PlannedActivity`` in the micro's cycle.
+/// 7. ``StepTargetResolver`` checks the athlete's zones and writes the pace of the zones, or the profile's
+///    race-target fraction of the race pace, as the steps' companion target (the heart-rate target stays a
+///    zone target, in bpm only when the workout is sent), and the run becomes a ``PlannedActivity`` in the
+///    micro's cycle.
 /// 8. ``PlannedIntensityClassifier`` makes the ``PlanSession``s, and ``DailyLoadSeries`` with
 ///    ``FitnessMetricsCalculator`` project the series, from the request's history, through race day.
 ///    The target race and the other races add their load on their day (``Race/expectedLoadOverride``

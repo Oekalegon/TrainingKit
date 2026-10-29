@@ -22,14 +22,74 @@ struct StepTargetResolverTests {
         WorkoutStep(kind: kind, goal: .time(300), target: target)
     }
 
-    @Test("a zone step gets the zone's bpm range and pace range")
+    @Test("a zone step keeps its zone and gets the zone's pace range; the bpm comes when the workout is sent")
     func zoneStep() {
         let result = resolve([step(target: .heartRateZone(4))])
         let resolved = result.workout.blocks[0].steps[0]
-        #expect(resolved.target == .heartRateRange(162, 176))
+        #expect(resolved.target == .heartRateZone(4))
         guard case .pace(let pace)? = resolved.companionTarget else { Issue.record("no pace"); return }
         #expect(abs(pace.lowerBound - 230.4) < 1e-9 && abs(pace.upperBound - 249.6) < 1e-9)
         #expect(result.unresolved.isEmpty)
+
+        let sent = StepTargetResolver.resolveBPM(result.workout, on: date, athlete: athlete)
+        #expect(sent.workout.blocks[0].steps[0].target == .heartRateRange(162, 176))
+        #expect(sent.workout.blocks[0].steps[0].companionTarget == resolved.companionTarget)
+        #expect(sent.unresolved.isEmpty)
+    }
+
+    @Test("zone positions: Z3.0-Z3.4 is the lower 40 % of zone 3, in bpm and in pace")
+    func zonePositionStep() {
+        // Zone 3 is 148...162 bpm and 249.6...270.4 s/km for the fixture athlete: 3.4 is 40 % up from the bottom.
+        let result = resolve([step(target: .heartRateZoneRange(3.0...3.4))])
+        let resolved = result.workout.blocks[0].steps[0]
+        #expect(resolved.target == .heartRateZoneRange(3.0...3.4))
+        let zone = StepTargetResolver.paceRange(zone: 3, in: athlete.paceModel)!
+        guard case .pace(let pace)? = resolved.companionTarget else { Issue.record("no pace"); return }
+        #expect(abs(pace.upperBound - zone.upperBound) < 1e-9)
+        #expect(abs(pace.lowerBound - (zone.upperBound - 0.4 * (zone.upperBound - zone.lowerBound))) < 1e-9)
+        #expect(result.unresolved.isEmpty)
+
+        let sent = StepTargetResolver.resolveBPM(result.workout, on: date, athlete: athlete).workout.blocks[0].steps[0]
+        guard case .heartRateRange(let low, let high)? = sent.target else { Issue.record("no bpm"); return }
+        #expect(abs(low - 148) < 1e-9 && abs(high - (148 + 0.4 * 14)) < 1e-9)
+    }
+
+    @Test("a whole zone as positions, 3.0 to 4.0, is the same as the zone")
+    func wholeZoneAsPositions() {
+        let model = HeartRateZoneModel(settings: athlete.currentHeartRateZoneSettings!)
+        let zone = model.zoneBPMRange(3)!
+        let positions = model.zoneBPMRange(positions: 3.0...4.0)!
+        #expect(abs(zone.lowerBound - positions.lowerBound) < 1e-9 && abs(zone.upperBound - positions.upperBound) < 1e-9)
+        let paces = StepTargetResolver.paceRange(zonePositions: 3.0...4.0, in: athlete.paceModel)
+        #expect(paces == StepTargetResolver.paceRange(zone: 3, in: athlete.paceModel))
+        // The top of zone 5 is the maximum heart rate.
+        #expect(model.zoneBPMRange(positions: 5.0...6.0)?.upperBound == 190)
+        #expect(model.zoneBPMRange(positions: 1.0...1.0)?.lowerBound == 120)
+    }
+
+    @Test("positions outside 1.0 to 6.0 are reported, and the bpm conversion reports them too")
+    func badPositions() {
+        for bad in [0.5...2.0, 4.0...6.5] {
+            let result = resolve([step(target: .heartRateZoneRange(bad))])
+            #expect(result.unresolved.map(\.reason) == [.zoneUnavailable(Int(((bad.lowerBound + bad.upperBound) / 2).rounded(.down)))])
+            let sent = StepTargetResolver.resolveBPM(result.workout, on: date, athlete: athlete)
+            #expect(sent.workout.blocks[0].steps[0].target == .heartRateZoneRange(bad))
+            #expect(sent.unresolved.count == 1)
+        }
+    }
+
+    @Test("sending without zone settings keeps the zone target and reports it; other targets pass through")
+    func resolveBPMEdges() {
+        var bare = athlete
+        bare.heartRateZoneHistory = []
+        let steps = [step(target: .heartRateZone(3)), step(target: .heartRateZoneRange(3.0...3.4)), step(target: .pace(240...250)), step(target: .rpe(5)), step(target: nil)]
+        let sent = StepTargetResolver.resolveBPM(workout(steps), on: date, athlete: bare)
+        #expect(sent.workout.blocks[0].steps.map(\.target) == steps.map(\.target))
+        #expect(sent.unresolved.map(\.reason) == [.noHeartRateZones, .noHeartRateZones])
+        let ok = StepTargetResolver.resolveBPM(workout(steps), on: date, athlete: athlete)
+        #expect(ok.workout.blocks[0].steps.dropFirst(2).map(\.target) == steps.dropFirst(2).map(\.target))
+        // Idempotent: a second conversion changes nothing.
+        #expect(StepTargetResolver.resolveBPM(ok.workout, on: date, athlete: athlete).workout == ok.workout)
     }
 
     @Test("every zone resolves, and neighbouring zones share a boundary")
@@ -37,7 +97,8 @@ struct StepTargetResolverTests {
         let model = HeartRateZoneModel(settings: athlete.currentHeartRateZoneSettings!)
         var previous: (bpm: ClosedRange<Double>, pace: ClosedRange<Double>)?
         for zone in 1...5 {
-            let resolved = resolve([step(target: .heartRateZone(zone))]).workout.blocks[0].steps[0]
+            let planned = resolve([step(target: .heartRateZone(zone))]).workout
+            let resolved = StepTargetResolver.resolveBPM(planned, on: date, athlete: athlete).workout.blocks[0].steps[0]
             guard case .heartRateRange(let low, let high)? = resolved.target, case .pace(let pace)? = resolved.companionTarget else {
                 Issue.record("zone \(zone) not resolved"); return
             }
@@ -59,8 +120,10 @@ struct StepTargetResolverTests {
         let workout = workout([step(target: .heartRateZone(4))])
         let before = StepTargetResolver.resolve(workout, on: date, athlete: athlete, raceTarget: nil, raceTargetFraction: nil)
         let after = StepTargetResolver.resolve(workout, on: later, athlete: athlete, raceTarget: nil, raceTargetFraction: nil)
-        #expect(before.workout.blocks[0].steps[0].target == .heartRateRange(162, 176))
-        #expect(after.workout.blocks[0].steps[0].target == .heartRateRange(156, 168))
+        // The plan keeps the zone; the heart rate follows the zones in effect on the day it is sent.
+        #expect(before.workout.blocks[0].steps[0].target == .heartRateZone(4))
+        #expect(StepTargetResolver.resolveBPM(before.workout, on: date, athlete: athlete).workout.blocks[0].steps[0].target == .heartRateRange(162, 176))
+        #expect(StepTargetResolver.resolveBPM(before.workout, on: later, athlete: athlete).workout.blocks[0].steps[0].target == .heartRateRange(156, 168))
         guard case .pace(let pace)? = after.workout.blocks[0].steps[0].companionTarget else { Issue.record("no pace"); return }
         #expect(abs(pace.lowerBound - 288) < 1e-9)
     }
@@ -84,7 +147,7 @@ struct StepTargetResolverTests {
     func phasePaceInZone() {
         let result = resolve([step(target: .heartRateZone(4))], fraction: 0.98)
         let resolved = result.workout.blocks[0].steps[0]
-        #expect(resolved.target == .heartRateRange(162, 176))
+        #expect(resolved.target == .heartRateZone(4))
         guard case .pace(let pace)? = resolved.companionTarget else { Issue.record("no pace"); return }
         #expect(abs((pace.lowerBound + pace.upperBound) / 2 - 240 / 0.98) < 1e-9)
         #expect(result.unresolved.isEmpty)
@@ -98,7 +161,7 @@ struct StepTargetResolverTests {
         let expectedZone = (1...5).first { StepTargetResolver.paceRange(zone: $0, in: model)!.contains(300) }
         #expect(expectedZone == 2)
         #expect(slow.unresolved == [UnresolvedStep(blockIndex: 0, stepIndex: 0, reason: .paceOutsideZone(zone: 4, paceZone: expectedZone))])
-        #expect(slow.workout.blocks[0].steps[0].target == .heartRateRange(162, 176))
+        #expect(slow.workout.blocks[0].steps[0].target == .heartRateZone(4))
         #expect(slow.workout.blocks[0].steps[0].companionTarget == .pace(StepTargetResolver.paceRange(zone: 4, in: model)!))
         // Faster than every zone.
         let fast = resolve([step(target: .heartRateZone(4))], fraction: 1.4)
@@ -122,7 +185,7 @@ struct StepTargetResolverTests {
             let reason: UnresolvedReason = race == nil ? .noRaceTarget : .unsupportedRaceTarget
             #expect(result.unresolved.map(\.reason) == [reason, reason])
             #expect(result.workout.blocks[0].steps[0].target == nil)
-            #expect(result.workout.blocks[0].steps[1].target == .heartRateRange(162, 176))
+            #expect(result.workout.blocks[0].steps[1].target == .heartRateZone(4))
         }
     }
 
@@ -165,6 +228,19 @@ struct StepTargetResolverTests {
         #expect(once.workout.blocks[1].repetitions == 6 && once.workout.id == input.id)
         let twice = StepTargetResolver.resolve(once.workout, on: date, athlete: athlete, raceTarget: race, raceTargetFraction: 1)
         #expect(twice.workout == once.workout)
+    }
+
+    @Test("TRIMP load and duration agree for the zone, the zone positions and the bpm sent to the device")
+    func agreesWithEstimatorsForPositions() {
+        let model = HeartRateZoneModel(settings: athlete.currentHeartRateZoneSettings!)
+        let planned = workout([
+            step(target: .heartRateZoneRange(3.0...3.4)), step(target: .heartRateZoneRange(4.2...5.0)), step(target: .heartRateZone(2)),
+        ])
+        let sent = StepTargetResolver.resolveBPM(planned, on: date, athlete: athlete).workout
+        let estimator = TRIMPPlanEstimator()
+        #expect(abs(estimator.estimatedLoad(for: planned, athlete: athlete).value - estimator.estimatedLoad(for: sent, athlete: athlete).value) < 1e-6)
+        #expect(abs(WorkoutDurationEstimator().duration(for: planned, athlete: athlete) - WorkoutDurationEstimator().duration(for: sent, athlete: athlete)) < 1e-6)
+        #expect(model.intensityZone(for: .heartRateZoneRange(3.0...3.4)) == 3 && model.intensityZone(for: .heartRateZoneRange(3.7...4.5)) == 4)
     }
 
     @Test("TRIMP load and duration agree before and after resolving")

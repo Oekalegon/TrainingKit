@@ -78,7 +78,7 @@ struct PlanGeneratorTests {
         #expect(proposal.candidate.compromises.filter { if case .leadTime = $0 { true } else { false } }.isEmpty)
     }
 
-    @Test("every planned workout is in the library of templates, has a cycle, and its steps carry numeric targets")
+    @Test("every planned workout is in the library of templates, has a cycle, and its zone steps carry a pace")
     func plannedWorkoutsResolve() async throws {
         let proposal = try await PlanGenerator.generate(request(race: race(micros: 16, target: .pace(secondsPerKilometer: 270))))
         let candidate = proposal.candidate
@@ -98,8 +98,10 @@ struct PlanGeneratorTests {
             let workout = try #require(workouts[planned.workoutID])
             #expect(templateIDs.contains(try #require(workout.templateID)))
             #expect(cycleIDs.contains(try #require(planned.cycleID)))
+            // A zone step keeps its zone (the bpm comes when the workout is sent) and has the pace of that zone.
             for step in workout.blocks.flatMap(\.steps) {
-                if case .heartRateZone = step.target { Issue.record("zone target left in \(workout.name)") }
+                if case .heartRateZone = step.target, step.companionTarget == nil { Issue.record("zone step without a pace in \(workout.name)") }
+                if case .heartRateRange = step.target { Issue.record("bpm stored in the plan in \(workout.name)") }
             }
         }
         #expect(candidate.sessions.count == candidate.plannedActivities.count)

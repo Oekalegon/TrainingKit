@@ -12,7 +12,7 @@ struct WorkoutKitBridgeTests {
 
     // MARK: - Scheduled entry ids
 
-    @Test("workoutPlan(for:workout:) gives the entry its PlannedActivity's id, not the workout's")
+    @Test("workoutPlan(for:workout:athlete:) gives the entry its PlannedActivity's id, not the workout's")
     func workoutPlanUsesPlanID() throws {
         let workout = StructuredWorkout(
             name: "Easy run", sport: .running,
@@ -21,25 +21,52 @@ struct WorkoutKitBridgeTests {
         )
         let plan = PlannedActivity(workoutID: workout.id, date: Date())
 
-        let workoutPlan = try bridge.workoutPlan(for: plan, workout: workout)
+        let workoutPlan = try bridge.workoutPlan(for: plan, workout: workout, athlete: testAthlete)
 
         #expect(workoutPlan.id == plan.id)
     }
 
-    @Test("workoutPlan(for:workout:) gives two plans of the same workout on one day distinct ids")
+    @Test("the plan sent to the watch has the athlete's heart rates for a zone and for zone positions, not the watch's zones")
+    func workoutPlanSendsHeartRates() throws {
+        func alert(_ target: IntensityTarget, athlete: AthleteProfile) throws -> (any WorkoutAlert)? {
+            let workout = StructuredWorkout(
+                name: "Z", sport: .running,
+                blocks: [WorkoutBlock(steps: [WorkoutStep(kind: .work, goal: .time(600), target: target)], repetitions: 2)]
+            )
+            let plan = PlannedActivity(workoutID: workout.id, date: Date())
+            guard case .custom(let custom) = try bridge.workoutPlan(for: plan, workout: workout, athlete: athlete).workout else {
+                Issue.record("not a custom workout"); return nil
+            }
+            return custom.blocks[0].steps[0].step.alert
+        }
+        let unit = WorkoutAlertMetric.countPerMinute
+        // Zone 3 is 148 to 162 bpm for the test athlete; 3.0 to 3.4 is its lower 40 %.
+        let whole = try #require(try alert(.heartRateZone(3), athlete: testAthlete) as? HeartRateRangeAlert)
+        #expect(abs(whole.target.lowerBound.converted(to: unit).value - 148) < 1e-6)
+        #expect(abs(whole.target.upperBound.converted(to: unit).value - 162) < 1e-6)
+        let positions = try #require(try alert(.heartRateZoneRange(3.0...3.4), athlete: testAthlete) as? HeartRateRangeAlert)
+        #expect(abs(positions.target.upperBound.converted(to: unit).value - 153.6) < 1e-6)
+        // Without zone settings the zone target is kept, and positions have no alert.
+        var bare = testAthlete
+        bare.heartRateZoneHistory = []
+        #expect(try alert(.heartRateZone(3), athlete: bare) is HeartRateZoneAlert)
+        #expect(try alert(.heartRateZoneRange(3.0...3.4), athlete: bare) == nil)
+    }
+
+    @Test("workoutPlan(for:workout:athlete:) gives two plans of the same workout on one day distinct ids")
     func workoutPlanDistinguishesPlansOfOneWorkout() throws {
         let workout = StructuredWorkout(
             name: "Easy run", sport: .running,
             blocks: [WorkoutBlock(steps: [WorkoutStep(kind: .work, goal: .time(1800))])]
         )
         let day = Date()
-        let first = try bridge.workoutPlan(for: PlannedActivity(workoutID: workout.id, date: day), workout: workout)
-        let second = try bridge.workoutPlan(for: PlannedActivity(workoutID: workout.id, date: day), workout: workout)
+        let first = try bridge.workoutPlan(for: PlannedActivity(workoutID: workout.id, date: day), workout: workout, athlete: testAthlete)
+        let second = try bridge.workoutPlan(for: PlannedActivity(workoutID: workout.id, date: day), workout: workout, athlete: testAthlete)
 
         #expect(first.id != second.id)
     }
 
-    @Test("workoutPlan(for:workout:) throws what customWorkout(from:) throws")
+    @Test("workoutPlan(for:workout:athlete:) throws what customWorkout(from:) throws")
     func workoutPlanPropagatesMappingErrors() {
         let bridge = WorkoutKitBridge(support: WorkoutKitSupportChecking(
             supportsActivity: { _ in false },
@@ -52,7 +79,7 @@ struct WorkoutKitBridgeTests {
         )
 
         #expect(throws: WorkoutKitMappingError.unsupportedActivity(.running)) {
-            try bridge.workoutPlan(for: PlannedActivity(workoutID: workout.id, date: Date()), workout: workout)
+            try bridge.workoutPlan(for: PlannedActivity(workoutID: workout.id, date: Date()), workout: workout, athlete: testAthlete)
         }
     }
 

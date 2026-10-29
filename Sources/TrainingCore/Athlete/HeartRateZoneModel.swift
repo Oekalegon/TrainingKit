@@ -182,7 +182,12 @@ public struct HeartRateZoneModel: Sendable {
         case .heartRateZone(let zone):
             return zoneMidpointRatio(zone) ?? zoneMidpointRatio(3) ?? 0.75
         case .heartRateZoneRange(let positions):
-            return zoneRatio(atPosition: (positions.lowerBound + positions.upperBound) / 2) ?? zoneMidpointRatio(3) ?? 0.75
+            // The average of the ratios at its two ends, as for the `.heartRateRange` it becomes when sent, so the
+            // estimate does not change when the workout is converted, whatever the zone method's zone widths.
+            guard let low = zoneRatio(atPosition: positions.lowerBound), let high = zoneRatio(atPosition: positions.upperBound) else {
+                return zoneMidpointRatio(3) ?? 0.75
+            }
+            return (low + high) / 2
         case .heartRateRange(let low, let high):
             return (deltaHRRatio(for: low) + deltaHRRatio(for: high)) / 2
         case .pace, .power:

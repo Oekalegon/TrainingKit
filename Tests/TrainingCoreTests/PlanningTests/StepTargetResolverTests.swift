@@ -54,17 +54,9 @@ struct StepTargetResolverTests {
         #expect(abs(low - 148) < 1e-9 && abs(high - (148 + 0.4 * 14)) < 1e-9)
     }
 
-    @Test("a whole zone as positions, 3.0 to 4.0, is the same as the zone")
-    func wholeZoneAsPositions() {
-        let model = HeartRateZoneModel(settings: athlete.currentHeartRateZoneSettings!)
-        let zone = model.zoneBPMRange(3)!
-        let positions = model.zoneBPMRange(positions: 3.0...4.0)!
-        #expect(abs(zone.lowerBound - positions.lowerBound) < 1e-9 && abs(zone.upperBound - positions.upperBound) < 1e-9)
-        let paces = StepTargetResolver.paceRange(zonePositions: 3.0...4.0, in: athlete.paceModel)
-        #expect(paces == StepTargetResolver.paceRange(zone: 3, in: athlete.paceModel))
-        // The top of zone 5 is the maximum heart rate.
-        #expect(model.zoneBPMRange(positions: 5.0...6.0)?.upperBound == 190)
-        #expect(model.zoneBPMRange(positions: 1.0...1.0)?.lowerBound == 120)
+    @Test("a whole zone as positions, 3.0 to 4.0, has the zone's pace range")
+    func wholeZonePaceAsPositions() {
+        #expect(StepTargetResolver.paceRange(zonePositions: 3.0...4.0, in: athlete.paceModel) == StepTargetResolver.paceRange(zone: 3, in: athlete.paceModel))
     }
 
     @Test("positions outside 1.0 to 6.0 are reported, and the bpm conversion reports them too")
@@ -241,6 +233,31 @@ struct StepTargetResolverTests {
         #expect(abs(estimator.estimatedLoad(for: planned, athlete: athlete).value - estimator.estimatedLoad(for: sent, athlete: athlete).value) < 1e-6)
         #expect(abs(WorkoutDurationEstimator().duration(for: planned, athlete: athlete) - WorkoutDurationEstimator().duration(for: sent, athlete: athlete)) < 1e-6)
         #expect(model.intensityZone(for: .heartRateZoneRange(3.0...3.4)) == 3 && model.intensityZone(for: .heartRateZoneRange(3.7...4.5)) == 4)
+    }
+
+    @Test("the estimates agree before and after the conversion under every zone method, also for positions across a boundary")
+    func agreesForEveryZoneMethod() {
+        let methods: [HeartRateZoneMethod] = [.karvonen, .percentageOfMaxHeartRate, .lactateThreshold]
+        for method in methods {
+            let athlete = AthleteProfile.fixture(lactateThresholdHeartRateBPM: 165, zoneMethod: method)
+            let planned = workout([step(target: .heartRateZoneRange(2.5...3.5)), step(target: .heartRateZoneRange(1.2...4.9)), step(target: .heartRateZoneRange(4.5...6.0))])
+            let sent = StepTargetResolver.resolveBPM(planned, on: date, athlete: athlete)
+            #expect(sent.unresolved.isEmpty, "\(method)")
+            let estimator = TRIMPPlanEstimator()
+            #expect(abs(estimator.estimatedLoad(for: planned, athlete: athlete).value - estimator.estimatedLoad(for: sent.workout, athlete: athlete).value) < 1e-6, "\(method)")
+            let zones = HeartRateZoneModel(settings: athlete.currentHeartRateZoneSettings!)
+            for (before, after) in zip(planned.blocks[0].steps, sent.workout.blocks[0].steps) {
+                #expect(zones.intensityZone(for: before.target) == zones.intensityZone(for: after.target), "\(method)")
+            }
+        }
+    }
+
+    @Test("a threshold-based zone method without a threshold heart rate cannot turn positions into bpm")
+    func positionsNeedTheThresholdForThatMethod() {
+        let athlete = AthleteProfile.fixture(zoneMethod: .lactateThreshold)
+        let result = resolve([step(target: .heartRateZoneRange(3.0...3.4))], athlete: athlete)
+        #expect(result.unresolved.map(\.reason) == [.zoneUnavailable(3)])
+        #expect(StepTargetResolver.resolveBPM(result.workout, on: date, athlete: athlete).unresolved.map(\.reason) == [.zoneUnavailable(3)])
     }
 
     @Test("TRIMP load and duration agree before and after resolving")

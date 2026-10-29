@@ -10,6 +10,10 @@ public enum IntensityTarget: Sendable, Codable, Hashable {
     /// same as `.heartRateZone(3)`) and `6.0` the top of zone 5. Positions run from 1.0 to 6.0. The athlete's
     /// zone settings turn it into bpm only when the workout is sent or run, see
     /// ``StepTargetResolver/resolveBPM(_:on:athlete:)``.
+    ///
+    /// A workout or template that uses it cannot be decoded by a version without this case (the decoding of the
+    /// whole workout fails, so nothing is half-read and written back without the target): update every device
+    /// that syncs the library together. Generated plans keep using ``heartRateZone(_:)``.
     case heartRateZoneRange(ClosedRange<Double>)
     case heartRateRange(Double, Double)
     case pace(ClosedRange<Double>)

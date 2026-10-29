@@ -97,6 +97,70 @@ struct HeartRateZoneModelTests {
     }
 }
 
+/// Zone positions (MVP5-148): `n.0` is the bottom of zone `n`, `(n+1).0` its top.
+@Suite("HeartRateZoneModel zone positions")
+struct HeartRateZonePositionTests {
+    private let methods: [HeartRateZoneMethod] = [.karvonen, .percentageOfMaxHeartRate, .lactateThreshold]
+
+    private func model(_ method: HeartRateZoneMethod) -> HeartRateZoneModel {
+        HeartRateZoneModel(restingHeartRateBPM: 50, maxHeartRateBPM: 190, lactateThresholdHeartRateBPM: 165, method: method)
+    }
+
+    @Test("a whole zone as positions is the zone's own range, and neighbouring zones meet on the boundary position")
+    func wholeZonesAndBoundaries() {
+        for method in methods {
+            let model = model(method)
+            for zone in 1...5 {
+                let own = model.zoneBPMRange(zone)!
+                let positions = model.zoneBPMRange(positions: Double(zone)...Double(zone + 1))!
+                #expect(abs(own.lowerBound - positions.lowerBound) < 1e-9 && abs(own.upperBound - positions.upperBound) < 1e-9, "\(method) zone \(zone)")
+                // The position of a boundary is the bottom of the upper zone: 4.0 is the top of zone 3 and the bottom of zone 4.
+                let boundary = model.zoneRatio(atPosition: Double(zone + 1))!
+                let expected = zone < 5 ? model.zoneRatioRange(zone + 1)!.lowerBound : model.zoneRatioRange(5)!.upperBound
+                #expect(abs(boundary - expected) < 1e-9, "\(method) boundary \(zone + 1)")
+            }
+            // The top of zone 5 is the maximum heart rate, except under the threshold method, where it is 120 % of the threshold.
+            #expect(model.zoneBPMRange(positions: 5.0...6.0)?.upperBound == (method == .lactateThreshold ? 198 : 190))
+        }
+    }
+
+    @Test("a position between two boundaries is the interpolation inside its zone")
+    func interpolation() {
+        let karvonen = model(.karvonen)
+        // Zone 3 is 148...162 bpm: 3.4 is 40 % up.
+        #expect(abs(karvonen.zoneBPMRange(positions: 3.0...3.4)!.upperBound - 153.6) < 1e-9)
+        // Unequal zone widths under the threshold method: the same fraction of a narrower zone is fewer bpm.
+        let lactate = model(.lactateThreshold)
+        let narrow = lactate.zoneBPMRange(positions: 2.0...2.5)!
+        let wide = lactate.zoneBPMRange(positions: 3.0...3.5)!
+        #expect(narrow.upperBound - narrow.lowerBound < wide.upperBound - wide.lowerBound)
+    }
+
+    @Test("positions outside 1.0 to 6.0, or a method without its reference heart rate, have no range")
+    func unavailable() {
+        for method in methods {
+            let model = model(method)
+            #expect(model.zoneRatio(atPosition: 0.99) == nil && model.zoneRatio(atPosition: 6.01) == nil)
+            #expect(model.zoneBPMRange(positions: 0.5...2.0) == nil && model.zoneBPMRange(positions: 4.0...6.5) == nil)
+        }
+        let noThreshold = HeartRateZoneModel(restingHeartRateBPM: 50, maxHeartRateBPM: 190, method: .lactateThreshold)
+        #expect(noThreshold.zoneBPMRange(positions: 3.0...3.4) == nil)
+        #expect(noThreshold.intensityRatio(for: .heartRateZoneRange(3.0...3.4)) == 0.75)
+    }
+
+    @Test("the intensity of positions is the average of their two ends, as the bpm range it becomes")
+    func intensityOfPositions() {
+        for method in methods {
+            let model = model(method)
+            for range in [3.0...3.4, 2.5...3.5, 1.2...4.9] {
+                let bpm = model.zoneBPMRange(positions: range)!
+                let sent = model.intensityRatio(for: .heartRateRange(bpm.lowerBound, bpm.upperBound))
+                #expect(abs(model.intensityRatio(for: .heartRateZoneRange(range)) - sent) < 1e-9, "\(method) \(range)")
+            }
+        }
+    }
+}
+
 @Suite("AthleteProfile heart-rate zone history")
 struct AthleteProfileHeartRateZoneHistoryTests {
     private func date(_ daysFromEpoch: Int) -> Date {

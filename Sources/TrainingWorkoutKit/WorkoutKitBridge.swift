@@ -173,7 +173,7 @@ public struct WorkoutKitBridge: Sendable {
     /// the entry again.
     ///
     /// The heart-rate zone targets of `workout` become heart-rate ranges first, from the athlete's zone settings
-    /// in effect on `plan.date` (``StepTargetResolver/resolveBPM(_:on:athlete:)``), so the watch alerts on the
+    /// in effect on `plan.date` (`StepTargetResolver.resolveBPM(_:on:athlete:)`), so the watch alerts on the
     /// athlete's zones and not its own, and zone positions such as Z3.0-Z3.4 have an alert at all (MVP5-148). A
     /// step that cannot be converted (no zone settings) keeps its zone target.
     ///

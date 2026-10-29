@@ -73,7 +73,7 @@ struct WorkoutKitBridgeSchedulingTests {
         let fake = FakeScheduler()
         let plan = PlannedActivity(workoutID: easyRun.id, date: date(5))
 
-        try await makeBridge(fake).schedule(plan, workout: easyRun, calendar: calendar)
+        try await makeBridge(fake).schedule(plan, workout: easyRun, athlete: testAthlete, calendar: calendar)
 
         let entries = await fake.entries
         #expect(entries.count == 1)
@@ -89,7 +89,7 @@ struct WorkoutKitBridgeSchedulingTests {
         let lateEvening = calendar.date(from: DateComponents(year: 2026, month: 10, day: 6, hour: 0, minute: 30))!
         let plan = PlannedActivity(workoutID: easyRun.id, date: lateEvening)
 
-        try await makeBridge(fake).schedule(plan, workout: easyRun, calendar: calendar)
+        try await makeBridge(fake).schedule(plan, workout: easyRun, athlete: testAthlete, calendar: calendar)
 
         #expect(await fake.entries.map(\.date) == [day(6)])
     }
@@ -100,8 +100,8 @@ struct WorkoutKitBridgeSchedulingTests {
         let plan = PlannedActivity(workoutID: easyRun.id, date: date(5))
         let bridge = makeBridge(fake)
 
-        try await bridge.schedule(plan, workout: easyRun, calendar: calendar)
-        try await bridge.schedule(plan, workout: easyRun, calendar: calendar)
+        try await bridge.schedule(plan, workout: easyRun, athlete: testAthlete, calendar: calendar)
+        try await bridge.schedule(plan, workout: easyRun, athlete: testAthlete, calendar: calendar)
 
         #expect(await fake.entries.count == 1)
         #expect(await fake.scheduleCalls == 1)
@@ -113,10 +113,10 @@ struct WorkoutKitBridgeSchedulingTests {
         let fake = FakeScheduler()
         var plan = PlannedActivity(workoutID: easyRun.id, date: date(5))
         let bridge = makeBridge(fake)
-        try await bridge.schedule(plan, workout: easyRun, calendar: calendar)
+        try await bridge.schedule(plan, workout: easyRun, athlete: testAthlete, calendar: calendar)
 
         plan.date = date(7)
-        try await bridge.schedule(plan, workout: easyRun, calendar: calendar)
+        try await bridge.schedule(plan, workout: easyRun, athlete: testAthlete, calendar: calendar)
 
         #expect(await fake.entries.map(\.date) == [day(7)])
     }
@@ -126,11 +126,11 @@ struct WorkoutKitBridgeSchedulingTests {
         let fake = FakeScheduler()
         let plan = PlannedActivity(workoutID: easyRun.id, date: date(5))
         let bridge = makeBridge(fake)
-        try await bridge.schedule(plan, workout: easyRun, calendar: calendar)
+        try await bridge.schedule(plan, workout: easyRun, athlete: testAthlete, calendar: calendar)
 
-        try await bridge.schedule(plan, workout: longRun, calendar: calendar)
+        try await bridge.schedule(plan, workout: longRun, athlete: testAthlete, calendar: calendar)
 
-        let edited = try bridge.workoutPlan(for: plan, workout: longRun)
+        let edited = try bridge.workoutPlan(for: plan, workout: longRun, athlete: testAthlete)
         let entries = await fake.entries
         #expect(entries.count == 1)
         #expect(entries[0].plan == edited)
@@ -139,10 +139,10 @@ struct WorkoutKitBridgeSchedulingTests {
     @Test("A completed entry on the plan's day is kept, even if the workout was edited since")
     func scheduleKeepsCompletedEntry() async throws {
         let plan = PlannedActivity(workoutID: easyRun.id, date: date(5))
-        let original = try WorkoutKitBridge().workoutPlan(for: plan, workout: easyRun)
+        let original = try WorkoutKitBridge().workoutPlan(for: plan, workout: easyRun, athlete: testAthlete)
         let fake = FakeScheduler([.init(plan: original, date: day(5), complete: true)])
 
-        try await makeBridge(fake).schedule(plan, workout: longRun, calendar: calendar)
+        try await makeBridge(fake).schedule(plan, workout: longRun, athlete: testAthlete, calendar: calendar)
 
         let entries = await fake.entries
         #expect(entries.count == 1)
@@ -153,11 +153,11 @@ struct WorkoutKitBridgeSchedulingTests {
     @Test("A completed entry on another day doesn't stop the plan being scheduled on its new day")
     func scheduleMovesPastCompletedEntryOnOtherDay() async throws {
         var plan = PlannedActivity(workoutID: easyRun.id, date: date(5))
-        let original = try WorkoutKitBridge().workoutPlan(for: plan, workout: easyRun)
+        let original = try WorkoutKitBridge().workoutPlan(for: plan, workout: easyRun, athlete: testAthlete)
         let fake = FakeScheduler([.init(plan: original, date: day(5), complete: true)])
 
         plan.date = date(7)
-        try await makeBridge(fake).schedule(plan, workout: easyRun, calendar: calendar)
+        try await makeBridge(fake).schedule(plan, workout: easyRun, athlete: testAthlete, calendar: calendar)
 
         #expect(await fake.entries.map(\.date) == [day(7)])
     }
@@ -165,13 +165,13 @@ struct WorkoutKitBridgeSchedulingTests {
     @Test("Duplicate entries for one plan collapse to one, preferring the completed one")
     func scheduleRemovesDuplicates() async throws {
         let plan = PlannedActivity(workoutID: easyRun.id, date: date(5))
-        let workoutPlan = try WorkoutKitBridge().workoutPlan(for: plan, workout: easyRun)
+        let workoutPlan = try WorkoutKitBridge().workoutPlan(for: plan, workout: easyRun, athlete: testAthlete)
         let fake = FakeScheduler([
             .init(plan: workoutPlan, date: day(5), complete: false),
             .init(plan: workoutPlan, date: DateComponents(year: 2026, month: 10, day: 5, hour: 9), complete: true),
         ])
 
-        try await makeBridge(fake).schedule(plan, workout: easyRun, calendar: calendar)
+        try await makeBridge(fake).schedule(plan, workout: easyRun, athlete: testAthlete, calendar: calendar)
 
         let entries = await fake.entries
         #expect(entries.count == 1)
@@ -185,8 +185,8 @@ struct WorkoutKitBridgeSchedulingTests {
         let morning = PlannedActivity(workoutID: easyRun.id, date: date(5))
         let evening = PlannedActivity(workoutID: easyRun.id, date: date(5))
 
-        try await bridge.schedule(morning, workout: easyRun, calendar: calendar)
-        try await bridge.schedule(evening, workout: easyRun, calendar: calendar)
+        try await bridge.schedule(morning, workout: easyRun, athlete: testAthlete, calendar: calendar)
+        try await bridge.schedule(evening, workout: easyRun, athlete: testAthlete, calendar: calendar)
         await bridge.unschedule(morning)
 
         #expect(await fake.entries.map(\.plan.id) == [evening.id])
@@ -195,7 +195,7 @@ struct WorkoutKitBridgeSchedulingTests {
     @Test("schedule leaves WorkoutKit untouched when the workout can't be mapped")
     func scheduleThrowsWithoutTouchingScheduler() async throws {
         let plan = PlannedActivity(workoutID: easyRun.id, date: date(5))
-        let existing = try WorkoutKitBridge().workoutPlan(for: plan, workout: easyRun)
+        let existing = try WorkoutKitBridge().workoutPlan(for: plan, workout: easyRun, athlete: testAthlete)
         let fake = FakeScheduler([.init(plan: existing, date: day(5), complete: false)])
         let bridge = WorkoutKitBridge(
             support: WorkoutKitSupportChecking(
@@ -207,7 +207,7 @@ struct WorkoutKitBridgeSchedulingTests {
         )
 
         await #expect(throws: WorkoutKitMappingError.unsupportedActivity(.running)) {
-            try await bridge.schedule(plan, workout: longRun, calendar: calendar)
+            try await bridge.schedule(plan, workout: longRun, athlete: testAthlete, calendar: calendar)
         }
         #expect(await fake.entries.count == 1)
         #expect(await fake.removeCalls == 0)
@@ -221,8 +221,8 @@ struct WorkoutKitBridgeSchedulingTests {
         let bridge = makeBridge(fake)
         let target = PlannedActivity(workoutID: easyRun.id, date: date(5))
         let other = PlannedActivity(workoutID: easyRun.id, date: date(6))
-        try await bridge.schedule(target, workout: easyRun, calendar: calendar)
-        try await bridge.schedule(other, workout: easyRun, calendar: calendar)
+        try await bridge.schedule(target, workout: easyRun, athlete: testAthlete, calendar: calendar)
+        try await bridge.schedule(other, workout: easyRun, athlete: testAthlete, calendar: calendar)
 
         var moved = target
         moved.date = date(9) // the plan's date no longer matches its entry's
@@ -245,7 +245,7 @@ struct WorkoutKitBridgeSchedulingTests {
     @Test("unscheduleAll(except:) removes entries no plan id names, such as ones scheduled before MVP2-55")
     func unscheduleAllRemovesUnknownEntries() async throws {
         let plan = PlannedActivity(workoutID: easyRun.id, date: date(5))
-        let known = try WorkoutKitBridge().workoutPlan(for: plan, workout: easyRun)
+        let known = try WorkoutKitBridge().workoutPlan(for: plan, workout: easyRun, athlete: testAthlete)
         let legacy = WorkoutPlan(.custom(try WorkoutKitBridge().customWorkout(from: easyRun)), id: UUID())
         let fake = FakeScheduler([
             .init(plan: known, date: day(5), complete: false),
@@ -262,7 +262,7 @@ struct WorkoutKitBridgeSchedulingTests {
     @Test("unscheduleAll(except:) with every entry's plan id removes nothing")
     func unscheduleAllKeepsKnownEntries() async throws {
         let plan = PlannedActivity(workoutID: easyRun.id, date: date(5))
-        let known = try WorkoutKitBridge().workoutPlan(for: plan, workout: easyRun)
+        let known = try WorkoutKitBridge().workoutPlan(for: plan, workout: easyRun, athlete: testAthlete)
         let fake = FakeScheduler([.init(plan: known, date: day(5), complete: false)])
 
         let removed = await makeBridge(fake).unscheduleAll(except: [plan.id])

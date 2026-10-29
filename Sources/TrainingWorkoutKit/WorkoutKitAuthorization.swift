@@ -1,7 +1,7 @@
 #if canImport(WorkoutKit)
 import WorkoutKit
 
-/// Requests the authorization ``WorkoutKitBridge/schedule(_:workout:calendar:)`` needs to put
+/// Requests the authorization ``WorkoutKitBridge/schedule(_:workout:athlete:calendar:)`` needs to put
 /// workouts on the Watch.
 public enum WorkoutKitAuthorization {
     /// The current authorization state for scheduling workouts, without prompting.

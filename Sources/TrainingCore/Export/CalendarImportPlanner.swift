@@ -326,6 +326,10 @@ public struct CalendarImportPlanner: Sendable {
         case "heartRateRange":
             guard let low = target.min, let high = target.max else { return nil }
             return .heartRateRange(low, high)
+        case "heartRateZoneRange":
+            guard let low = target.min, let high = target.max, low <= high, HeartRateZoneModel.zonePositions.contains(low),
+                  HeartRateZoneModel.zonePositions.contains(high) else { return nil }
+            return .heartRateZoneRange(low...high)
         case "pace", "power":
             guard let low = target.min, let high = target.max, low <= high else { return nil }
             return target.type == "pace" ? .pace(low...high) : .power(low...high)

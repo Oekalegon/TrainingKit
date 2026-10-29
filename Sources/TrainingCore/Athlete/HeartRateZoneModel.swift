@@ -94,6 +94,31 @@ public struct HeartRateZoneModel: Sendable {
         return bpm(forRatio: ratioRange.lowerBound)...bpm(forRatio: ratioRange.upperBound)
     }
 
+    /// The valid zone positions (MVP5-148): `n.0` is the bottom of zone `n` and `(n+1).0` its top, so the
+    /// scale runs from the bottom of zone 1 (1.0) to the top of zone 5 (6.0).
+    public static let zonePositions: ClosedRange<Double> = 1...6
+
+    /// The Karvonen heart-rate-reserve ratio at a zone position, interpolated between the boundaries of the
+    /// zone it lies in. `nil` for a position outside ``zonePositions``, or under the conditions
+    /// ``zoneRatioRange(_:)`` returns `nil` for.
+    ///
+    /// - Parameter position: A zone position, `3.4` being 40 % up zone 3.
+    public func zoneRatio(atPosition position: Double) -> Double? {
+        guard Self.zonePositions.contains(position) else { return nil }
+        let zone = min(Int(position.rounded(.down)), 5)
+        guard let range = zoneRatioRange(zone) else { return nil }
+        return range.lowerBound + (position - Double(zone)) * (range.upperBound - range.lowerBound)
+    }
+
+    /// The heart-rate range, in bpm, of a stretch of zone positions: the athlete's zone boundaries
+    /// interpolated, so `3.0...3.4` is the lower 40 % of zone 3. `nil` when ``zoneRatio(atPosition:)`` is.
+    ///
+    /// - Parameter positions: The zone positions, from the bottom of the stretch to its top.
+    public func zoneBPMRange(positions: ClosedRange<Double>) -> ClosedRange<Double>? {
+        guard let low = zoneRatio(atPosition: positions.lowerBound), let high = zoneRatio(atPosition: positions.upperBound) else { return nil }
+        return bpm(forRatio: low)...bpm(forRatio: high)
+    }
+
     /// The heart rate, in bpm, for a given Karvonen heart-rate-reserve ratio — the inverse of
     /// ``deltaHRRatio(for:)``.
     private func bpm(forRatio ratio: Double) -> Double {
@@ -156,6 +181,13 @@ public struct HeartRateZoneModel: Sendable {
         switch target {
         case .heartRateZone(let zone):
             return zoneMidpointRatio(zone) ?? zoneMidpointRatio(3) ?? 0.75
+        case .heartRateZoneRange(let positions):
+            // The average of the ratios at its two ends, as for the `.heartRateRange` it becomes when sent, so the
+            // estimate does not change when the workout is converted, whatever the zone method's zone widths.
+            guard let low = zoneRatio(atPosition: positions.lowerBound), let high = zoneRatio(atPosition: positions.upperBound) else {
+                return zoneMidpointRatio(3) ?? 0.75
+            }
+            return (low + high) / 2
         case .heartRateRange(let low, let high):
             return (deltaHRRatio(for: low) + deltaHRRatio(for: high)) / 2
         case .pace, .power:
@@ -182,11 +214,14 @@ public struct HeartRateZoneModel: Sendable {
     }
 
     /// The zone a target implies when there is no zone model to resolve it against: a
-    /// `.heartRateZone` target's own zone (3 if out of range), zone 4 for `.pace`/`.power`
+    /// `.heartRateZone` target's own zone (the zone of the midpoint for a `.heartRateZoneRange`; 3 if out of range), zone 4 for `.pace`/`.power`
     /// (matching ``intensityRatio(for:)``), and zone 3 otherwise.
     public static func fallbackZone(for target: IntensityTarget?) -> Int {
         switch target {
         case .heartRateZone(let zone): return (1...5).contains(zone) ? zone : 3
+        case .heartRateZoneRange(let positions):
+            let zone = Int(((positions.lowerBound + positions.upperBound) / 2).rounded(.down))
+            return (1...5).contains(zone) ? zone : 3
         case .pace, .power: return 4
         default: return 3
         }

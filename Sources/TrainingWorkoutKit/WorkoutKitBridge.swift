@@ -24,7 +24,7 @@ import WorkoutKit
 /// falls back to `IntervalStep.Purpose.work` — that enum only distinguishes work from recovery.
 ///
 /// Sync is one-directional: library → WorkoutKit. A scheduled entry's `WorkoutPlan` id is the
-/// `PlannedActivity`'s id (see ``workoutPlan(for:workout:)``), so each entry belongs to one plan
+/// `PlannedActivity`'s id (see ``workoutPlan(for:workout:athlete:)``), so each entry belongs to one plan
 /// and can be found again without storing anything.
 public struct WorkoutKitBridge: Sendable {
     private let support: WorkoutKitSupportChecking
@@ -47,6 +47,11 @@ public struct WorkoutKitBridge: Sendable {
 
     /// Maps a library workout onto a `CustomWorkout`, validating every step's goal and alert
     /// against `workout.sport` along the way.
+    ///
+    /// This maps the targets as they are. A heart-rate zone target maps to WorkoutKit's own zone alert, which
+    /// uses the watch's zones, and zone positions have no alert, so a workout from a plan goes through
+    /// ``workoutPlan(for:workout:athlete:)`` or ``schedule(_:workout:athlete:calendar:)``, which turn the
+    /// athlete's zones into heart rates first (MVP5-148).
     ///
     /// - Parameter workout: The library workout to map.
     /// - Returns: A `CustomWorkout` WorkoutKit is guaranteed to accept for `workout.sport`.
@@ -102,7 +107,7 @@ public struct WorkoutKitBridge: Sendable {
     /// `workoutKitID`.
     ///
     /// For an entry this bridge scheduled, that id is a `PlannedActivity`'s id (see
-    /// ``workoutPlan(for:workout:)``), not a library workout's.
+    /// ``workoutPlan(for:workout:athlete:)``), not a library workout's.
     ///
     /// - Parameter plan: The plan to recover a `StructuredWorkout` from.
     /// - Returns: The recovered `StructuredWorkout`, with `workoutKitID` set to `plan.id`.
@@ -145,7 +150,7 @@ public struct WorkoutKitBridge: Sendable {
     /// it has one, otherwise a new id.
     ///
     /// This doesn't schedule anything, and scheduling doesn't use the id it returns: a scheduled
-    /// entry takes its plan's id instead (see ``workoutPlan(for:workout:)``). It exists so a caller
+    /// entry takes its plan's id instead (see ``workoutPlan(for:workout:athlete:)``). It exists so a caller
     /// can validate a workout up front. `async` to leave room for a real library-sync API if
     /// WorkoutKit ever grows one — WorkoutKit today has no concept of a workout library separate
     /// from scheduled plans.
@@ -167,19 +172,26 @@ public struct WorkoutKitBridge: Sendable {
     /// one, names the plan it fulfilled. `plan.id` is stable, so nothing extra needs storing to find
     /// the entry again.
     ///
+    /// The heart-rate zone targets of `workout` become heart-rate ranges first, from the athlete's zone settings
+    /// in effect on `plan.date` (`StepTargetResolver.resolveBPM(_:on:athlete:)`), so the watch alerts on the
+    /// athlete's zones and not its own, and zone positions such as Z3.0-Z3.4 have an alert at all (MVP5-148). A
+    /// step that cannot be converted (no zone settings) keeps its zone target.
+    ///
     /// - Parameters:
-    ///   - plan: The plan being scheduled; supplies the id.
+    ///   - plan: The plan being scheduled; supplies the id and the day.
     ///   - workout: The library workout `plan` schedules.
+    ///   - athlete: Supplies the date-effective heart-rate zones.
     /// - Returns: A `WorkoutPlan` wrapping `workout`'s `CustomWorkout`, with id `plan.id`.
     /// - Throws: Whatever ``customWorkout(from:)`` throws for `workout`.
-    public func workoutPlan(for plan: PlannedActivity, workout: StructuredWorkout) throws(WorkoutKitMappingError) -> WorkoutPlan {
-        WorkoutPlan(.custom(try customWorkout(from: workout)), id: plan.id)
+    public func workoutPlan(for plan: PlannedActivity, workout: StructuredWorkout, athlete: AthleteProfile) throws(WorkoutKitMappingError) -> WorkoutPlan {
+        let sent = StepTargetResolver.resolveBPM(workout, on: plan.date, athlete: athlete).workout
+        return WorkoutPlan(.custom(try customWorkout(from: sent)), id: plan.id)
     }
 
     /// Puts `workout` on the Watch for `plan.date` via `WorkoutScheduler`, replacing whatever was
     /// scheduled for `plan` before.
     ///
-    /// The entry's id is `plan.id` (see ``workoutPlan(for:workout:)``). Existing entries with that
+    /// The entry's id is `plan.id` (see ``workoutPlan(for:workout:athlete:)``). Existing entries with that
     /// id are removed, whatever their date, so a moved plan leaves nothing on its old day and an
     /// edited workout replaces the stale version. The one exception is an entry on the plan's own
     /// day that's identical or already completed; it's kept instead of scheduling a new one: that keeps the Watch's completion flag, which a
@@ -193,14 +205,16 @@ public struct WorkoutKitBridge: Sendable {
     /// - Parameters:
     ///   - plan: Supplies the date to schedule for and the entry's id.
     ///   - workout: The library workout `plan` schedules.
+    ///   - athlete: Supplies the heart-rate zones the workout's zone targets become heart rates in, see
+    ///     ``workoutPlan(for:workout:athlete:)``.
     ///   - calendar: Used to turn `plan.date` into the `DateComponents` the scheduler takes;
     ///     defaults to `.current`. Pass the athlete's own calendar (built from
     ///     `AthleteProfile.timeZone`) if it differs from the device's, since `plan.date` is a
     ///     calendar day in the athlete's timezone, not necessarily the device's.
     /// - Throws: Whatever ``customWorkout(from:)`` throws for `workout`. Nothing is removed from
     ///   WorkoutKit when it throws.
-    public func schedule(_ plan: PlannedActivity, workout: StructuredWorkout, calendar: Calendar = .current) async throws(WorkoutKitMappingError) {
-        let desired = try workoutPlan(for: plan, workout: workout)
+    public func schedule(_ plan: PlannedActivity, workout: StructuredWorkout, athlete: AthleteProfile, calendar: Calendar = .current) async throws(WorkoutKitMappingError) {
+        let desired = try workoutPlan(for: plan, workout: workout, athlete: athlete)
         let day = calendar.dateComponents([.year, .month, .day], from: plan.date)
         // A completed entry wins over an identical one, so its flag is the one kept.
         let entries = await scheduler.scheduledWorkouts()
@@ -227,7 +241,7 @@ public struct WorkoutKitBridge: Sendable {
     /// scheduled would rebuild to a different one. Nothing is mapped, so this doesn't throw. A no-op
     /// when nothing was scheduled for `plan`.
     ///
-    /// Moving a plan to another day doesn't need this: ``schedule(_:workout:calendar:)`` already
+    /// Moving a plan to another day doesn't need this: ``schedule(_:workout:athlete:calendar:)`` already
     /// removes the old day's entry.
     ///
     /// - Parameter plan: The plan whose entry to remove.

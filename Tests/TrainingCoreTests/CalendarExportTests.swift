@@ -254,6 +254,22 @@ struct CalendarExportTests {
         #expect(steps[2].target == CalendarExport.Target(type: "power", zone: nil, rpe: nil, min: 200, max: 220))
     }
 
+    @Test("zone positions are exported as a range of positions and read back; positions outside 1 to 6 are refused")
+    func zonePositionsRoundTrip() throws {
+        let workout = StructuredWorkout(name: "Z3.0-3.4", sport: .running, blocks: [WorkoutBlock(steps: [
+            WorkoutStep(kind: .work, goal: .time(600), target: .heartRateZoneRange(3.0...3.4), companionTarget: .pace(260...270)),
+        ])])
+        let export = build(plans: [PlannedActivity(workoutID: workout.id, date: day(4))], workouts: [workout])
+        let step = try #require(export.days[4].activities.first).steps[0]
+        let target = try #require(step.target)
+        #expect(target == CalendarExport.Target(type: "heartRateZoneRange", zone: nil, rpe: nil, min: 3.0, max: 3.4))
+        #expect(CalendarImportPlanner.target(from: target) == .heartRateZoneRange(3.0...3.4))
+        for (low, high) in [(0.5, 2.0), (4.0, 6.5), (3.4, 3.0)] {
+            let bad = CalendarExport.Target(type: "heartRateZoneRange", zone: nil, rpe: nil, min: low, max: high)
+            #expect(CalendarImportPlanner.target(from: bad) == nil)
+        }
+    }
+
     @Test("steps survive a JSON round trip")
     func stepsRoundTrip() throws {
         let workout = intervals()

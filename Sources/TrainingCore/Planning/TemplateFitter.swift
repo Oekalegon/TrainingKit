@@ -71,8 +71,8 @@ public enum TemplateFitter {
         let parameters: [String: WorkoutTemplateParameter]
         /// Every parameter at its default.
         let defaults: [String: Double]
-        /// The heart-rate zones of the hard work steps.
-        let hardZones: [Int]
+        /// The zone positions of the hard work steps with a heart-rate zone target (a whole zone `n` is `n.0...(n+1).0`).
+        let hardPositions: [ClosedRange<Double>]
         /// Whether a hard work step has another target (an effort, say), which the step resolver keeps as it is.
         let hasOtherHardTarget: Bool
 
@@ -83,8 +83,8 @@ public enum TemplateFitter {
         /// cannot do work at the phase pace and takes part only when none holds.
         func holds(_ phase: PhasePace) -> Bool {
             if hasOtherHardTarget { return true }
-            if hardZones.isEmpty { return false }
-            return hardZones.contains { StepTargetResolver.paceRange(zone: $0, in: phase.paceModel)?.contains(phase.secondsPerKilometer) == true }
+            if hardPositions.isEmpty { return false }
+            return hardPositions.contains { StepTargetResolver.paceRange(zonePositions: $0, in: phase.paceModel)?.contains(phase.secondsPerKilometer) == true }
         }
     }
 
@@ -118,18 +118,18 @@ public enum TemplateFitter {
                 }
             }
             volumeKeys.removeAll { workKeys[$0] != nil }
-            var hardZones: [Int] = []
+            var hardPositions: [ClosedRange<Double>] = []
             var hasOtherHardTarget = false
             for block in template.blocks {
                 for step in block.steps where step.isHardWork(in: block) {
-                    if case .heartRateZone(let zone) = step.target { hardZones.append(zone) } else { hasOtherHardTarget = true }
+                    if let positions = StepTargetResolver.zonePositions(of: step.target) { hardPositions.append(positions) } else { hasOtherHardTarget = true }
                 }
             }
             return Prepared(
                 template: template, analysis: analysis, workKeys: workKeys, volumeKeys: volumeKeys, repetitionKeys: repetitionKeys,
                 parameters: Dictionary(uniqueKeysWithValues: template.parameters.map { ($0.key, $0) }),
                 defaults: Dictionary(uniqueKeysWithValues: template.parameters.map { ($0.key, $0.defaultValue) }),
-                hardZones: hardZones, hasOtherHardTarget: hasOtherHardTarget
+                hardPositions: hardPositions, hasOtherHardTarget: hasOtherHardTarget
             )
         }
     }

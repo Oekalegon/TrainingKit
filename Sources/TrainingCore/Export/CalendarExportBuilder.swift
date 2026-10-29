@@ -268,6 +268,8 @@ public struct CalendarExportBuilder: Sendable {
         switch target {
         case .heartRateZone(let zone):
             CalendarExport.Target(type: "heartRateZone", zone: zone, rpe: nil, min: nil, max: nil)
+        case .heartRateZoneRange(let positions):
+            CalendarExport.Target(type: "heartRateZoneRange", zone: nil, rpe: nil, min: finite(positions.lowerBound), max: finite(positions.upperBound))
         case .heartRateRange(let low, let high):
             CalendarExport.Target(type: "heartRateRange", zone: nil, rpe: nil, min: finite(low), max: finite(high))
         case .pace(let range):

@@ -120,6 +120,7 @@ extension IntensityTarget? {
     var isHardEffort: Bool {
         switch self {
         case .heartRateZone(let zone): zone >= 3
+        case .heartRateZoneRange(let positions): Int(((positions.lowerBound + positions.upperBound) / 2).rounded(.down)) >= 3
         case .rpe(let rpe): rpe >= 7
         default: false
         }
@@ -155,6 +156,10 @@ extension TemplateBlock {
 extension IntensityTarget? {
     /// Whether the target is easy enough to be an interval only inside an interval set: heart-rate zone 2.
     var isIntervalEffort: Bool {
-        if case .heartRateZone(let zone) = self { zone == 2 } else { false }
+        switch self {
+        case .heartRateZone(let zone): zone == 2
+        case .heartRateZoneRange(let positions): Int(((positions.lowerBound + positions.upperBound) / 2).rounded(.down)) == 2
+        default: false
+        }
     }
 }

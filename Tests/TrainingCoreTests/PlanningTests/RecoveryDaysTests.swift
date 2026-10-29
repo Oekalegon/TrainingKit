@@ -268,6 +268,38 @@ struct RecoveryDaysPlanTests {
         #expect(longRuns(ultra) > longRuns(marathon))
     }
 
+    @Test("a template whose hard step is in zone positions is chosen for a race pace inside them and keeps them in the plan")
+    func zonePositionsInATemplate() async throws {
+        let positions = WorkoutTemplate(
+            name: "Zone 3.0-3.4 repeats", sport: .running,
+            parameters: [WorkoutTemplateParameter(key: "reps", name: "Reps", unit: .count, defaultValue: 4, range: 2...10)],
+            blocks: [TemplateBlock(steps: [
+                TemplateStep(kind: .work, goal: .time(.fixed(300)), target: .heartRateZoneRange(3.0...3.4)),
+                TemplateStep(kind: .recovery, goal: .time(.fixed(120)), target: .heartRateZone(1)),
+            ], repetitions: .parameter("reps"))],
+            sessionType: .interval
+        )
+        var asked = request(hard: [.wednesday], long: [.sunday], templates: basics + [positions, BuiltInWorkoutTemplates.longRun])
+        // The fixture athlete's zone 3 runs from 249.6 to 270.4 s/km; its first 40 % is about 262 to 270.
+        asked.targetRace.specificPhaseTarget = .pace(secondsPerKilometer: 266)
+        let proposal = try await PlanGenerator.generate(asked)
+
+        let chosen = proposal.candidate.workouts.filter { $0.templateID == positions.id }
+        #expect(!chosen.isEmpty)
+        for workout in chosen {
+            let step = try #require(workout.blocks.flatMap(\.steps).first { $0.kind == .work })
+            #expect(step.target == .heartRateZoneRange(3.0...3.4))
+            guard case .pace(let pace)? = step.companionTarget else { Issue.record("no pace"); return }
+            #expect(pace.contains(266))
+        }
+        // In the specific phase and the taper the pace is held; the structural phase asks for other paces and may report.
+        let phases = Dictionary(uniqueKeysWithValues: proposal.candidate.cycles.filter { $0.level == .micro }.map { ($0.dateRange.lowerBound, $0.phase) })
+        let late = proposal.candidate.compromises.filter {
+            if case .unresolvedStep(let start, let template, _) = $0 { (phases[start] == .specific || phases[start] == .taper) && template == positions.name } else { false }
+        }
+        #expect(late.isEmpty)
+    }
+
     @Test("a plan without alternation runs is unchanged: the default days are the paradigm's spacing")
     func defaultsUnchanged() async throws {
         let asked = request(hard: [.tuesday, .thursday], long: [.saturday, .sunday], templates: basics + [BuiltInWorkoutTemplates.longRun], hardSessions: 2)

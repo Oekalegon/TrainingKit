@@ -10,6 +10,9 @@ extension IntensityTarget {
     /// - `.pace` is stored in seconds per kilometer, matching `PaceModel`'s convention; it's
     ///   converted to a `SpeedRangeAlert` (WorkoutKit has no pace-based alert), inverting the
     ///   range since a faster (smaller) pace is a higher speed.
+    /// - `.heartRateZoneRange` (zone positions, MVP5-148) has no alert without the athlete's zone settings, so it
+    ///   maps to `nil`; send the workout through `StepTargetResolver.resolveBPM(_:on:athlete:)` first, which turns
+    ///   it into a `.heartRateRange`.
     /// - `.rpe` has no WorkoutKit equivalent — there's no alert type based on perceived exertion —
     ///   so it always maps to `nil`, the same "not representable on the watch" gap
     ///   `TrainingHealthKit`'s import notes for `Activity.perceivedExertion` in the other direction.
@@ -45,6 +48,8 @@ extension IntensityTarget {
             )
         case .power(let range):
             return PowerRangeAlert(target: Measurement(value: range.lowerBound, unit: .watts)...Measurement(value: range.upperBound, unit: .watts))
+        case .heartRateZoneRange:
+            return nil
         case .rpe:
             return nil
         }

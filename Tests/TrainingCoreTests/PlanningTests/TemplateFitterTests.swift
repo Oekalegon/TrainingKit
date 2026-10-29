@@ -461,6 +461,20 @@ struct TemplateFitterTests {
         #expect(try picked(faster).template.id == zone2.id)
     }
 
+    @Test("a hard step in zone positions holds the pace that lies in those positions, not the rest of the zone")
+    func phasePaceWithZonePositions() throws {
+        func positions(_ name: String, _ range: ClosedRange<Double>) -> WorkoutTemplate {
+            var template = repeats(name, zone: 3)
+            template.blocks[0].steps[0].target = .heartRateZoneRange(range)
+            return template
+        }
+        // Zone 3 is 249.6 to 270.4 s/km for the fixture athlete; 3.0...3.4 is its slower 40 % (262 to 270 s/km).
+        let low = positions("A Z3.0-3.4", 3.0...3.4)
+        let high = positions("B Z3.6-4.0", 3.6...4.0)
+        #expect(try fit(phasePace: 266, templates: [high, low]).template.id == low.id)
+        #expect(try fit(phasePace: 253, templates: [low, high]).template.id == high.id)
+    }
+
     @Test("rotation moves to another template that holds the pace, never to one that does not")
     func rotationStaysInTheHoldingPool() throws {
         let outside = repeats("A Zone 4", zone: 4)

@@ -3,18 +3,22 @@ import Foundation
 /// Gives the steps of a workout concrete targets for one athlete on one date (MVP5-122).
 ///
 /// A pure function of its inputs; it reads no clock and stores nothing. The caller stores the
-/// returned workout in the plan, so a workout already sent to a watch does not change when the zones
-/// are edited later; re-planning resolves again.
+/// returned workout in the plan.
+///
+/// A heart-rate target stays a zone target (MVP5-148): a position in the athlete's zones such as
+/// `3.0...3.4` (``IntensityTarget/heartRateZoneRange(_:)``), or a whole zone, which an athlete reads more
+/// easily than bpm. The bpm is worked out only when the workout is sent or run, by
+/// ``resolveBPM(_:on:athlete:)``, with the zone settings in effect on that day.
 ///
 /// The rules, per step:
-/// - A `.heartRateZone(n)` target becomes `.heartRateRange` with the bpm bounds of zone `n` from the
-///   zone settings in effect on the date (``AthleteProfile/heartRateZoneSettings(asOf:)``). Its
-///   ``HeartRateZoneModel/intensityRatio(for:)`` is the zone's midpoint ratio, so
-///   ``TRIMPPlanEstimator`` and ``WorkoutDurationEstimator`` read the resolved step as the same zone.
-///   The ``WorkoutStep/companionTarget`` is the zone's pace, see below.
+/// - A `.heartRateZone(n)` or `.heartRateZoneRange` target is kept. The step is checked against the zone
+///   settings in effect on the date (``AthleteProfile/heartRateZoneSettings(asOf:)``): without them, or
+///   when a zone has no bpm range under the athlete's zone method, it is reported
+///   (``UnresolvedReason/noHeartRateZones``, ``UnresolvedReason/zoneUnavailable(_:)``). The
+///   ``WorkoutStep/companionTarget`` is the pace of the zones the target spans, see below.
 /// - On a `.work` step with a zone, when the phase gives a race-target fraction and the race target
-///   is a pace, the companion is the phase pace instead, provided it falls in the zone's pace range.
-///   If it does not, the step keeps the zone's pace and is reported as
+///   is a pace, the companion is the phase pace instead, provided it falls in the pace range of the
+///   target's zones. If it does not, the step keeps the zone's pace and is reported as
 ///   ``UnresolvedReason/paceOutsideZone(zone:paceZone:)``: the template does not suit the phase.
 /// - A `.work` step with no target and a fraction gets `.pace` as its target.
 /// - A `.pace`, `.power`, `.heartRateRange` or `.rpe` target is kept as it is, and so is a step
@@ -23,7 +27,7 @@ import Foundation
 /// A fraction scales *speed*: pace is the race pace divided by the fraction, so 1.05 is 5 % faster
 /// than race pace and 0.9 is slower.
 ///
-/// Resolving keeps a heart-rate range it wrote earlier, so after the zones change a re-plan must
+/// Resolving keeps a companion pace it wrote earlier, so after the pace model changes a re-plan must
 /// resolve the template's workout again, not a stored resolved one.
 public enum StepTargetResolver {
     /// Half-width of the pace range written for a fraction of the race pace, as a fraction of that
@@ -74,8 +78,8 @@ public enum StepTargetResolver {
                 var step = step
                 var reason: UnresolvedReason?
                 switch step.target {
-                case .heartRateZone(let zone):
-                    reason = resolveZone(zone, in: &step, zoneModel: zoneModel, paceModel: paceModel, phasePace: step.kind == .work ? phasePace : nil)
+                case .heartRateZone, .heartRateZoneRange:
+                    reason = resolveZone(step.target, in: &step, zoneModel: zoneModel, paceModel: paceModel, phasePace: step.kind == .work ? phasePace : nil)
                     if reason == nil, step.kind == .work { reason = phaseProblem }
                 case nil where step.kind == .work && fraction != nil:
                     if let phasePace {
@@ -121,14 +125,60 @@ public enum StepTargetResolver {
         (1...5).first { paceRange(zone: $0, in: paceModel)?.contains(pace) == true }
     }
 
+    /// The zone positions a heart-rate zone target spans: `n.0...(n+1).0` for a whole zone `n`, the range itself
+    /// for a ``IntensityTarget/heartRateZoneRange(_:)``. `nil` for another target, a zone outside 1...5 or positions
+    /// outside ``HeartRateZoneModel/zonePositions``.
+    static func zonePositions(of target: IntensityTarget?) -> ClosedRange<Double>? {
+        switch target {
+        case .heartRateZone(let zone):
+            (1...5).contains(zone) ? Double(zone)...Double(zone + 1) : nil
+        case .heartRateZoneRange(let positions):
+            HeartRateZoneModel.zonePositions.contains(positions.lowerBound) && HeartRateZoneModel.zonePositions.contains(positions.upperBound) ? positions : nil
+        default:
+            nil
+        }
+    }
+
+    /// The zone a heart-rate zone target is reported under: its own zone, or the zone of the middle of its positions.
+    private static func zoneNumber(of target: IntensityTarget?) -> Int {
+        switch target {
+        case .heartRateZone(let zone): zone
+        case .heartRateZoneRange(let positions): Int(((positions.lowerBound + positions.upperBound) / 2).rounded(.down))
+        default: 0
+        }
+    }
+
+    /// The pace range, in seconds per kilometer, of a stretch of zone positions in `paceModel`: the zone's
+    /// ``paceRange(zone:in:)`` cut at the positions, a higher position being a faster pace. A whole zone gives
+    /// exactly its ``paceRange(zone:in:)``. `nil` for positions outside ``HeartRateZoneModel/zonePositions``.
+    ///
+    /// - Parameters:
+    ///   - zonePositions: The positions, such as `3.0...3.4`.
+    ///   - paceModel: The pace model to read.
+    public static func paceRange(zonePositions: ClosedRange<Double>, in paceModel: PaceModel) -> ClosedRange<Double>? {
+        if zonePositions.lowerBound.rounded() == zonePositions.lowerBound, zonePositions.upperBound == zonePositions.lowerBound + 1,
+           let whole = paceRange(zone: Int(zonePositions.lowerBound), in: paceModel) {
+            return whole
+        }
+        func pace(atPosition position: Double) -> Double? {
+            guard HeartRateZoneModel.zonePositions.contains(position) else { return nil }
+            let zone = min(Int(position.rounded(.down)), 5)
+            guard let range = paceRange(zone: zone, in: paceModel) else { return nil }
+            return range.upperBound - (position - Double(zone)) * (range.upperBound - range.lowerBound)
+        }
+        guard let slow = pace(atPosition: zonePositions.lowerBound), let fast = pace(atPosition: zonePositions.upperBound) else { return nil }
+        return min(fast, slow)...max(fast, slow)
+    }
+
     private static func resolveZone(
-        _ zone: Int, in step: inout WorkoutStep, zoneModel: HeartRateZoneModel?, paceModel: PaceModel, phasePace: Double?
+        _ target: IntensityTarget?, in step: inout WorkoutStep, zoneModel: HeartRateZoneModel?, paceModel: PaceModel, phasePace: Double?
     ) -> UnresolvedReason? {
         guard let zoneModel else { return .noHeartRateZones }
-        guard let bpm = zoneModel.zoneBPMRange(zone), let zonePace = paceRange(zone: zone, in: paceModel) else {
+        let zone = zoneNumber(of: target)
+        guard let positions = zonePositions(of: target), zoneModel.zoneBPMRange(positions: positions) != nil,
+              let zonePace = paceRange(zonePositions: positions, in: paceModel) else {
             return .zoneUnavailable(zone)
         }
-        step.target = .heartRateRange(bpm.lowerBound, bpm.upperBound)
         step.companionTarget = .pace(zonePace)
         guard let phasePace else { return nil }
         guard zonePace.contains(phasePace) else {
@@ -136,6 +186,53 @@ public enum StepTargetResolver {
         }
         let tolerance = phasePace * fractionPaceTolerance
         step.companionTarget = .pace((phasePace - tolerance)...(phasePace + tolerance))
+        return nil
+    }
+
+    /// Turns the heart-rate zone targets of `workout` into bpm ranges, for sending the workout to a device or
+    /// running it (MVP5-148). The plan keeps zone positions; this is where the athlete's zones become heart
+    /// rates, with the settings in effect on `date`, so a workout sent after the zones changed follows them and
+    /// one already on the watch does not.
+    ///
+    /// `.heartRateZone(n)` and `.heartRateZoneRange` become `.heartRateRange`; every other target, and the
+    /// ``WorkoutStep/companionTarget``, is kept. A step it cannot convert (no zone settings, or a zone with no
+    /// bpm range under the zone method) keeps its zone target and is reported.
+    ///
+    /// - Parameters:
+    ///   - workout: The workout to convert; not modified.
+    ///   - date: The day the workout is done; picks the zone settings in effect.
+    ///   - athlete: Supplies the date-effective heart-rate zones.
+    /// - Returns: The workout with bpm targets, and the steps that could not be converted.
+    public static func resolveBPM(_ workout: StructuredWorkout, on date: Date, athlete: AthleteProfile) -> StepTargetResolution {
+        let zoneModel = athlete.heartRateZoneSettings(asOf: date).map { HeartRateZoneModel(settings: $0) }
+        var converted = workout
+        var unresolved: [UnresolvedStep] = []
+        for (blockIndex, block) in workout.blocks.enumerated() {
+            for (stepIndex, step) in block.steps.enumerated() {
+                switch step.target {
+                case .heartRateZone, .heartRateZoneRange:
+                    if let reason = convert(step, at: (blockIndex, stepIndex), zoneModel: zoneModel, into: &converted) {
+                        unresolved.append(UnresolvedStep(blockIndex: blockIndex, stepIndex: stepIndex, reason: reason))
+                    }
+                default:
+                    break
+                }
+            }
+        }
+        return StepTargetResolution(workout: converted, unresolved: unresolved)
+    }
+
+    private static func convert(
+        _ step: WorkoutStep, at index: (block: Int, step: Int), zoneModel: HeartRateZoneModel?, into workout: inout StructuredWorkout
+    ) -> UnresolvedReason? {
+        guard let zoneModel else { return .noHeartRateZones }
+        guard let positions = zonePositions(of: step.target), let bpm = zoneModel.zoneBPMRange(positions: positions) else {
+            return .zoneUnavailable(zoneNumber(of: step.target))
+        }
+        // A whole zone is the zone's own range, to the digit, as it was before zone positions.
+        let range: ClosedRange<Double>
+        if case .heartRateZone(let zone) = step.target, let whole = zoneModel.zoneBPMRange(zone) { range = whole } else { range = bpm }
+        workout.blocks[index.block].steps[index.step].target = .heartRateRange(range.lowerBound, range.upperBound)
         return nil
     }
 }

@@ -173,6 +173,14 @@ public struct PlannedIntensityClassifier: Sendable {
         switch target {
         case .heartRateZone(let zone):
             return ResolvedZone(zone: min(max(zone, 1), 5), isExplicit: true)
+        case .heartRateZoneRange(let positions):
+            // Through the zone model where there is one, so it agrees with the `.heartRateRange` it becomes when sent.
+            if let zoneModel, let boundaries {
+                let ratio = zoneModel.intensityRatio(for: target)
+                return ResolvedZone(zone: min(max(TimeInZoneBuilder.zone(for: ratio, boundaries: boundaries), 1), 5), isExplicit: true)
+            }
+            let zone = Int(((positions.lowerBound + positions.upperBound) / 2).rounded(.down))
+            return ResolvedZone(zone: min(max(zone, 1), 5), isExplicit: true)
         case .heartRateRange(let low, let high):
             guard let zoneModel, let boundaries else { return fallback }
             let ratio = zoneModel.deltaHRRatio(for: (low + high) / 2)

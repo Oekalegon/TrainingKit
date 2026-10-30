@@ -700,9 +700,13 @@ public struct PlanGenerator: PlanCandidateProvider {
 }
 
 private extension UnresolvedReason {
-    /// Whether the reason is about the template (its zone does not hold the phase pace) and not about the plan
+    /// Whether the reason is about the template (its zone does not hold the phase pace, or it asks for a phase
+    /// intensity the profile does not give) and not about the plan
     /// (no race target, no zone settings): the second kind is the same for every template.
     var dependsOnTemplate: Bool {
-        if case .paceOutsideZone = self { true } else { false }
+        switch self {
+        case .paceOutsideZone, .noPhaseFraction: true
+        default: false
+        }
     }
 }

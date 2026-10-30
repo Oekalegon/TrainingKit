@@ -323,6 +323,7 @@ public struct CalendarImportPlanner: Sendable {
         switch target.type {
         case "heartRateZone": return target.zone.map { .heartRateZone($0) }
         case "rpe": return target.rpe.map { .rpe($0) }
+        case "phaseIntensity": return .phaseIntensity
         case "heartRateRange":
             guard let low = target.min, let high = target.max else { return nil }
             return .heartRateRange(low, high)

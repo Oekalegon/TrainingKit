@@ -173,7 +173,7 @@ public struct CalendarExport: Sendable, Codable, Hashable {
 
     /// The intensity a ``Step`` targets.
     public struct Target: Sendable, Codable, Hashable {
-        /// `heartRateZone`, `heartRateZoneRange`, `heartRateRange`, `pace`, `power` or `rpe`.
+        /// `heartRateZone`, `heartRateZoneRange`, `phaseIntensity` (no zone and no range), `heartRateRange`, `pace`, `power` or `rpe`.
         public let type: String
         /// The zone, for `heartRateZone`.
         public let zone: Int?

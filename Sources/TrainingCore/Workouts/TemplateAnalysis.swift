@@ -120,6 +120,7 @@ extension IntensityTarget? {
     var isHardEffort: Bool {
         switch self {
         case .heartRateZone(let zone): zone >= 3
+        case .phaseIntensity: true
         case .heartRateZoneRange(let positions): Int(((positions.lowerBound + positions.upperBound) / 2).rounded(.down)) >= 3
         case .rpe(let rpe): rpe >= 7
         default: false

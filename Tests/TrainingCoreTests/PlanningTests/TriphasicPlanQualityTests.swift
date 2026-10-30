@@ -594,7 +594,9 @@ struct TriphasicPlanQualityTests {
             let work = try #require(workout.blocks.flatMap(\.steps).first { $0.kind == .work })
             // The specific phase asks for race pace (fraction 1.0): the target is where that pace sits in the athlete's zones.
             guard case .heartRateZoneRange(let positions)? = work.target else { Issue.record("target \(String(describing: work.target))"); return }
-            #expect(abs((positions.lowerBound + positions.upperBound) / 2 - expected.position) < 0.2, "race pace \(racePace)")
+            // A pace outside every zone targets the whole edge zone, whose middle is 1.5 or 5.5.
+            let middle = expected.exact ? expected.position : (expected.position <= 1 ? 1.5 : 5.5)
+            #expect(abs((positions.lowerBound + positions.upperBound) / 2 - middle) < 0.2, "race pace \(racePace)")
             checked += 1
         }
         #expect(checked > 0)
@@ -603,5 +605,26 @@ struct TriphasicPlanQualityTests {
             if case .unresolvedStep(let start, _, _) = $0 { phases.first { $0.range.lowerBound == start }?.phase == .specific } else { false }
         }
         #expect(reported == !expected.exact)
+    }
+
+    @Test("the phase-intensity templates do not take sessions from the templates with a fixed zone in a marathon plan (MVP5-153)")
+    func phaseIntensityIsOnlyAFallback() async throws {
+        var asked = generous(tenDayRequest(distance: Race.marathonDistanceMeters))
+        asked.templates = BuiltInWorkoutTemplates.all
+        asked.targetRace.specificPhaseTarget = .pace(secondsPerKilometer: 270)
+        let candidate = try await PlanGenerator.generate(asked).candidate
+
+        let intensityIDs: Set<UUID> = [BuiltInWorkoutTemplates.intensityRepeats.id, BuiltInWorkoutTemplates.intensityBlocks.id]
+        let phases = micros(candidate).map { (range: $0.dateRange, phase: $0.phase) }
+        let workouts = Dictionary(uniqueKeysWithValues: candidate.workouts.map { ($0.id, $0) })
+        var specific = 0
+        for planned in candidate.plannedActivities {
+            guard let templateID = workouts[planned.workoutID]?.templateID else { continue }
+            let phase = phases.first { $0.range.contains(planned.date) }?.phase
+            if phase == .specific, intensityIDs.contains(templateID) { specific += 1 }
+        }
+        // Where a fixed-zone template holds the race pace (the specific phase) it keeps the session; the fallback
+        // only fills the structural sessions no fixed zone reaches.
+        #expect(specific == 0)
     }
 }

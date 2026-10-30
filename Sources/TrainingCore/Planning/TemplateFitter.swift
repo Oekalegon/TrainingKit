@@ -10,7 +10,9 @@ import Foundation
 ///    race-target fraction on a pace target (the plan generator's fits), a template also has to have a hard work
 ///    step in a zone whose pace range holds the phase pace (MVP5-150), so race-pace work is not made from a
 ///    workout whose zone is another pace; when no template does, all of them take part and the step resolver
-///    reports the step.
+///    reports the step. A template with a ``IntensityTarget/phaseIntensity`` step holds any phase pace, but only
+///    as a fallback: when a template with a fixed zone holds the pace, those alone take part, so the phase-intensity
+///    templates fill the sessions no fixed-zone template can (MVP5-153) and do not displace the existing ones.
 /// 2. **Closest fit.** Each remaining template gets the parameter values that bring it nearest the
 ///    profile: the work-length parameters (those of hard work steps) are set so each hard step
 ///    lasts the work length asked for, then the duration parameters of the easy work steps (when
@@ -173,7 +175,9 @@ public enum TemplateFitter {
         }
         var candidates: [TemplateChoice] = []
         if let phase {
-            let holding = passing.filter { $0.holds(phase) }
+            // A template with a fixed zone that holds the phase pace comes first; phase-intensity templates are the fallback.
+            let fixed = passing.filter { !$0.hasPhaseStep && $0.holds(phase) }
+            let holding = fixed.isEmpty ? passing.filter { $0.holds(phase) } : fixed
             candidates = holding.isEmpty ? [] : choices(holding)
         }
         if candidates.isEmpty { candidates = choices(passing) }

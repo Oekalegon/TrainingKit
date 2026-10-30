@@ -477,13 +477,13 @@ struct TemplateFitterTests {
 
     @Test("a template with a phase-intensity step holds any phase pace; without a phase pace it takes part only when nothing else does")
     func phaseIntensityTemplates() throws {
-        let z3 = repeats("A Zone 3", zone: 3)
-        var phaseRepeats = repeats("B Phase intensity", zone: 3)
+        let z3 = repeats("B Zone 3", zone: 3)
+        var phaseRepeats = repeats("A Phase intensity", zone: 3)
         phaseRepeats.blocks[0].steps[0].target = .phaseIntensity
         // 400 s/km is no pace of zone 3, but the phase-intensity template makes its zone from the pace.
         #expect(try fit(phasePace: 400, templates: [z3, phaseRepeats]).template.id == phaseRepeats.id)
         #expect(try fit(phasePace: 150, templates: [z3, phaseRepeats]).template.id == phaseRepeats.id)
-        // Where both hold the pace, the fit decides (a tie goes to the name).
+        // Where both hold the pace, the template with a fixed zone wins, whatever the names or the fit.
         #expect(try fit(phasePace: 260, templates: [phaseRepeats, z3]).template.id == z3.id)
         // No phase pace (a profile without a fraction): the phase-intensity template waits for a template with a zone.
         #expect(try fit(phasePace: nil, templates: [z3, phaseRepeats]).template.id == z3.id)

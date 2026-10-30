@@ -20,6 +20,9 @@ public enum IntensityTarget: Sendable, Codable, Hashable {
     /// race-target fraction and into the zone positions that pace sits at in the athlete's pace model, so 86 % of a
     /// marathon pace is an easy zone and 86 % of a 5k pace a threshold one. Outside a plan, or without a fraction, it
     /// stays as it is and reads as a moderate effort (zone 3), with no WorkoutKit alert.
+    ///
+    /// A workout or template that uses it cannot be decoded by a version without this case, as for
+    /// ``heartRateZoneRange(_:)``; the stores skip and log what they cannot decode.
     case phaseIntensity
     case heartRateRange(Double, Double)
     case pace(ClosedRange<Double>)

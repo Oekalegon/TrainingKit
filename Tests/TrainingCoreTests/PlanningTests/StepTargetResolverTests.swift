@@ -205,15 +205,15 @@ struct StepTargetResolverTests {
         #expect(resolve([phase], race: .heartRate(beatsPerMinute: 150...160), fraction: 1).unresolved.map(\.reason) == [.unsupportedRaceTarget])
     }
 
-    @Test("a phase pace outside every zone is clamped to the nearest edge and reported")
+    @Test("a phase pace outside every zone targets the whole nearest edge zone and is reported")
     func phaseIntensityOutsideTheZones() {
         // 240 / 0.4 = 600 s/km, much slower than zone 1; 240 / 2 = 120 s/km, much faster than zone 5.
         let slow = resolve([step(target: .phaseIntensity)], fraction: 0.4)
         #expect(slow.unresolved.map(\.reason) == [.paceOutsideZone(zone: 1, paceZone: nil)])
-        #expect(slow.workout.blocks[0].steps[0].target == .heartRateZoneRange(1.0...1.0))
+        #expect(slow.workout.blocks[0].steps[0].target == .heartRateZoneRange(1.0...2.0))
         let fast = resolve([step(target: .phaseIntensity)], fraction: 2)
         #expect(fast.unresolved.map(\.reason) == [.paceOutsideZone(zone: 5, paceZone: nil)])
-        #expect(fast.workout.blocks[0].steps[0].target == .heartRateZoneRange(6.0...6.0))
+        #expect(fast.workout.blocks[0].steps[0].target == .heartRateZoneRange(5.0...6.0))
     }
 
     @Test("without zone settings a phase-intensity step still gets its positions and is reported")

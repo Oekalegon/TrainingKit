@@ -190,7 +190,7 @@ public struct PlannedIntensityClassifier: Sendable {
             return ResolvedZone(zone: Self.nearestZone(toPaceSecondsPerKilometer: midpoint, paceModel: athlete.paceModel), isExplicit: true)
         case .rpe(let rpe):
             return ResolvedZone(zone: Self.zone(forRPE: rpe), isExplicit: true)
-        case .power:
+        case .power, .phaseIntensity:
             return fallback
         }
     }

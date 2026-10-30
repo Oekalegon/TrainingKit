@@ -48,7 +48,8 @@ extension IntensityTarget {
             )
         case .power(let range):
             return PowerRangeAlert(target: Measurement(value: range.lowerBound, unit: .watts)...Measurement(value: range.upperBound, unit: .watts))
-        case .heartRateZoneRange:
+        case .heartRateZoneRange, .phaseIntensity:
+            // `.phaseIntensity` is resolved to zone positions by the plan before a workout is sent.
             return nil
         case .rpe:
             return nil

@@ -7,6 +7,9 @@ public enum UnresolvedReason: Sendable, Codable, Hashable {
     case zoneUnavailable(Int)
     /// The phase asks for a fraction of the race target but there is no race target.
     case noRaceTarget
+    /// The step asks for the phase's intensity (``IntensityTarget/phaseIntensity``) but the plan's phase gives no
+    /// fraction of the race pace for it (MVP5-153): the template does not suit this profile.
+    case noPhaseFraction
     /// The race target is not a pace (a heart rate, an effort or a prediction), so a fraction of it
     /// cannot be turned into a pace.
     case unsupportedRaceTarget

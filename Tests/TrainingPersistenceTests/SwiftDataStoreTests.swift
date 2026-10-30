@@ -883,6 +883,27 @@ struct SwiftDataStoreTests {
         #expect(templates == [good])
     }
 
+    @Test("WorkoutLibraryStore skips a workout with a target this version doesn't know instead of failing the whole library (MVP5-153)")
+    func workoutStoreSkipsUnknownTarget() async throws {
+        let container = try TestContainers.make(cloudKitDatabase: .none, isStoredInMemoryOnly: true)
+        let store = SwiftDataStore(modelContainer: container)
+        let good = StructuredWorkout(name: "Easy", sport: .running, blocks: [])
+        try await store.upsert([good])
+        let futureID = UUID()
+        let future = try JSONEncoder().encode(
+            StructuredWorkout(
+                id: futureID, name: "Future", sport: .running,
+                blocks: [WorkoutBlock(steps: [WorkoutStep(kind: .work, goal: .time(300), target: .phaseIntensity)])]
+            )
+        )
+        let json = String(decoding: future, as: UTF8.self).replacingOccurrences(of: "phaseIntensity", with: "futureTarget")
+        let context = ModelContext(container)
+        context.insert(StructuredWorkoutRecord(id: futureID, payload: Data(json.utf8)))
+        try context.save()
+
+        #expect(try await store.workouts() == [good])
+    }
+
     @Test("a template with a step kind this version doesn't know is skipped by both templates() and template(id:)")
     func templateStoreSkipsUnknownStepKind() async throws {
         let container = try TestContainers.make(cloudKitDatabase: .none, isStoredInMemoryOnly: true)

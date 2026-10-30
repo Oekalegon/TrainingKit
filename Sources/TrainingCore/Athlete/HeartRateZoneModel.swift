@@ -190,6 +190,8 @@ public struct HeartRateZoneModel: Sendable {
             return (low + high) / 2
         case .heartRateRange(let low, let high):
             return (deltaHRRatio(for: low) + deltaHRRatio(for: high)) / 2
+        case .phaseIntensity:
+            return zoneMidpointRatio(3) ?? 0.75
         case .pace, .power:
             return zoneMidpointRatio(4) ?? 0.85
         case .rpe(let rpe):

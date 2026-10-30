@@ -20,6 +20,11 @@ import Foundation
 ///   is a pace, the companion is the phase pace instead, provided it falls in the pace range of the
 ///   target's zones. If it does not, the step keeps the zone's pace and is reported as
 ///   ``UnresolvedReason/paceOutsideZone(zone:paceZone:)``: the template does not suit the phase.
+/// - A ``IntensityTarget/phaseIntensity`` step (MVP5-153) is the intensity of the phase wherever the race is: with
+///   the phase pace it becomes the zone positions that pace sits at in the pace model (so 86 % of a marathon pace
+///   is an easy zone and 86 % of a 5k pace a threshold one), with the pace as the companion; a pace outside every
+///   zone is clamped to the nearest edge and reported as ``UnresolvedReason/paceOutsideZone(zone:paceZone:)``;
+///   without a fraction it is reported as ``UnresolvedReason/noPhaseFraction``.
 /// - A `.work` step with no target and a fraction gets `.pace` as its target.
 /// - A `.pace`, `.power`, `.heartRateRange` or `.rpe` target is kept as it is, and so is a step
 ///   with no target that is not a work step.
@@ -81,6 +86,13 @@ public enum StepTargetResolver {
                 case .heartRateZone, .heartRateZoneRange:
                     reason = resolveZone(step.target, in: &step, zoneModel: zoneModel, paceModel: paceModel, phasePace: step.kind == .work ? phasePace : nil)
                     if reason == nil, step.kind == .work { reason = phaseProblem }
+                case .phaseIntensity:
+                    if let phasePace {
+                        reason = resolvePhaseIntensity(in: &step, phasePace: phasePace, paceModel: paceModel)
+                        if reason == nil, zoneModel == nil { reason = .noHeartRateZones }
+                    } else {
+                        reason = fraction == nil ? .noPhaseFraction : phaseProblem
+                    }
                 case nil where step.kind == .work && fraction != nil:
                     if let phasePace {
                         let tolerance = phasePace * fractionPaceTolerance
@@ -168,6 +180,45 @@ public enum StepTargetResolver {
         }
         guard let slow = pace(atPosition: zonePositions.lowerBound), let fast = pace(atPosition: zonePositions.upperBound) else { return nil }
         return min(fast, slow)...max(fast, slow)
+    }
+
+    /// The zone position (1.0 to 6.0) at which `pace`, in seconds per kilometer, sits in `paceModel`: the inverse of
+    /// ``paceRange(zonePositions:in:)``, a slower pace being a lower position. A pace slower than zone 1 or faster
+    /// than zone 5 gives 1.0 or 6.0, and `exact` is `false`.
+    ///
+    /// - Parameters:
+    ///   - pace: The pace, in seconds per kilometer.
+    ///   - paceModel: The pace model to read.
+    /// - Returns: The position, and whether the pace is inside the zones (`nil` for a pace that is not finite and above zero).
+    static func zonePosition(forPace pace: Double, in paceModel: PaceModel) -> (position: Double, exact: Bool)? {
+        guard pace.isFinite, pace > 0, let slowest = paceRange(zone: 1, in: paceModel), let fastest = paceRange(zone: 5, in: paceModel) else { return nil }
+        if pace > slowest.upperBound { return (1, false) }
+        if pace < fastest.lowerBound { return (6, false) }
+        for zone in 1...5 {
+            guard let range = paceRange(zone: zone, in: paceModel), range.contains(pace) else { continue }
+            let width = range.upperBound - range.lowerBound
+            return (Double(zone) + (width > 0 ? (range.upperBound - pace) / width : 0), true)
+        }
+        return nil
+    }
+
+    /// A ``IntensityTarget/phaseIntensity`` step: the target becomes the zone positions of the phase pace ±
+    /// ``fractionPaceTolerance``, and the companion that pace range. A phase pace outside every zone (not just its
+    /// band) gives the whole edge zone and is reported.
+    private static func resolvePhaseIntensity(in step: inout WorkoutStep, phasePace: Double, paceModel: PaceModel) -> UnresolvedReason? {
+        let tolerance = phasePace * fractionPaceTolerance
+        guard let centre = zonePosition(forPace: phasePace, in: paceModel),
+              let slow = zonePosition(forPace: phasePace + tolerance, in: paceModel),
+              let fast = zonePosition(forPace: phasePace - tolerance, in: paceModel) else { return .zoneUnavailable(0) }
+        step.companionTarget = .pace((phasePace - tolerance)...(phasePace + tolerance))
+        guard centre.exact else {
+            // Slower than zone 1 or faster than zone 5 for this athlete: the whole nearest zone is the target.
+            let zone = centre.position <= 1 ? 1 : 5
+            step.target = .heartRateZoneRange(Double(zone)...Double(zone + 1))
+            return .paceOutsideZone(zone: zone, paceZone: nil)
+        }
+        step.target = .heartRateZoneRange(min(slow.position, fast.position)...max(slow.position, fast.position))
+        return nil
     }
 
     private static func resolveZone(

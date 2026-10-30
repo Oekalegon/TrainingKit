@@ -922,6 +922,74 @@ public enum BuiltInWorkoutTemplates {
         sessionType: .interval
     )
 
+    /// Repeats at the intensity of the phase (MVP5-153): the key interval session for any race distance.
+    ///
+    /// A fixed 10-minute Zone 1 warmup, then `reps` (2-20) times a `work` effort (30 s to 20 minutes) at the
+    /// intensity of the plan's phase (``IntensityTarget/phaseIntensity``) and a `recovery` (30-240 s) in Zone 1,
+    /// then a fixed 5-minute Zone 1 cooldown. The effort fixes no zone: in a plan it is the race pace divided by the
+    /// phase's fraction, whatever zone that is for the athlete, so the same template gives 1000 m repeats at 5k pace,
+    /// 2 km repeats at 10k pace and 5 km blocks at half-marathon pace. Outside a plan the effort reads as a
+    /// moderate one. Tagged interval.
+    public static let intensityRepeats = WorkoutTemplate(
+        id: UUID(uuidString: "8F5D6E4E-6E0E-4B8B-9C1A-9E6F9F1C1A1A")!,
+        name: "Repeats at phase intensity",
+        sport: .running,
+        parameters: [
+            WorkoutTemplateParameter(key: "reps", name: "Repetitions", unit: .count, defaultValue: 5, range: 2...20),
+            WorkoutTemplateParameter(key: "work", name: "Effort", unit: .minutes, defaultValue: 4 * 60, range: 30...20 * 60),
+            WorkoutTemplateParameter(key: "recovery", name: "Recovery", unit: .minutes, defaultValue: 90, range: 30...240),
+        ],
+        blocks: [
+            TemplateBlock(steps: [
+                TemplateStep(kind: .warmup, goal: .time(.fixed(10 * 60)), target: .heartRateZone(1)),
+            ]),
+            TemplateBlock(
+                steps: [
+                    TemplateStep(kind: .work, goal: .time(.parameter("work")), target: .phaseIntensity),
+                    TemplateStep(kind: .recovery, goal: .time(.parameter("recovery")), target: .heartRateZone(1)),
+                ],
+                repetitions: .parameter("reps")
+            ),
+            TemplateBlock(steps: [
+                TemplateStep(kind: .cooldown, goal: .time(.fixed(5 * 60)), target: .heartRateZone(1)),
+            ]),
+        ],
+        sessionType: .interval
+    )
+
+    /// Steady blocks at the intensity of the phase (MVP5-153): threshold or tempo work for any race distance.
+    ///
+    /// A fixed 10-minute Zone 1 warmup, then `reps` (1-4) times a `work` block (10-60 minutes) at the intensity of the
+    /// plan's phase (``IntensityTarget/phaseIntensity``) and a `recovery` (1-5 minutes) in Zone 1, then a fixed
+    /// 5-minute Zone 1 cooldown. As in ``intensityRepeats`` the effort fixes no zone: 92 % of a 5k pace is a threshold
+    /// effort, 105 % of a half-marathon pace is one too. Tagged tempo.
+    public static let intensityBlocks = WorkoutTemplate(
+        id: UUID(uuidString: "8F5D6E4E-6E0E-4B8B-9C1A-9E6F9F1C1A1B")!,
+        name: "Steady blocks at phase intensity",
+        sport: .running,
+        parameters: [
+            WorkoutTemplateParameter(key: "reps", name: "Blocks", unit: .count, defaultValue: 2, range: 1...4),
+            WorkoutTemplateParameter(key: "work", name: "Block length", unit: .minutes, defaultValue: 20 * 60, range: 10 * 60...60 * 60),
+            WorkoutTemplateParameter(key: "recovery", name: "Recovery", unit: .minutes, defaultValue: 2 * 60, range: 60...5 * 60),
+        ],
+        blocks: [
+            TemplateBlock(steps: [
+                TemplateStep(kind: .warmup, goal: .time(.fixed(10 * 60)), target: .heartRateZone(1)),
+            ]),
+            TemplateBlock(
+                steps: [
+                    TemplateStep(kind: .work, goal: .time(.parameter("work")), target: .phaseIntensity),
+                    TemplateStep(kind: .recovery, goal: .time(.parameter("recovery")), target: .heartRateZone(1)),
+                ],
+                repetitions: .parameter("reps")
+            ),
+            TemplateBlock(steps: [
+                TemplateStep(kind: .cooldown, goal: .time(.fixed(5 * 60)), target: .heartRateZone(1)),
+            ]),
+        ],
+        sessionType: .tempo
+    )
+
     /// Every built-in template, in the order they should appear in a library UI.
-    public static let all: [WorkoutTemplate] = [recoveryRun, easyRun, longRun, tempoRun, baseHillSprints, shortIntervalRun, shortIntervalRunTrack, maxHRTest, lthrTest, fastFinishRun, cruiseIntervalRun, longFartlekRun, longRunFastFinish, fartlekZone4, fartlekZone5, hillRepetitionRun, longIntervalRun, mixedIntervalRun, sarcomereRun, alternationRun, enduranceRepeats, speedEnduranceRepeats, longRunEnduranceIntervals, longRunSpeedIntervals, glycogenStoreRun]
+    public static let all: [WorkoutTemplate] = [recoveryRun, easyRun, longRun, tempoRun, baseHillSprints, shortIntervalRun, shortIntervalRunTrack, maxHRTest, lthrTest, fastFinishRun, cruiseIntervalRun, longFartlekRun, longRunFastFinish, fartlekZone4, fartlekZone5, hillRepetitionRun, longIntervalRun, mixedIntervalRun, sarcomereRun, alternationRun, enduranceRepeats, speedEnduranceRepeats, longRunEnduranceIntervals, longRunSpeedIntervals, glycogenStoreRun, intensityRepeats, intensityBlocks]
 }

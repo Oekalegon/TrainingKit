@@ -438,4 +438,22 @@ struct BuiltInWorkoutTemplatesTests {
         let last = try #require(store.blocks.last?.steps.last)
         #expect(last.goal == .time(90) && last.target == .heartRateZone(5))
     }
+
+    // MARK: Phase intensity (MVP5-153)
+
+    @Test("the phase-intensity templates have a hard effort of any length at the phase's intensity, and no fixed zone for it")
+    func phaseIntensityTemplates() throws {
+        let athlete = AthleteProfile.fixture()
+        let repeats = try BuiltInWorkoutTemplates.intensityRepeats.analysis(athlete: athlete)
+        #expect(repeats.workLength == 30...1200)
+        #expect(repeats.workCount.lowerBound == 2 && repeats.workCount.upperBound == 20)
+        let blocks = try BuiltInWorkoutTemplates.intensityBlocks.analysis(athlete: athlete)
+        #expect(blocks.workLength == 600...3600)
+        #expect(BuiltInWorkoutTemplates.intensityRepeats.sessionType == .interval && BuiltInWorkoutTemplates.intensityBlocks.sessionType == .tempo)
+        for template in [BuiltInWorkoutTemplates.intensityRepeats, BuiltInWorkoutTemplates.intensityBlocks] {
+            let workout = try template.instantiate()
+            let work = workout.blocks.flatMap(\.steps).filter { $0.kind == .work }
+            #expect(work.count == 1 && work[0].target == .phaseIntensity)
+        }
+    }
 }

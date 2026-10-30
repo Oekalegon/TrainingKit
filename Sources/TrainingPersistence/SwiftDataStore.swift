@@ -323,7 +323,16 @@ public actor SwiftDataStore: ActivityStore, PlanStore, WorkoutLibraryStore, Cycl
 
     /// See `WorkoutLibraryStore/workouts()`.
     public func workouts() async throws -> [StructuredWorkout] {
-        try modelContext.fetch(FetchDescriptor<StructuredWorkoutRecord>()).map { try $0.toWorkout() }
+        try modelContext.fetch(FetchDescriptor<StructuredWorkoutRecord>()).compactMap { record in
+            do {
+                return try record.toWorkout()
+            } catch {
+                Logging.persistence.error(
+                    "Skipping workout \(record.id, privacy: .public) that can't be decoded: \(String(describing: error), privacy: .public)"
+                )
+                return nil
+            }
+        }
     }
 
     /// See `WorkoutLibraryStore/workout(id:)`.

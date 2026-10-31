@@ -40,7 +40,8 @@ extension TrainingParadigm {
     /// session profiles (hill sprints, quality work lengths, race-target fractions) are in
     /// ``sessionProfiles``, with only the numbers the design document has decided (MVP5-147).
     /// Its numbers are calibrated for a marathon (``TrainingParadigm/calibratedDistanceMeters``), so a
-    /// shorter target race gets a ``CalibrationWarning`` (MVP5-143).
+    /// shorter target race gets a ``CalibrationWarning`` (MVP5-143), except a 5k, 10k or half marathon, which have
+    /// their own session profiles (``TrainingParadigm/distanceProfiles``, MVP5-154) and the same phases, mixes and spacing.
     /// - Phases: ``CyclePhase/conditioning``, ``CyclePhase/base``, ``CyclePhase/structural``,
     ///   ``CyclePhase/specific``, ``CyclePhase/taper``.
     /// - Distribution: conditioning and base have only easy running, so `medium` and `high`
@@ -104,8 +105,54 @@ extension TrainingParadigm {
             .specific: [SessionProfile(sessionType: .interval, raceTargetFraction: 1.0)],
             .taper: [SessionProfile(sessionType: .interval, raceTargetFraction: 1.0)],
         ],
+        distanceProfiles: [
+            .fiveK: Self.triphasicFiveK, .tenK: Self.triphasicTenK, .halfMarathon: Self.triphasicHalfMarathon,
+        ],
         calibratedDistanceMeters: Race.marathonDistanceMeters
     )
+
+    // The session profiles for the shorter races (MVP5-154), from `docs/design/short-distances-design.md`. Work given
+    // in metres there is written in seconds at about the race pace (1000 m at 3:50/km is 230 s). Only the specific
+    // phase and the taper work at race pace; the structural work is below it (threshold) or above it (fast quality).
+
+    /// The 5 km: threshold and fast quality under it, 1000 to 1200 m repeats at race pace.
+    private static let triphasicFiveK: [CyclePhase: [SessionProfile]] = [
+        .base: [SessionProfile(sessionType: .hillRepeats, workLength: 0...8)],
+        .structural: [
+            SessionProfile(sessionType: .interval, workLength: 360...720, workCount: 3...5, raceTargetFraction: 0.92, endRaceTargetFraction: 0.95),
+            SessionProfile(sessionType: .interval, workLength: 40...90, workCount: 8...14, raceTargetFraction: 1.10, endRaceTargetFraction: 1.05),
+        ],
+        .specific: [
+            SessionProfile(sessionType: .interval, workLength: 180...240, workCount: 4...6, raceTargetFraction: 1.0, endRaceTargetFraction: 1.03),
+            SessionProfile(sessionType: .interval, workLength: 60...90, workCount: 10...12, raceTargetFraction: 1.03, endRaceTargetFraction: 1.06),
+        ],
+        .taper: [SessionProfile(sessionType: .interval, workLength: 180...240, workCount: 3...4, raceTargetFraction: 1.0)],
+    ]
+
+    /// The 10 km: threshold and fast quality under it, 1600 to 2400 m repeats at race pace.
+    private static let triphasicTenK: [CyclePhase: [SessionProfile]] = [
+        .base: [SessionProfile(sessionType: .hillRepeats, workLength: 0...8)],
+        .structural: [
+            SessionProfile(sessionType: .interval, workLength: 480...900, workCount: 2...4, raceTargetFraction: 0.95, endRaceTargetFraction: 0.98),
+            SessionProfile(sessionType: .interval, workLength: 80...220, workCount: 6...10, raceTargetFraction: 1.08, endRaceTargetFraction: 1.04),
+        ],
+        .specific: [
+            SessionProfile(sessionType: .interval, workLength: 360...540, workCount: 3...5, raceTargetFraction: 1.0, endRaceTargetFraction: 1.02),
+            SessionProfile(sessionType: .interval, workLength: 600...900, workCount: 2...2, raceTargetFraction: 0.97),
+        ],
+        .taper: [SessionProfile(sessionType: .interval, workLength: 360...420, workCount: 2...3, raceTargetFraction: 1.0)],
+    ]
+
+    /// The half marathon: tempo above race pace and fast quality under it, 3 to 5 km blocks at race pace.
+    private static let triphasicHalfMarathon: [CyclePhase: [SessionProfile]] = [
+        .base: [SessionProfile(sessionType: .hillRepeats, workLength: 0...8)],
+        .structural: [
+            SessionProfile(sessionType: .tempo, workLength: 600...2400, workCount: 1...3, raceTargetFraction: 1.02, endRaceTargetFraction: 1.05),
+            SessionProfile(sessionType: .interval, workLength: 180...300, workCount: 5...8, raceTargetFraction: 1.10, endRaceTargetFraction: 1.06),
+        ],
+        .specific: [SessionProfile(sessionType: .tempo, workLength: 840...1500, workCount: 2...3, raceTargetFraction: 1.0)],
+        .taper: [SessionProfile(sessionType: .interval, workLength: 480...600, workCount: 2...2, raceTargetFraction: 1.0)],
+    ]
 
     /// The mix of specific and taper: `medium` and `high` intensity and `moderate` and `fast` speed
     /// each 0.25 ± 0.25, so none is more than half the time.

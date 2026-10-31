@@ -38,7 +38,7 @@ import Foundation
 ///    session type, else one with the session type only; a micro's hard runs take the phase's hard
 ///    profiles in turn, so a structural micro with two gets a fast and an endurance quality session). ``SessionProfile/progressedWorkLength(microIndex:of:)``
 ///    steps the work length across the phase, and ``TemplateFitter`` picks and sizes a template for an
-///    equal share of the micro's duration, with the previous micro's templates (only that one) for rotation. No
+///    share of the micro's duration (30 % for the long run, the rest split with the easy runs alternating 20 % longer and shorter: MVP5-158), with the previous micro's templates (only that one) for rotation. No
 ///    template is ``PlanCompromise/missingTemplate(microStart:_:)`` and the run is left out. A run whose
 ///    template wants more days free of demanding workouts around it than its neighbours leave
 ///    (``RecoveryDays``) is fitted again without that template; when no other template fits it keeps the
@@ -214,7 +214,7 @@ public struct PlanGenerator: PlanCandidateProvider {
                             let scale = (low + high) / 2
                             let probe = try build(ceilingSeconds * scale)
                             guard let metric = endTSB(of: probe, on: aim.day) else { break }
-                            if scale < lightest.scale { lightest = (scale, probe, metric.tsb) }
+                                                if scale < lightest.scale { lightest = (scale, probe, metric.tsb) }
                             if metric.tsb < aim.tsb { high = scale } else { low = scale; reached = (scale, probe, metric.tsb) }
                             if abs(metric.tsb - aim.tsb) < Self.sizingTolerance { reached = (scale, probe, metric.tsb); break }
                         }
@@ -309,6 +309,8 @@ public struct PlanGenerator: PlanCandidateProvider {
         var sessions: [PlanSession] = []
         var templates: [UUID] = []
         var fittedSeconds: TimeInterval = 0
+        /// What each run was fitted to, in seconds, to see which could not take the share it was asked for.
+        var fittedByRun: [DayAssignment: TimeInterval] = [:]
         var hardDays: [Date] = []
         var longDays: [Date] = []
         var demands: [Demand] = []
@@ -323,7 +325,7 @@ public struct PlanGenerator: PlanCandidateProvider {
         let recovery: RecoveryDays
     }
 
-    /// Steps 5 and 6 for one micro: the runs of `assignment` fitted to an equal share of `seconds`.
+    /// Steps 5 and 6 for one micro: the runs of `assignment` fitted to their shares of `seconds` (see `shares(of:seconds:)`).
     ///
     /// A run whose template wants more days around it than its neighbours leave (``RecoveryDays``:
     /// the demanding workouts `carried` in from earlier micros, the ones already fitted in this micro
@@ -334,10 +336,41 @@ public struct PlanGenerator: PlanCandidateProvider {
         _ assignment: DayAssignmentResult, micro: Microcycle, cycleID: UUID, seconds: TimeInterval, position: Int,
         phaseCount: Int, previous: [UUID], levers: PlanLevers, carried: [Demand], prepared: [TemplateFitter.Prepared], calendar: Calendar
     ) throws -> MicroBuild {
-        var built = MicroBuild()
         let fits = TemplateFits(prepared: prepared)
+        var shares = Self.shares(of: assignment.assignments, seconds: seconds)
+        var built = try buildMicro(
+            assignment, micro: micro, cycleID: cycleID, shares: shares, position: position, phaseCount: phaseCount,
+            previous: previous, levers: levers, carried: carried, calendar: calendar, fits: fits
+        )
+        // A template has a longest duration, so a run can fall short of its share (a long run of a big volume): what it
+        // could not take goes to the easy and long runs that took theirs, in proportion to their shares, and the micro
+        // is built again. A hard session is not made longer for it: it keeps the length of its own share.
+        for _ in 0..<Self.redistributionPasses {
+            let capped = built.fittedByRun.filter { run, fitted in (shares[run] ?? 0) - fitted > (shares[run] ?? 0) * 0.02 }
+            let shortfall = capped.reduce(0) { $0 + (shares[$1.key] ?? 0) - $1.value }
+            guard !capped.isEmpty, shortfall > seconds * 0.01 else { break }
+            let open = shares.filter { capped[$0.key] == nil && !Self.hardTypes.contains($0.key.runType) }
+            let openTotal = open.values.reduce(0, +)
+            guard openTotal > 0 else { break }
+            for (run, fitted) in capped { shares[run] = fitted }
+            for (run, share) in open { shares[run] = share + shortfall * share / openTotal }
+            built = try buildMicro(
+                assignment, micro: micro, cycleID: cycleID, shares: shares, position: position, phaseCount: phaseCount,
+                previous: previous, levers: levers, carried: carried, calendar: calendar, fits: fits
+            )
+        }
+        return built
+    }
+
+    /// How many times a micro is built again to give the volume a capped run could not take to the others.
+    private static let redistributionPasses = 4
+
+    private func buildMicro(
+        _ assignment: DayAssignmentResult, micro: Microcycle, cycleID: UUID, shares: [DayAssignment: TimeInterval], position: Int,
+        phaseCount: Int, previous: [UUID], levers: PlanLevers, carried: [Demand], calendar: Calendar, fits: TemplateFits
+    ) throws -> MicroBuild {
+        var built = MicroBuild()
         var reportedProblems: Set<ProblemKey> = []
-        let share = seconds / Double(max(assignment.assignments.count, 1))
         var hardIndex = 0
         let runs = assignment.assignments.filter { !levers.droppedDays.contains($0.day) }
         let defaultAfter = paradigm.minDaysBetweenHardSessions.flatMap { $0 > 0 ? $0 : nil }
@@ -353,6 +386,7 @@ public struct PlanGenerator: PlanCandidateProvider {
         }
 
         for (index, run) in runs.enumerated() {
+            let share = shares[run] ?? 0
             let eased = isEased(run)
             let later = runs[(index + 1)...].compactMap(defaultDemand(of:))
             let thisHardIndex = hardIndex
@@ -388,6 +422,7 @@ public struct PlanGenerator: PlanCandidateProvider {
                 }
             }
             built.fittedSeconds += result.seconds
+            built.fittedByRun[run] = result.seconds
             if let recovery = recoveryDays(of: result.templateID, defaultAfter: defaultAfter, longNeedsRecovery: longNeedsRecovery) {
                 built.demands.append(Demand(date: run.day, recovery: recovery))
             }
@@ -497,6 +532,45 @@ public struct PlanGenerator: PlanCandidateProvider {
         let excluded: Set<UUID>
         /// The pace the phase asks for, which decides which templates take part.
         let phase: TemplateFitter.PhasePace?
+    }
+
+    /// The share of a long run in a micro's volume (MVP5-158), when the micro has other runs too.
+    static let longRunShare = 0.30
+    /// How much the easy runs of a micro differ from their average length: they alternate between 20 % longer and 20 %
+    /// shorter, so a micro's runs are not all the same length (a monotonous week) (MVP5-158).
+    static let easyRunVariation = 0.20
+
+    /// The target length of each run of a micro, in seconds, keyed by the run: the long run takes
+    /// ``longRunShare`` of `seconds` (all of them, split, when there are only long runs), a hard run an equal part of the
+    /// rest, and the other runs the remainder alternating ``easyRunVariation`` above and below their average. The
+    /// shares add up to `seconds`.
+    ///
+    /// - Parameters:
+    ///   - runs: The micro's runs, from the day assigner.
+    ///   - seconds: The micro's volume, in seconds.
+    static func shares(of runs: [DayAssignment], seconds: TimeInterval) -> [DayAssignment: TimeInterval] {
+        guard !runs.isEmpty else { return [:] }
+        let long = runs.filter { $0.runType == .long }
+        let others = runs.filter { $0.runType != .long }
+        let longTotal = others.isEmpty ? seconds : (long.isEmpty ? 0 : seconds * longRunShare)
+        var result: [DayAssignment: TimeInterval] = [:]
+        for run in long { result[run] = longTotal / Double(long.count) }
+        guard !others.isEmpty else { return result }
+        var easyIndex = 0
+        let weights: [Double] = others.map { run in
+            guard !hardTypes.contains(run.runType) else { return 1 }
+            defer { easyIndex += 1 }
+            return easyIndex.isMultiple(of: 2) ? 1 + easyRunVariation : 1 - easyRunVariation
+        }
+        let easyCount = weights.filter { $0 != 1 }.count
+        // Alternating +/- leaves an odd number of easy runs 20 % longer on average; scale the easy ones back to their average.
+        let easyWeightSum = weights.filter { $0 != 1 }.reduce(0, +)
+        let easyScale = easyCount > 0 ? Double(easyCount) / easyWeightSum : 1
+        let adjusted = weights.map { $0 == 1 ? $0 : $0 * easyScale }
+        let total = adjusted.reduce(0, +)
+        let rest = seconds - longTotal
+        for (run, weight) in zip(others, adjusted) { result[run] = rest * weight / total }
+        return result
     }
 
     /// The ``TemplateFit``s made while building one micro, so equal runs (the easy runs of a micro, say)

@@ -656,4 +656,41 @@ struct TriphasicPlanQualityTests {
         let missing = candidate.compromises.filter { if case .missingTemplate = $0 { true } else { false } }
         #expect(missing.isEmpty)
     }
+
+    @Test("a marathon plan is the same with and without the profiles per distance (MVP5-154)")
+    func marathonIgnoresDistanceProfiles() async throws {
+        var asked = generous(tenDayRequest(distance: Race.marathonDistanceMeters))
+        asked.templates = BuiltInWorkoutTemplates.all
+        var without = asked
+        without.paradigm.distanceProfiles = [:]
+        let first = try await PlanGenerator.generate(asked).candidate
+        let second = try await PlanGenerator.generate(without).candidate
+        func summary(_ candidate: PlanCandidate) -> [String] {
+            let workouts = Dictionary(uniqueKeysWithValues: candidate.workouts.map { ($0.id, $0) })
+            return candidate.plannedActivities.map { "\($0.date) \(workouts[$0.workoutID]?.name ?? "")" }
+        }
+        #expect(summary(first) == summary(second))
+    }
+
+    @Test("the specific-phase repeats of a 5K plan are as long as the 5K profile asks (about 3 to 4 minutes)")
+    func fiveKSpecificWorkLengths() async throws {
+        var asked = generous(tenDayRequest(distance: 5_000))
+        asked.templates = [BuiltInWorkoutTemplates.easyRun, BuiltInWorkoutTemplates.recoveryRun, BuiltInWorkoutTemplates.longRun,
+                           BuiltInWorkoutTemplates.intensityRepeats]
+        asked.targetRace.specificPhaseTarget = .pace(secondsPerKilometer: 230)
+        let candidate = try await PlanGenerator.generate(asked).candidate
+        let phases = micros(candidate).map { (range: $0.dateRange, phase: $0.phase) }
+        let workouts = Dictionary(uniqueKeysWithValues: candidate.workouts.map { ($0.id, $0) })
+        var lengths: [TimeInterval] = []
+        for planned in candidate.plannedActivities {
+            guard let workout = workouts[planned.workoutID], workout.templateID == BuiltInWorkoutTemplates.intensityRepeats.id,
+                  phases.first(where: { $0.range.contains(planned.date) })?.phase == .specific else { continue }
+            for step in workout.blocks.flatMap(\.steps) where step.kind == .work {
+                if case .time(let seconds) = step.goal { lengths.append(seconds) }
+            }
+        }
+        #expect(!lengths.isEmpty)
+        // The two specific profiles ask for 180 to 240 s and 60 to 90 s; the micro's position moves the length inside the range.
+        #expect(lengths.allSatisfy { (60...240).contains($0) }, "\(lengths)")
+    }
 }

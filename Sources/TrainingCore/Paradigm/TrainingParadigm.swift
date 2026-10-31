@@ -17,7 +17,8 @@ import Foundation
 ///
 /// A plan aimed at an ultra race (``Race/isUltra``) uses ``resolved(for:)``: long runs are no
 /// longer spaced like hard sessions, and ``maxLongRunMeters`` and
-/// ``maxBackToBackLongRunPairsPerMicro`` apply (MVP5-138).
+/// ``maxBackToBackLongRunPairsPerMicro`` apply (MVP5-138). A plan aimed at a 5k, 10k or half marathon
+/// (``RaceDistanceClass``) uses the session profiles in ``distanceProfiles`` instead of ``sessionProfiles`` (MVP5-154).
 ///
 /// Decoding is tolerant: every field but `name` is optional, and an unknown or missing key falls
 /// back to the default.
@@ -60,11 +61,16 @@ public struct TrainingParadigm: Sendable, Codable, Hashable {
     /// What each phase asks of its sessions (MVP5-118), for example one interval profile and a long
     /// run for a build phase; ``TemplateFitter`` matches each to a library template. A phase with no
     /// entry asks nothing. Empty for ``polarized8020``; ``triphasic`` carries the profiles its design
-    /// document has decided (MVP5-147).
+    /// document has decided (MVP5-147). For a marathon target and for no race; see ``distanceProfiles`` for the shorter races.
     public var sessionProfiles: [CyclePhase: [SessionProfile]]
+    /// The session profiles for a plan aimed at a 5k, 10k or half marathon (MVP5-154): for a target race of one of
+    /// these classes, ``resolved(for:)`` uses the class's profiles instead of ``sessionProfiles``, and there is no
+    /// ``CalibrationWarning``. A class with no entry, and a marathon or ultra, use ``sessionProfiles``.
+    public var distanceProfiles: [RaceDistanceClass: [CyclePhase: [SessionProfile]]]
     /// The race distance, in meters, the paradigm's percentages and zone mapping were calibrated for
     /// (42,195 for ``triphasic``); `nil` (the default) when it makes no claim. A plan aimed at a
-    /// shorter race gets a ``CalibrationWarning`` (MVP5-143): see ``calibrationWarning(for:)``.
+    /// shorter race gets a ``CalibrationWarning`` (MVP5-143), unless ``distanceProfiles`` covers its class (MVP5-154):
+    /// see ``calibrationWarning(for:)``.
     public var calibratedDistanceMeters: Double?
     /// The minimum number of days from one hard session to the next (Tuesday to Thursday is 2);
     /// `nil` switches ``PlanRule/hardSessionSpacing`` off.
@@ -91,6 +97,7 @@ public struct TrainingParadigm: Sendable, Codable, Hashable {
     ///     an ultra target, by micro length in days; defaults to no limit.
     ///   - shortenablePhase: The phase a short lead time shortens; defaults to `nil` (none).
     ///   - sessionProfiles: What each phase asks of its sessions; defaults to none.
+    ///   - distanceProfiles: The profiles for a 5k, 10k or half marathon target; defaults to none.
     ///   - calibratedDistanceMeters: The race distance the numbers were calibrated for; defaults to
     ///     `nil` (none). A value that is not finite or not above zero becomes `nil`.
     public init(
@@ -108,6 +115,7 @@ public struct TrainingParadigm: Sendable, Codable, Hashable {
         maxBackToBackLongRunPairsPerMicro: [Int: Int] = [:],
         shortenablePhase: CyclePhase? = nil,
         sessionProfiles: [CyclePhase: [SessionProfile]] = [:],
+        distanceProfiles: [RaceDistanceClass: [CyclePhase: [SessionProfile]]] = [:],
         calibratedDistanceMeters: Double? = nil
     ) {
         self.name = name
@@ -124,6 +132,7 @@ public struct TrainingParadigm: Sendable, Codable, Hashable {
         self.maxBackToBackLongRunPairsPerMicro = Self.validPairLimits(maxBackToBackLongRunPairsPerMicro)
         self.shortenablePhase = shortenablePhase
         self.sessionProfiles = sessionProfiles
+        self.distanceProfiles = distanceProfiles
         self.calibratedDistanceMeters = Self.validPositive(calibratedDistanceMeters)
     }
 
@@ -142,8 +151,9 @@ public struct TrainingParadigm: Sendable, Codable, Hashable {
     /// For an ultra (``Race/isUltra``) long runs are not spaced like hard sessions, so
     /// ``spacesLongRunsAsHard`` is `false`, and ``maxLongRunMeters`` and
     /// ``maxBackToBackLongRunPairsPerMicro`` stay. For any other race, or none, the two ultra
-    /// settings are dropped and everything else is unchanged. ``DayAssigner`` and
-    /// ``PlanEvaluator`` call this with their `targetRace`.
+    /// settings are dropped and everything else is unchanged. For a race of a ``RaceDistanceClass`` that has
+    /// ``distanceProfiles``, ``sessionProfiles`` is those profiles. ``DayAssigner``, ``PlanEvaluator`` and
+    /// ``PlanGenerator`` call this with their `targetRace`.
     ///
     /// - Parameter targetRace: The race the plan builds towards, if any.
     public func resolved(for targetRace: Race?) -> TrainingParadigm {
@@ -154,19 +164,25 @@ public struct TrainingParadigm: Sendable, Codable, Hashable {
             result.maxLongRunMeters = nil
             result.maxBackToBackLongRunPairsPerMicro = [:]
         }
+        if let profiles = distanceProfiles(for: targetRace) { result.sessionProfiles = profiles }
         return result
+    }
+
+    private func distanceProfiles(for targetRace: Race?) -> [CyclePhase: [SessionProfile]]? {
+        targetRace.flatMap { RaceDistanceClass(distanceMeters: $0.distanceMeters) }.flatMap { distanceProfiles[$0] }
     }
 
     /// The warning for a plan aimed at `targetRace`, if the race is not the distance the paradigm is
     /// calibrated for (MVP5-143).
     ///
     /// `nil` when ``calibratedDistanceMeters`` is `nil`, when there is no race, when the race is an
-    /// ultra (``Race/isUltra``; the paradigm's ultra settings cover it, ``resolved(for:)``), or when
-    /// its distance is within ``CalibrationWarning/tolerance`` of the calibration distance.
+    /// ultra (``Race/isUltra``; the paradigm's ultra settings cover it, ``resolved(for:)``), when the paradigm has
+    /// ``distanceProfiles`` for the race's class (MVP5-154), or when its distance is within ``CalibrationWarning/tolerance`` of the calibration distance.
     ///
     /// - Parameter targetRace: The race the plan builds towards, if any.
     public func calibrationWarning(for targetRace: Race?) -> CalibrationWarning? {
-        guard let calibrated = calibratedDistanceMeters, let race = targetRace, !race.isUltra else { return nil }
+        guard let calibrated = calibratedDistanceMeters, let race = targetRace, !race.isUltra,
+              distanceProfiles(for: race) == nil else { return nil }
         let distance = race.distanceMeters
         guard distance.isFinite, abs(distance - calibrated) > calibrated * CalibrationWarning.tolerance else { return nil }
         return CalibrationWarning(raceDistanceMeters: distance, calibratedDistanceMeters: calibrated)
@@ -191,7 +207,7 @@ public struct TrainingParadigm: Sendable, Codable, Hashable {
 
     private enum CodingKeys: String, CodingKey {
         case name, phases, guardrailOverrides, defaultMix, phaseMixes, hardIntensity, hardSpeed, spacesLongRunsAsHard
-        case minDaysBetweenHardSessions, maxHardSessionsPerMicro, maxLongRunMeters, maxBackToBackLongRunPairsPerMicro, shortenablePhase, sessionProfiles, calibratedDistanceMeters
+        case minDaysBetweenHardSessions, maxHardSessionsPerMicro, maxLongRunMeters, maxBackToBackLongRunPairsPerMicro, shortenablePhase, sessionProfiles, distanceProfiles, calibratedDistanceMeters
     }
 
     /// Decodes a paradigm; everything but `name` falls back to its default when absent.
@@ -219,6 +235,10 @@ public struct TrainingParadigm: Sendable, Codable, Hashable {
         shortenablePhase = try container.decodeIfPresent(CyclePhase.self, forKey: .shortenablePhase)
         let profiles = try container.decodeIfPresent([String: [LossyProfile]].self, forKey: .sessionProfiles) ?? [:]
         sessionProfiles = Dictionary(profiles.map { (CyclePhase($0.key), $0.value.compactMap(\.profile)) }, uniquingKeysWith: { first, _ in first })
+        let classes = try container.decodeIfPresent([String: [String: [LossyProfile]]].self, forKey: .distanceProfiles) ?? [:]
+        distanceProfiles = Dictionary(classes.compactMap { key, phases in
+            RaceDistanceClass(rawValue: key).map { ($0, Dictionary(phases.map { (CyclePhase($0.key), $0.value.compactMap(\.profile)) }, uniquingKeysWith: { first, _ in first })) }
+        }, uniquingKeysWith: { first, _ in first })
         calibratedDistanceMeters = Self.validPositive(try container.decodeIfPresent(Double.self, forKey: .calibratedDistanceMeters))
     }
 
@@ -248,6 +268,10 @@ public struct TrainingParadigm: Sendable, Codable, Hashable {
         try container.encode(Dictionary(uniqueKeysWithValues: maxBackToBackLongRunPairsPerMicro.map { (String($0.key), $0.value) }), forKey: .maxBackToBackLongRunPairsPerMicro)
         try container.encodeIfPresent(shortenablePhase, forKey: .shortenablePhase)
         try container.encode(Dictionary(uniqueKeysWithValues: sessionProfiles.map { ($0.key.id, $0.value) }), forKey: .sessionProfiles)
+        try container.encode(
+            Dictionary(uniqueKeysWithValues: distanceProfiles.map { ($0.key.rawValue, Dictionary(uniqueKeysWithValues: $0.value.map { ($0.key.id, $0.value) })) }),
+            forKey: .distanceProfiles
+        )
         try container.encodeIfPresent(calibratedDistanceMeters, forKey: .calibratedDistanceMeters)
     }
 }

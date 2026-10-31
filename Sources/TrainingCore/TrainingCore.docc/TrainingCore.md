@@ -188,6 +188,7 @@ See `docs/design/trainingKit-design.md` in the package repository for the full m
 - ``TrainingParadigm``
 - ``PlanGuardrails/Overrides``
 - ``IntensityMix``
+- ``RaceDistanceClass``
 - ``PlanSession``
 - ``SessionProfile``
 - ``SpeedLevel``

@@ -2,7 +2,7 @@
 
 **Status (2026-10-29): the user confirmed the sessions below (specific and structural), one paradigm that chooses its
 profile set from the race distance, and the phase-intensity steps.** The phase-intensity steps are built (MVP5-153);
-the profiles per distance are the next step (MVP5-154). The user asked on 2026-10-29 for plans for these three
+the profiles per distance are built (MVP5-154, `TrainingParadigm.distanceProfiles`); the fast finish in km is not. The user asked on 2026-10-29 for plans for these three
 distances, and chose that the session content is drafted here and corrected before it is built. The content below is my summary of common coaching practice, not a quotation of a source: no
 book, plan or course is cited because none was given. Every number is a starting point to confirm or change.
 Where the user already decided something, it is marked *decided*.
@@ -123,3 +123,11 @@ fast-finish template should take km, or the profile converts at the race pace (3
 3. Phase-intensity steps, so the templates do not fix a zone.
 
 Open: the points of section 5 stay open until the plans can be looked at; they are starting numbers, not decisions.
+
+## 7. What was built (MVP5-154)
+
+`RaceDistanceClass` (5k up to 7.5 km, 10k up to 15 km, half marathon up to 30 km; the boundaries are my choice, not a decision) and
+`TrainingParadigm.distanceProfiles`, with the three sets for triphasic as in section 3. Work in metres is in seconds at
+about the race pace: 5k specific 180 to 240 s, 10k specific 360 to 540 s, half specific 840 to 1500 s. The half
+marathon's long run with a fast finish and the marathon's fast finish in km are not built: they need a distance goal
+turned into seconds at the phase pace in the fitter.

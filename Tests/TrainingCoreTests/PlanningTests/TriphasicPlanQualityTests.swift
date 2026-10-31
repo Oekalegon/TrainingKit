@@ -343,7 +343,10 @@ struct TriphasicPlanQualityTests {
         // fits: a Saturday is 2 days after a hard session, which wants 3 before it, and a Sunday 2 before the next, which
         // it wants 3 after. The long runs then come from the shorter templates, which absorb less volume in a 14-day micro
         // (9 of 13 build micros end in training; the same on develop with the alternation run left out of the templates).
-        #expect(Double(training.count) >= 0.65 * Double(builds.count), "\(length)-day: \(training.count) of \(builds.count) build micros end in training")
+        // Since MVP5-158 a hard session keeps the length of its own share instead of absorbing what the easy runs cannot take
+        // (an easy run tops out at 70 minutes, and the 15 hours a week asked for here are far more than a 14-day micro's runs
+        // can hold): 7 of 12 end in training, so the bar is half.
+        #expect(Double(training.count) >= 0.5 * Double(builds.count), "\(length)-day: \(training.count) of \(builds.count) build micros end in training")
         for (index, micro) in all.enumerated() where micro.loadRole == .recovery {
             // About as heavy or lighter than the build micro before it: its ceiling is the curve's, not the volume the build micro was
             // sized to, so a 14-day recovery micro can be a little heavier (measured: 1.11 at most).
@@ -692,5 +695,27 @@ struct TriphasicPlanQualityTests {
         #expect(!lengths.isEmpty)
         // The two specific profiles ask for 180 to 240 s and 60 to 90 s; the micro's position moves the length inside the range.
         #expect(lengths.allSatisfy { (60...240).contains($0) }, "\(lengths)")
+    }
+
+    // MARK: Run lengths (MVP5-158)
+
+    @Test("a micro's runs are not all the same length: the long run is the longest and the easy runs differ")
+    func runLengthsVary() async throws {
+        var asked = tenDayRequest(distance: Race.marathonDistanceMeters, microLength: 7)
+        asked.startingVolume = VolumeTarget(measure: .durationSeconds, amount: 21_600)!
+        asked.peakVolume = VolumeTarget(measure: .durationSeconds, amount: 36_000)!
+        let candidate = try await PlanGenerator.generate(asked).candidate
+
+        var checked = 0
+        for micro in micros(candidate).filter({ $0.loadRole == .build }) {
+            let sessions = candidate.sessions.filter { micro.dateRange.contains($0.day) && $0.day >= asked.start }
+            let long = sessions.filter(\.isLongRun).map(\.seconds)
+            let easy = sessions.filter { !$0.isLongRun && $0.intensity < .high }.map(\.seconds)
+            guard let longest = long.max(), easy.count >= 2 else { continue }
+            checked += 1
+            #expect(longest > easy.reduce(0, +) / Double(easy.count), "the long run is longer than the average easy run in the micro at \(micro.dateRange.lowerBound)")
+            #expect(Set(easy.map { Int($0 / 60) }).count > 1, "the easy runs of the micro at \(micro.dateRange.lowerBound) differ in length")
+        }
+        #expect(checked > 3)
     }
 }

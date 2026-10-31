@@ -17,7 +17,8 @@ import Foundation
 ///
 /// A plan aimed at an ultra race (``Race/isUltra``) uses ``resolved(for:)``: long runs are no
 /// longer spaced like hard sessions, and ``maxLongRunMeters`` and
-/// ``maxBackToBackLongRunPairsPerMicro`` apply (MVP5-138).
+/// ``maxBackToBackLongRunPairsPerMicro`` apply (MVP5-138). A plan aimed at a 5k, 10k or half marathon
+/// (``RaceDistanceClass``) uses the session profiles in ``distanceProfiles`` instead of ``sessionProfiles`` (MVP5-154).
 ///
 /// Decoding is tolerant: every field but `name` is optional, and an unknown or missing key falls
 /// back to the default.
@@ -60,7 +61,7 @@ public struct TrainingParadigm: Sendable, Codable, Hashable {
     /// What each phase asks of its sessions (MVP5-118), for example one interval profile and a long
     /// run for a build phase; ``TemplateFitter`` matches each to a library template. A phase with no
     /// entry asks nothing. Empty for ``polarized8020``; ``triphasic`` carries the profiles its design
-    /// document has decided (MVP5-147).
+    /// document has decided (MVP5-147). For a marathon target and for no race; see ``distanceProfiles`` for the shorter races.
     public var sessionProfiles: [CyclePhase: [SessionProfile]]
     /// The session profiles for a plan aimed at a 5k, 10k or half marathon (MVP5-154): for a target race of one of
     /// these classes, ``resolved(for:)`` uses the class's profiles instead of ``sessionProfiles``, and there is no
@@ -68,7 +69,8 @@ public struct TrainingParadigm: Sendable, Codable, Hashable {
     public var distanceProfiles: [RaceDistanceClass: [CyclePhase: [SessionProfile]]]
     /// The race distance, in meters, the paradigm's percentages and zone mapping were calibrated for
     /// (42,195 for ``triphasic``); `nil` (the default) when it makes no claim. A plan aimed at a
-    /// shorter race gets a ``CalibrationWarning`` (MVP5-143): see ``calibrationWarning(for:)``.
+    /// shorter race gets a ``CalibrationWarning`` (MVP5-143), unless ``distanceProfiles`` covers its class (MVP5-154):
+    /// see ``calibrationWarning(for:)``.
     public var calibratedDistanceMeters: Double?
     /// The minimum number of days from one hard session to the next (Tuesday to Thursday is 2);
     /// `nil` switches ``PlanRule/hardSessionSpacing`` off.

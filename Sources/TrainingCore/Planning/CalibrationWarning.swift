@@ -2,9 +2,9 @@
 /// target race (MVP5-143).
 ///
 /// ``TrainingParadigm/triphasic`` takes its percentages and zone mapping from a marathon table, so a
-/// plan for a shorter race gets bands that are too moderate. Example, a 20:00 5K (4:00/km): the base
-/// endurance band of 0.80-0.85 of race speed is 4:42-5:00/km, which is moderate, not very easy, for
-/// that runner; the warning then carries `raceDistanceMeters` 5,000 and `calibratedDistanceMeters`
+/// plan for a shorter race with no profiles of its own gets bands that are too moderate. A 5k, 10k or
+/// half marathon has its own (``TrainingParadigm/distanceProfiles``, MVP5-154) and gets no warning.
+/// Example, a 35 km race: the warning carries `raceDistanceMeters` 35,000 and `calibratedDistanceMeters`
 /// 42,195. The app formats the text. It is not a ``PlanFinding`` and never makes a proposal
 /// unacceptable: see ``PlanProposal/calibrationWarning``.
 public struct CalibrationWarning: Sendable, Codable, Hashable {

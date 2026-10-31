@@ -627,4 +627,33 @@ struct TriphasicPlanQualityTests {
         // only fills the structural sessions no fixed zone reaches.
         #expect(specific == 0)
     }
+
+    // MARK: Short distances (MVP5-154)
+
+    @Test(
+        "a 5K, a 10K and a half marathon plan has no calibration warning, hard sessions in every phase from base to taper, and every session found a template",
+        arguments: [(5_000.0, 230.0), (10_000.0, 245.0), (21_097.5, 260.0)]
+    )
+    func shortDistancePlans(distance: Double, pace: Double) async throws {
+        var asked = generous(tenDayRequest(distance: distance))
+        asked.templates = BuiltInWorkoutTemplates.all
+        asked.targetRace.specificPhaseTarget = .pace(secondsPerKilometer: pace)
+        let proposal = try await PlanGenerator.generate(asked)
+        let candidate = proposal.candidate
+
+        #expect(proposal.calibrationWarning == nil)
+        let phases = micros(candidate).map { (range: $0.dateRange, phase: $0.phase) }
+        let workouts = Dictionary(uniqueKeysWithValues: candidate.workouts.map { ($0.id, $0) })
+        var hardByPhase: [CyclePhase: Int] = [:]
+        for planned in candidate.plannedActivities {
+            guard let workout = workouts[planned.workoutID], let phase = phases.first(where: { $0.range.contains(planned.date) })?.phase,
+                  workout.blocks.flatMap(\.steps).contains(where: { $0.kind == .work && $0.target != nil }) else { continue }
+            hardByPhase[phase, default: 0] += 1
+        }
+        for phase in [CyclePhase.base, .structural, .specific, .taper] {
+            #expect((hardByPhase[phase] ?? 0) > 0, "\(phase.id) has no hard session")
+        }
+        let missing = candidate.compromises.filter { if case .missingTemplate = $0 { true } else { false } }
+        #expect(missing.isEmpty)
+    }
 }

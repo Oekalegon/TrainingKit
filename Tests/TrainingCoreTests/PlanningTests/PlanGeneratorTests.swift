@@ -135,7 +135,9 @@ struct PlanGeneratorTests {
 
     @Test("triphasic for a 10K shows the calibration warning with both distances")
     func calibrationWarning() async throws {
-        let proposal = try await PlanGenerator.generate(request(race: race(micros: 16, distance: 10_000)))
+        var marathonOnly = TrainingParadigm.triphasic
+        marathonOnly.distanceProfiles = [:]
+        let proposal = try await PlanGenerator.generate(request(race: race(micros: 16, distance: 10_000), paradigm: marathonOnly))
 
         #expect(proposal.calibrationWarning == CalibrationWarning(raceDistanceMeters: 10_000, calibratedDistanceMeters: Race.marathonDistanceMeters))
     }

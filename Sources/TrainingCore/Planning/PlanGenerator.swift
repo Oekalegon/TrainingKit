@@ -601,7 +601,7 @@ public struct PlanGenerator: PlanCandidateProvider {
     /// run takes the phase's profile for its session type, else the session type alone.
     private func profile(for run: DayAssignment, eased: Bool, hardIndex: Int, position: Int, phase: CyclePhase) -> SessionProfile {
         let sessionType = (eased ? RunType.easy : run.runType).sessionType
-        let profiles = request.paradigm.sessionProfiles[phase] ?? []
+        let profiles = request.paradigm.resolved(for: request.targetRace).sessionProfiles[phase] ?? []
         if Self.hardTypes.contains(run.runType) && !eased {
             let hard = profiles.filter { Self.hardSessionTypes.contains($0.sessionType) }
             if !hard.isEmpty { return hard[(hardIndex + position) % hard.count] }

@@ -212,4 +212,52 @@ struct DayAssignerTests {
         #expect(onlySunday.assignments.isEmpty)
         #expect(onlySunday.dropped.map(\.reason) == [.noFreeDay])
     }
+    // MARK: Preferred days and runs per week (MVP5-159)
+
+    private func assign(_ avail: RunAvailability, hard: Int, long: Int, days: Int = 7, runsPerWeek: Int?) -> DayAssignmentResult {
+        DayAssigner().assign(micro: micro(days: days), availability: avail, hardCount: hard, longCount: long, runsPerWeek: runsPerWeek, calendar: calendar)
+    }
+
+    @Test("days kept free get no easy run, and a hard session or long run only when no other day can take it")
+    func preferablyFreeDays() {
+        var avail = availability(allWeek)
+        avail.setPreferablyFree(true, on: .monday)
+        avail.setPreferablyFree(true, on: .wednesday)
+        let result = assign(avail, hard: 1, long: 1)
+        #expect(Set(result.assignments.map { calendar.dateComponents([.day], from: monday, to: $0.day).day! }) == [1, 3, 4, 5, 6])
+
+        // Only Monday and Wednesday are open and both are kept free: they are used.
+        var onlyFree = availability([.monday, .wednesday])
+        onlyFree.setPreferablyFree(true, on: .monday)
+        let used = assign(onlyFree, hard: 1, long: 1)
+        #expect(used.dropped.isEmpty && used.assignments.count == 2)
+        // The hard session and the long run take Wednesday and Monday: Monday is kept free, so the first one placed (long) goes to Wednesday.
+        #expect(offsets(used, .long) == [2])
+    }
+
+    @Test("runs per week: 3 runs a week are spread, the long run counts, easy runs avoid days kept free")
+    func runsPerWeek() {
+        let result = assign(availability(allWeek), hard: 0, long: 1, runsPerWeek: 3)
+        let days = result.assignments.map { calendar.dateComponents([.day], from: monday, to: $0.day).day! }.sorted()
+        #expect(days.count == 3)
+        let gaps = zip(days, days.dropFirst()).map { $1 - $0 }
+        #expect(gaps.allSatisfy { $0 >= 2 }, "the runs are not on consecutive days: \(days)")
+
+        var avail = availability(allWeek)
+        avail.setPreferablyFree(true, on: .monday)
+        avail.setPreferablyFree(true, on: .wednesday)
+        let kept = assign(avail, hard: 0, long: 0, runsPerWeek: 5)
+        #expect(kept.assignments.count == 5 && !offsets(kept, .easy).contains(0) && !offsets(kept, .easy).contains(2))
+        // Six runs need a day kept free.
+        #expect(assign(avail, hard: 0, long: 0, runsPerWeek: 6).assignments.count == 6)
+    }
+
+    @Test("runs per week scale with the micro, hard sessions and long runs are never dropped for it")
+    func runsPerWeekScale() {
+        #expect(assign(availability(allWeek), hard: 0, long: 0, days: 10, runsPerWeek: 3).assignments.count == 4)
+        #expect(assign(availability(allWeek), hard: 0, long: 0, days: 14, runsPerWeek: 3).assignments.count == 6)
+        let tight = assign(availability(allWeek), hard: 2, long: 1, runsPerWeek: 2)
+        #expect(tight.assignments.count == 3 && tight.dropped.isEmpty)
+        #expect(assign(availability([.monday, .tuesday]), hard: 0, long: 0, runsPerWeek: 5).assignments.count == 2)
+    }
 }

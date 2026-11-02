@@ -247,4 +247,23 @@ struct PlanPreferencesTests {
         #expect(PlanPreferences(minDaysBetweenHardSessions: 0).minDaysBetweenHardSessions == nil)
         #expect(try JSONDecoder().decode(PlanPreferences.self, from: Data(#"{"minDaysBetweenHardSessions":-2}"#.utf8)).minDaysBetweenHardSessions == nil)
     }
+    @Test("runs per week and the days kept free round-trip, are left out at their defaults and decode from older payloads")
+    func runsPerWeekAndPreferablyFree() throws {
+        var avail = RunAvailability(slots: [.monday: [.morning], .tuesday: [.morning]])
+        avail.setPreferablyFree(true, on: .monday)
+        let preferences = PlanPreferences(runAvailability: avail, runsPerWeek: 3)
+        let data = try JSONEncoder().encode(preferences)
+        let decoded = try JSONDecoder().decode(PlanPreferences.self, from: data)
+        #expect(decoded == preferences && decoded.runsPerWeek == 3 && decoded.runAvailability.isPreferablyFree(.monday))
+        #expect(!decoded.runAvailability.isPreferablyFree(.tuesday))
+
+        let plain = String(decoding: try JSONEncoder().encode(PlanPreferences()), as: UTF8.self)
+        #expect(!plain.contains("runsPerWeek") && !plain.contains("preferablyFree"))
+        #expect(PlanPreferences(runsPerWeek: 0).runsPerWeek == nil)
+        #expect(try JSONDecoder().decode(RunAvailability.self, from: Data(#"{"preferablyFree":[2,99]}"#.utf8)).preferablyFree == [.monday])
+        // A day without free slots is not preferably free: it is not available at all.
+        var none = RunAvailability()
+        none.setPreferablyFree(true, on: .friday)
+        #expect(!none.isPreferablyFree(.friday))
+    }
 }

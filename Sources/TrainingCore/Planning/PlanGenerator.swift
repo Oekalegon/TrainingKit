@@ -177,6 +177,7 @@ public struct PlanGenerator: PlanCandidateProvider {
                 recoveryAfter: Dictionary(demands.map { ($0.date, $0.recovery.after) }, uniquingKeysWith: max),
                 raceDays: raceDays,
                 targetRace: request.targetRace,
+                runsPerWeek: request.preferences.runsPerWeek,
                 calendar: calendar
             )
             let phaseMicros = micros.indices.filter { micros[$0].phase == micro.phase }

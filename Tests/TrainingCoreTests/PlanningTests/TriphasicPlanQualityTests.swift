@@ -729,4 +729,17 @@ struct TriphasicPlanQualityTests {
         #expect(!hard.isEmpty)
         #expect(hard.allSatisfy { $0.seconds <= 120 * 60 }, "the longest hard session is \((hard.map(\.seconds).max() ?? 0) / 60) minutes")
     }
+    @Test("a plan for 4 runs a week has at most 4 runs in a 7-day micro")
+    func fourRunsAWeek() async throws {
+        var asked = tenDayRequest(distance: Race.marathonDistanceMeters, microLength: 7)
+        asked.preferences.runsPerWeek = 4
+        asked.startingVolume = VolumeTarget(measure: .durationSeconds, amount: 21_600)!
+        asked.peakVolume = VolumeTarget(measure: .durationSeconds, amount: 36_000)!
+        let candidate = try await PlanGenerator.generate(asked).candidate
+
+        let counts = micros(candidate).filter { $0.loadRole == .build }.map { micro in
+            candidate.sessions.filter { micro.dateRange.contains($0.day) && $0.day >= asked.start }.count
+        }
+        #expect(counts.count > 3 && counts.allSatisfy { $0 <= 4 }, "runs per micro: \(counts)")
+    }
 }

@@ -88,6 +88,10 @@ See `docs/design/trainingKit-design.md` in the package repository for the full m
 - ``TemplateFitter``
 - ``TemplateFit``
 - ``TemplateChoice``
+- ``WorkoutRanker``
+- ``RankedWorkout``
+- ``WorkoutRankReason``
+- ``ParameterGrid``
 - ``StepTargetResolver``
 - ``StepTargetResolution``
 - ``UnresolvedStep``

@@ -805,4 +805,77 @@ struct TriphasicPlanQualityTests {
         #expect(!conditioning.isEmpty)
         #expect(conditioning.allSatisfy { seconds($0) <= 14_400 * 1.05 }, "conditioning stays at the weekly maximum")
     }
+    // MARK: Special blocks (MVP5-161)
+
+    @Test("blocks go in the latest specific build micros with one micro after them, at least three apart")
+    func blockPlacement() {
+        func micro(_ phase: CyclePhase, _ role: MicroLoadRole, _ index: Int) -> Microcycle {
+            Microcycle(dateRange: day(index * 7)...day(index * 7 + 6), phase: phase, loadRole: role, mesoBlockIndex: 0)
+        }
+        let plan = (0..<3).map { micro(.base, .build, $0) } + (3..<12).map { micro(.specific, $0 % 4 == 0 ? .recovery : .build, $0) } + [micro(.taper, .taper, 12)]
+        #expect(PlanGenerator.specialBlockMicros(plan, wanted: 1) == [11])
+        #expect(PlanGenerator.specialBlockMicros(plan, wanted: 2) == [11, 7])
+        let two = PlanGenerator.specialBlockMicros(plan, wanted: 2).sorted()
+        #expect(two.count == 2 && two[1] - two[0] >= 3)
+        #expect(PlanGenerator.specialBlockMicros(plan, wanted: 0).isEmpty)
+        #expect(PlanGenerator.specialBlockMicros(Array(plan.prefix(5)), wanted: 1) == [3])
+        #expect(PlanGenerator.specialBlockMicros(Array(plan.prefix(3)), wanted: 1).isEmpty, "no specific phase, no block")
+    }
+
+    @Test("a marathon plan with one block has one day with two sessions, in the specific phase")
+    func marathonBlock() async throws {
+        var asked = tenDayRequest(distance: Race.marathonDistanceMeters, microLength: 7)
+        asked.preferences.specialBlocks = 1
+        for weekday in [Weekday.tuesday, .thursday] { asked.preferences.runAvailability[weekday] = [.morning, .evening] }
+        asked.startingVolume = VolumeTarget(measure: .durationSeconds, amount: 21_600)!
+        asked.peakVolume = VolumeTarget(measure: .durationSeconds, amount: 36_000)!
+        let result = try await PlanGenerator.generate(asked)
+
+        let specific = micros(result.candidate).filter { $0.phase == .specific }
+        // Intensity is not the test of a hard session here (the fitter can give a hard run a low-intensity template): two sessions in a day are.
+        let doubles = specific.filter { micro in
+            Dictionary(grouping: result.candidate.sessions.filter { micro.dateRange.contains($0.day) }, by: \.day).values.contains { $0.count == 2 }
+        }
+        #expect(doubles.count == 1, "one specific micro has two sessions in a day")
+        let doubleDay = doubles.first.flatMap { micro in
+            Dictionary(grouping: result.candidate.sessions.filter { micro.dateRange.contains($0.day) }, by: \.day).first { $0.value.count == 2 }?.key
+        }
+        #expect(!result.compromises.contains { if case .recoveryDaysShort(let day, _, _, _) = $0 { day == doubleDay } else { false } },
+                "the two sessions of the block's day do not ask days of each other")
+        #expect(micros(result.candidate).filter { $0.phase != .specific }.allSatisfy { micro in
+            Dictionary(grouping: result.candidate.sessions.filter { micro.dateRange.contains($0.day) }, by: \.day).values.allSatisfy { $0.count == 1 }
+        }, "no other micro has a double day")
+        #expect(result.candidate.sessions.filter(\.isBlockSession).map(\.day) == doubleDay.map { [$0] } ?? [], "the second session of the block's day is marked")
+        #expect(!result.proposalFindingsOnBlockDay(doubleDay), "the evaluator does not fault the block's day")
+        #expect(!result.compromises.contains { if case .overriddenPreference(.specialBlocks) = $0 { true } else { false } })
+    }
+
+    @Test("an ultra plan with one block has long runs on two consecutive days in one micro, and a request that cannot fit is reported")
+    func ultraBlock() async throws {
+        var asked = tenDayRequest(distance: 100_000, microLength: 7)
+        asked.preferences.specialBlocks = 1
+        asked.startingVolume = VolumeTarget(measure: .durationSeconds, amount: 21_600)!
+        asked.peakVolume = VolumeTarget(measure: .durationSeconds, amount: 36_000)!
+        let result = try await PlanGenerator.generate(asked)
+        let pairs = micros(result.candidate).filter { micro in
+            let days = result.candidate.sessions.filter { micro.dateRange.contains($0.day) && $0.isLongRun }.map(\.day).sorted()
+            return zip(days, days.dropFirst()).contains { $1.timeIntervalSince($0) < 1.5 * 86_400 }
+        }
+        #expect(pairs.count == 1)
+
+        var impossible = asked
+        impossible.preferences.specialBlocks = 2
+        impossible.macro = MacroTemplate(name: "Short", mesoBlocks: [.init(phase: .base, microCount: 3), .init(phase: .specific, microCount: 2), .init(phase: .taper, microCount: 1)])
+        impossible.targetRace.date = day(6 * 7 - 1)
+        let short = try await PlanGenerator.generate(impossible)
+        #expect(short.compromises.contains { if case .overriddenPreference(.specialBlocks) = $0 { true } else { false } })
+    }
+}
+
+private extension PlanProposal {
+    /// Whether the evaluation holds a spacing or per-micro finding dated on `day`.
+    func proposalFindingsOnBlockDay(_ day: Date?) -> Bool {
+        guard let day else { return false }
+        return evaluation.findings.contains { ($0.rule == .hardSessionSpacing || $0.rule == .hardSessionsPerMicro) && $0.day == day }
+    }
 }

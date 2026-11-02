@@ -61,6 +61,20 @@ struct PlanEvaluatorParadigmRulesTests {
         #expect(findings(.hardSessionSpacing, sessions: [session(3), session(3)], paradigm: paradigm).count == 1)
     }
 
+    @Test("the second session of a special block's day is left out of the spacing and per-micro rules")
+    func blockSession() {
+        let paradigm = TrainingParadigm(name: "x", minDaysBetweenHardSessions: 2, maxHardSessionsPerMicro: [7: 2])
+        let second = PlanSession(day: day(3), seconds: 3600, intensity: .high, speed: .fast, isBlockSession: true)
+        let sessions = [session(0), session(3), second]
+        let cycles = [micro(start: 0, length: 7)]
+        #expect(findings(.hardSessionSpacing, sessions: sessions, paradigm: paradigm).isEmpty)
+        #expect(findings(.hardSessionsPerMicro, sessions: sessions, cycles: cycles, paradigm: paradigm).isEmpty)
+        // The same day without the flag is a fault on both rules.
+        let plain = [session(0), session(3), session(3)]
+        #expect(findings(.hardSessionSpacing, sessions: plain, paradigm: paradigm).count == 1)
+        #expect(findings(.hardSessionsPerMicro, sessions: plain, cycles: cycles, paradigm: paradigm).count == 1)
+    }
+
     @Test("spacing ignores easy sessions and works without cycles; sessions need not be sorted")
     func spacingIgnoresEasy() {
         let paradigm = TrainingParadigm(name: "x", minDaysBetweenHardSessions: 2)

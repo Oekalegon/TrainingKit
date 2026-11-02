@@ -266,4 +266,12 @@ struct PlanPreferencesTests {
         none.setPreferablyFree(true, on: .friday)
         #expect(!none.isPreferablyFree(.friday))
     }
+    @Test("special blocks are clamped to 0...2, round-trip and are left out at 0")
+    func specialBlocks() throws {
+        #expect(PlanPreferences(specialBlocks: 5).specialBlocks == 2 && PlanPreferences(specialBlocks: -1).specialBlocks == 0)
+        let preferences = PlanPreferences(specialBlocks: 1)
+        #expect(try JSONDecoder().decode(PlanPreferences.self, from: JSONEncoder().encode(preferences)) == preferences)
+        #expect(!String(decoding: try JSONEncoder().encode(PlanPreferences()), as: UTF8.self).contains("specialBlocks"))
+        #expect(try JSONDecoder().decode(PlanPreferences.self, from: Data(#"{"specialBlocks":9}"#.utf8)).specialBlocks == 2)
+    }
 }

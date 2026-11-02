@@ -10,7 +10,7 @@ import Foundation
 /// the generator picks a long-tagged workout for each ``RunType/long`` assignment.
 public struct PlanSession: Sendable, Codable, Hashable {
     private enum CodingKeys: String, CodingKey {
-        case day, seconds, intensity, speed, isLongRun
+        case day, seconds, intensity, speed, isLongRun, isBlockSession
     }
 
     /// Decodes a session; `isLongRun` is optional and defaults to `false`.
@@ -21,6 +21,7 @@ public struct PlanSession: Sendable, Codable, Hashable {
         intensity = try container.decode(IntensityCategory.self, forKey: .intensity)
         speed = try container.decode(SpeedLevel.self, forKey: .speed)
         isLongRun = try container.decodeIfPresent(Bool.self, forKey: .isLongRun) ?? false
+        isBlockSession = try container.decodeIfPresent(Bool.self, forKey: .isBlockSession) ?? false
     }
 
     /// The calendar day of the session, day-granular in the same timezone as the metrics it is
@@ -36,6 +37,10 @@ public struct PlanSession: Sendable, Codable, Hashable {
     /// easy by ``intensity`` but may still count towards hard-session spacing, see
     /// ``TrainingParadigm/spacesLongRunsAsHard``.
     public let isLongRun: Bool
+    /// Whether this is the second hard session on the day of a special block (MVP5-161). The
+    /// evaluator leaves it out of ``PlanRule/hardSessionSpacing`` and ``PlanRule/hardSessionsPerMicro``,
+    /// since the athlete asked for the block; the first session of the day counts as usual.
+    public let isBlockSession: Bool
 
     /// Creates a planned session.
     ///
@@ -45,11 +50,13 @@ public struct PlanSession: Sendable, Codable, Hashable {
     ///   - intensity: The session's intensity from its time in zones.
     ///   - speed: The session's fastest work.
     ///   - isLongRun: Whether this is the long run of its micro; defaults to `false`.
-    public init(day: Date, seconds: TimeInterval, intensity: IntensityCategory, speed: SpeedLevel, isLongRun: Bool = false) {
+    ///   - isBlockSession: Whether this is the second hard session of a special block's day; defaults to `false`.
+    public init(day: Date, seconds: TimeInterval, intensity: IntensityCategory, speed: SpeedLevel, isLongRun: Bool = false, isBlockSession: Bool = false) {
         self.day = day
         self.seconds = seconds
         self.intensity = intensity
         self.speed = speed
         self.isLongRun = isLongRun
+        self.isBlockSession = isBlockSession
     }
 }

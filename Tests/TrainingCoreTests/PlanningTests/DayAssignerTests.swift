@@ -278,4 +278,45 @@ struct DayAssignerTests {
         let race = DayAssigner().assign(micro: micro(days: 7), availability: availability(allWeek), hardCount: 0, longCount: 0, raceDays: [day(3)], runsPerWeek: 3, calendar: calendar)
         #expect(race.assignments.count == 3 && !offsets(race, .easy).contains(3))
     }
+    // MARK: Special blocks (MVP5-161)
+
+    private func block(_ avail: RunAvailability, hard: Int, long: Int, targetRace: Race? = nil, paradigm: TrainingParadigm? = nil) -> DayAssignmentResult {
+        DayAssigner(paradigm: paradigm).assign(micro: micro(days: 7), availability: avail, hardCount: hard, longCount: long, targetRace: targetRace, specialBlock: true, calendar: calendar)
+    }
+
+    @Test("a special block puts a second hard session on the day of the first, in a later part, past the hard limit")
+    func doubleDay() {
+        let avail = availability(allWeek, slots: [.morning, .evening])
+        let result = block(avail, hard: 2, long: 1, paradigm: .triphasic)
+        let hard = result.assignments.filter { [.interval, .threshold].contains($0.runType) }
+        #expect(hard.count == 3 && result.dropped.isEmpty)
+        let perDay = Dictionary(grouping: hard, by: \.day)
+        #expect(perDay.values.contains { $0.count == 2 && $0.map(\.slot).contains(.morning) && $0.map(\.slot).contains(.evening) })
+        // Without the block the same micro has two hard sessions.
+        #expect(assign(avail, hard: 2, long: 1, paradigm: .triphasic).assignments.filter { [.interval, .threshold].contains($0.runType) }.count == 2)
+    }
+
+    @Test("a block with no day that has a second part is dropped")
+    func doubleDayDropped() {
+        let result = block(availability(allWeek), hard: 1, long: 1)
+        #expect(result.dropped.map(\.reason) == [.noFreeDay])
+        #expect(result.assignments.filter { [.interval, .threshold].contains($0.runType) }.count == 1)
+    }
+
+    @Test("a block in a micro with no hard session has nothing to double and reports nothing")
+    func blockWithoutHard() {
+        let result = block(availability(allWeek), hard: 0, long: 1)
+        #expect(result.dropped.isEmpty)
+    }
+
+    @Test("for an ultra, a block adds a long run on the day before or after the other, even when the paradigm lists no pairs")
+    func backToBack() {
+        let ultra = Race(name: "Ultra", date: day(60), priority: .primary, distanceMeters: 100_000)
+        var paradigm = TrainingParadigm.triphasic
+        paradigm.maxBackToBackLongRunPairsPerMicro = [7: 0]
+        let result = block(availability(allWeek), hard: 1, long: 1, targetRace: ultra, paradigm: paradigm)
+        let long = offsets(result, .long)
+        #expect(long.count == 2 && abs(long[0] - long[1]) == 1, "long runs on \(long)")
+        #expect(offsets(assign(availability(allWeek), hard: 1, long: 1), .long).count == 1)
+    }
 }

@@ -12,10 +12,11 @@ extension PlanEvaluator {
     /// Compares each hard session with the previous one in date order, so two on the same day
     /// (0 days apart) fail any minimum of 1 or more. A ``Severity/risk`` dated at the later
     /// session; `value` is the days between the two, `threshold` the minimum. Gaps are whole
-    /// calendar days, rounded, so a daylight-saving day does not change the count.
+    /// calendar days, rounded, so a daylight-saving day does not change the count. The second session
+    /// of a special block's day (``PlanSession/isBlockSession``) is left out.
     func hardSessionSpacingFindings(sessions: [PlanSession], paradigm: TrainingParadigm) -> [PlanFinding] {
         guard let minimum = paradigm.minDaysBetweenHardSessions else { return [] }
-        let hard = sessions.filter(paradigm.isHardForSpacing).sorted { $0.day < $1.day }
+        let hard = sessions.filter { !$0.isBlockSession && paradigm.isHardForSpacing($0) }.sorted { $0.day < $1.day }
         var findings: [PlanFinding] = []
         for (previous, current) in zip(hard, hard.dropFirst()) {
             let gap = Int((current.day.timeIntervalSince(previous.day) / Self.secondsPerDay).rounded())
@@ -28,12 +29,13 @@ extension PlanEvaluator {
 
     /// A micro with more hard sessions than ``TrainingParadigm/maxHardSessionsPerMicro`` allows
     /// for its length in days. A ``Severity/risk`` dated at the micro's start; `value` is the
-    /// count, `threshold` the maximum. Micros whose length has no entry are not checked.
+    /// count, `threshold` the maximum. Micros whose length has no entry are not checked. A
+    /// ``PlanSession/isBlockSession`` does not count.
     func hardSessionsPerMicroFindings(sessions: [PlanSession], cycles: [TrainingCycle], paradigm: TrainingParadigm) -> [PlanFinding] {
         var findings: [PlanFinding] = []
         for micro in micros(cycles) {
             guard let maximum = paradigm.maxHardSessionsPerMicro[length(of: micro)] else { continue }
-            let count = sessions.filter { micro.dateRange.contains($0.day) && paradigm.isHard($0) }.count
+            let count = sessions.filter { micro.dateRange.contains($0.day) && !$0.isBlockSession && paradigm.isHard($0) }.count
             if count > maximum {
                 findings.append(PlanFinding(day: micro.dateRange.lowerBound, rule: .hardSessionsPerMicro, severity: .risk, value: Double(count), threshold: Double(maximum)))
             }

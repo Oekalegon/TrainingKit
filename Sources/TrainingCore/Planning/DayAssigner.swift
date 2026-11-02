@@ -71,6 +71,12 @@ public struct DayAssigner: Sendable, Hashable {
     ///     scaled to the micro's length and rounded; `nil` (the default) for a run on every available
     ///     day that is not preferably free. Hard sessions and long runs count towards it and are never
     ///     dropped for it.
+    ///   - specialBlock: Whether the micro is a special block (MVP5-161, ``PlanPreferences/specialBlocks``).
+    ///     For an ultra target one more long run is placed on the day before or after another one of
+    ///     the micro (a back-to-back pair, one allowed even if the paradigm lists none); otherwise a
+    ///     second hard session of the same type goes on the day of a hard session, in a later free part.
+    ///     The hard-session limit of the micro does not apply to it. A block that cannot be placed is
+    ///     returned as dropped (``DropReason/noFreeDay``). Defaults to `false`.
     ///   - calendar: The athlete's calendar, which maps days to weekdays.
     /// - Returns: The placed runs and the sessions that could not be placed. A day without free
     ///   runs, or outside the availability, gets nothing.
@@ -86,6 +92,7 @@ public struct DayAssigner: Sendable, Hashable {
         raceDays: [Date] = [],
         targetRace: Race? = nil,
         runsPerWeek: Int? = nil,
+        specialBlock: Bool = false,
         calendar: Calendar
     ) -> DayAssignmentResult {
         let paradigm = paradigm?.resolved(for: targetRace)
@@ -108,7 +115,9 @@ public struct DayAssigner: Sendable, Hashable {
         var dropped: [DroppedSession] = []
         let minGap = paradigm?.minDaysBetweenHardSessions
         let spacesLong = paradigm?.spacesLongRunsAsHard ?? false
-        let pairLimit = paradigm?.maxBackToBackLongRunPairsPerMicro[Self.length(of: micro, calendar: calendar)]
+        let isUltra = targetRace?.isUltra == true
+        let pairLimit = paradigm?.maxBackToBackLongRunPairsPerMicro[Self.length(of: micro, calendar: calendar)].map { specialBlock && isUltra ? max($0, 1) : $0 }
+            ?? (specialBlock && isUltra ? 1 : nil)
         var longDates: [Date] = precedingLongRuns
         var pairs = 0
 
@@ -126,7 +135,10 @@ public struct DayAssigner: Sendable, Hashable {
             return spaced.allSatisfy { abs(calendar.dateComponents([.day], from: $0, to: date).day ?? Int.max) >= minGap }
         }
 
-        for _ in 0..<max(longCount, 0) {
+        func rank(_ slot: DaySlot) -> Int { DaySlot.allCases.firstIndex(of: slot) ?? 0 }
+        var microLongDates: [Date] = []
+        let blockLongIndex = specialBlock && isUltra ? max(longCount, 0) : -1
+        for longIndex in 0..<(max(longCount, 0) + (blockLongIndex >= 0 ? 1 : 0)) {
             let withCapacity = days.indices.filter { days[$0].capacity > 0 }
             let allowing = withCapacity.filter { availability.runTypes(on: days[$0].weekday).contains(.long) }
             // Each candidate with the part its long run would take.
@@ -136,7 +148,9 @@ public struct DayAssigner: Sendable, Hashable {
             func eligible(honouringWanted: Bool) -> [(index: Int, slot: DaySlot)] {
                 withSlot.filter { candidate in
                     let date = days[candidate.index].date
-                    return (!spacesLong || spacingAllows(date, honouringWanted: honouringWanted)) && pairs + newPairs(on: date) <= (pairLimit ?? Int.max)
+                    // The extra long run of an ultra block goes next to one of the micro.
+                    let beside = longIndex != blockLongIndex || microLongDates.isEmpty || microLongDates.contains { isNextDay($0, date) }
+                    return beside && (!spacesLong || spacingAllows(date, honouringWanted: honouringWanted)) && pairs + newPairs(on: date) <= (pairLimit ?? Int.max)
                 }
             }
             // The days wanted after an earlier workout are a minimum to aim for: without a day that has them, the paradigm's own spacing decides.
@@ -159,6 +173,7 @@ public struct DayAssigner: Sendable, Hashable {
             if spacesLong { spaced.append(days[best.index].date) }
             pairs += newPairs(on: days[best.index].date)
             longDates.append(days[best.index].date)
+            microLongDates.append(days[best.index].date)
         }
 
         let hardLimit = paradigm?.maxHardSessionsPerMicro[Self.length(of: micro, calendar: calendar)]
@@ -196,6 +211,23 @@ public struct DayAssigner: Sendable, Hashable {
             hardPlaced += 1
         }
 
+        if specialBlock && !isUltra {
+            // Two sessions in one day: a second hard session of the type of one already placed, in a later free part.
+            let hardRuns = placed.filter { hardTypes.contains($0.runType) }
+            let options = hardRuns.compactMap { run -> (index: Int, slot: DaySlot, type: RunType)? in
+                guard let index = days.firstIndex(where: { $0.date == run.day }),
+                      let slot = DaySlot.allCases.first(where: { days[index].freeSlots.contains($0) && rank($0) > rank(run.slot) }) else { return nil }
+                return (index, slot, run.runType)
+            }
+            if let pick = options.min(by: { days[$0.index].preferFree != days[$1.index].preferFree ? !days[$0.index].preferFree : days[$0.index].date < days[$1.index].date }) {
+                days[pick.index].take(pick.slot)
+                placed.append(DayAssignment(day: days[pick.index].date, slot: pick.slot, runType: pick.type))
+            } else if !hardRuns.isEmpty {
+                // With no hard session in the micro there is nothing to double, which is not a missing day.
+                dropped.append(DroppedSession(kind: .hard, reason: .noFreeDay))
+            }
+        }
+
         func easyType(on weekday: Weekday) -> RunType? {
             let allowed = availability.runTypes(on: weekday)
             return allowed.contains(.easy) ? .easy : allowed.contains(.recovery) ? .recovery : nil
@@ -228,7 +260,6 @@ public struct DayAssigner: Sendable, Hashable {
             }
         }
 
-        func rank(_ slot: DaySlot) -> Int { DaySlot.allCases.firstIndex(of: slot) ?? 0 }
         placed.sort { ($0.day, rank($0.slot)) < ($1.day, rank($1.slot)) }
         return DayAssignmentResult(assignments: placed, dropped: dropped)
     }

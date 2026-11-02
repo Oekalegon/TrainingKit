@@ -783,4 +783,26 @@ struct TriphasicPlanQualityTests {
         #expect(seconds(conditioning[0]) < seconds(base[0]), "the first conditioning micro is lighter than the first base micro")
         #expect(seconds(conditioning[0]) <= 21_600 * 0.6, "conditioning starts near the current volume, not the base volume")
     }
+    @Test("a weekly maximum below the start lowers the start, and a higher current volume does not push conditioning above it (MVP5-160)")
+    func conditioningUnderWeeklyMaximum() async throws {
+        var asked = tenDayRequest(distance: Race.marathonDistanceMeters, microLength: 7)
+        asked.preferences.includeConditioning = true
+        asked.preferences.maxWeeklyVolume[.running] = VolumeTarget(measure: .durationSeconds, amount: 14_400)!
+        asked.targetRace.date = day(19 * 7 - 1)
+        asked.macro = MacroTemplate(name: "Triphasic", mesoBlocks: [
+            .init(phase: .conditioning, microCount: 3), .init(phase: .base, microCount: 3), .init(phase: .structural, microCount: 6),
+            .init(phase: .specific, microCount: 6), .init(phase: .taper, microCount: 1),
+        ])
+        asked.startingVolume = VolumeTarget(measure: .durationSeconds, amount: 21_600)!
+        asked.peakVolume = VolumeTarget(measure: .durationSeconds, amount: 36_000)!
+        asked.currentVolume = VolumeTarget(measure: .durationSeconds, amount: 18_000)!
+        let result = try await PlanGenerator.generate(asked)
+
+        func seconds(_ micro: TrainingCycle) -> Double {
+            result.candidate.sessions.filter { micro.dateRange.contains($0.day) && $0.day >= asked.start }.map(\.seconds).reduce(0, +)
+        }
+        let conditioning = micros(result.candidate).filter { $0.phase == .conditioning && $0.loadRole == .build }
+        #expect(!conditioning.isEmpty)
+        #expect(conditioning.allSatisfy { seconds($0) <= 14_400 * 1.05 }, "conditioning stays at the weekly maximum")
+    }
 }

@@ -4,7 +4,7 @@ import Foundation
 ///
 /// Volumes are given **per 7 days** and scaled by each micro's length, so a 14-day micro holds
 /// twice the weekly volume and 7-, 10- and 14-day micros read alike. From `starting` to `peak`:
-/// - **Build micros** climb in equal steps from the starting volume at the first build micro to
+/// - **Build micros** climb in equal steps from the starting volume at the first build micro (after conditioning, see below) to
 ///   the peak at the last one (a single build micro gets the peak). Recovery micros between them do
 ///   not add a step.
 /// - **Recovery micros** hold ``recoveryLoadFraction`` of the preceding build micro (the first
@@ -63,7 +63,8 @@ public struct VolumeCurveBuilder: Sendable, Hashable {
     ///
     /// - Parameters:
     ///   - micros: The micros of the plan, e.g. from ``CycleLayoutBuilder``; any order.
-    ///   - starting: The volume per 7 days of the first build micro.
+    ///   - starting: The volume per 7 days at the start of the base phase: the first build micro, or the
+    ///     first one after the conditioning micros when `conditioningStart` is given.
     ///   - peak: The volume per 7 days of the last build micro, in the same measure as `starting`
     ///     and at least as large.
     ///   - conditioningStart: The athlete's current volume per 7 days, where the conditioning phase

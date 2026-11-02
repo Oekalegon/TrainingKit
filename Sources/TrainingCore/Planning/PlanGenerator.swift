@@ -749,12 +749,11 @@ public struct PlanGenerator: PlanCandidateProvider {
         }
         var starting = request.startingVolume
         var peak = request.peakVolume
-        var current = request.currentVolume
+        let current = request.currentVolume // the curve holds it at or below the starting volume
         if let limit = request.preferences.maxWeeklyVolume[.running] {
             guard limit.measure == peak.measure else { throw PlanGeneratorError.volumeCurve(.mismatchedMeasure) }
             if limit.amount < peak.amount { peak = limit }
             if peak.amount < starting.amount { starting = peak }
-            if let held = current, held.measure == starting.measure, held.amount > starting.amount { current = starting }
         }
         do {
             return try curve.targets(for: micros, starting: starting, peak: peak, conditioningStart: current)

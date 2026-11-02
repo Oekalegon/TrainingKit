@@ -718,4 +718,15 @@ struct TriphasicPlanQualityTests {
         }
         #expect(checked > 3)
     }
+    @Test("at a volume the long run's template cannot hold, the surplus goes to the easy runs and not to the hard sessions")
+    func surplusSkipsHardSessions() async throws {
+        var asked = tenDayRequest(distance: Race.marathonDistanceMeters, microLength: 7)
+        asked.startingVolume = VolumeTarget(measure: .durationSeconds, amount: 54_000)!
+        asked.peakVolume = VolumeTarget(measure: .durationSeconds, amount: 72_000)!
+        let candidate = try await PlanGenerator.generate(asked).candidate
+
+        let hard = candidate.sessions.filter { $0.intensity >= .high && !$0.isLongRun }
+        #expect(!hard.isEmpty)
+        #expect(hard.allSatisfy { $0.seconds <= 120 * 60 }, "the longest hard session is \((hard.map(\.seconds).max() ?? 0) / 60) minutes")
+    }
 }

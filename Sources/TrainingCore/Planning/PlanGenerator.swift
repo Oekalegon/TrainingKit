@@ -214,7 +214,7 @@ public struct PlanGenerator: PlanCandidateProvider {
                             let scale = (low + high) / 2
                             let probe = try build(ceilingSeconds * scale)
                             guard let metric = endTSB(of: probe, on: aim.day) else { break }
-                                                if scale < lightest.scale { lightest = (scale, probe, metric.tsb) }
+                            if scale < lightest.scale { lightest = (scale, probe, metric.tsb) }
                             if metric.tsb < aim.tsb { high = scale } else { low = scale; reached = (scale, probe, metric.tsb) }
                             if abs(metric.tsb - aim.tsb) < Self.sizingTolerance { reached = (scale, probe, metric.tsb); break }
                         }
@@ -346,11 +346,12 @@ public struct PlanGenerator: PlanCandidateProvider {
         // could not take goes to the easy and long runs that took theirs, in proportion to their shares, and the micro
         // is built again. A hard session is not made longer for it: it keeps the length of its own share.
         for _ in 0..<Self.redistributionPasses {
-            let capped = built.fittedByRun.filter { run, fitted in (shares[run] ?? 0) - fitted > (shares[run] ?? 0) * 0.02 }
+            let capped = built.fittedByRun.filter { run, fitted in (shares[run] ?? 0) - fitted > (shares[run] ?? 0) * Self.cappedTolerance }
             let shortfall = capped.reduce(0) { $0 + (shares[$1.key] ?? 0) - $1.value }
-            guard !capped.isEmpty, shortfall > seconds * 0.01 else { break }
+            guard !capped.isEmpty, shortfall > seconds * Self.minimumShortfall else { break }
             let open = shares.filter { capped[$0.key] == nil && !Self.hardTypes.contains($0.key.runType) }
             let openTotal = open.values.reduce(0, +)
+            // With only hard runs left open the shortfall stays unplaced; the TSB sizing of the micro absorbs it.
             guard openTotal > 0 else { break }
             for (run, fitted) in capped { shares[run] = fitted }
             for (run, share) in open { shares[run] = share + shortfall * share / openTotal }
@@ -364,6 +365,10 @@ public struct PlanGenerator: PlanCandidateProvider {
 
     /// How many times a micro is built again to give the volume a capped run could not take to the others.
     private static let redistributionPasses = 4
+    /// A run is capped when it falls short of its share by more than this fraction of the share.
+    private static let cappedTolerance = 0.02
+    /// The capped runs' total shortfall, as a fraction of the micro's volume, below which it is not worth a re-build.
+    private static let minimumShortfall = 0.01
 
     private func buildMicro(
         _ assignment: DayAssignmentResult, micro: Microcycle, cycleID: UUID, shares: [DayAssignment: TimeInterval], position: Int,
@@ -541,8 +546,8 @@ public struct PlanGenerator: PlanCandidateProvider {
     static let easyRunVariation = 0.20
 
     /// The target length of each run of a micro, in seconds, keyed by the run: the long run takes
-    /// ``longRunShare`` of `seconds` (all of them, split, when there are only long runs), a hard run an equal part of the
-    /// rest, and the other runs the remainder alternating ``easyRunVariation`` above and below their average. The
+    /// `longRunShare` of `seconds` (all of them, split, when there are only long runs), a hard run an equal part of the
+    /// rest, and the other runs the remainder alternating `easyRunVariation` above and below their average. The
     /// shares add up to `seconds`.
     ///
     /// - Parameters:

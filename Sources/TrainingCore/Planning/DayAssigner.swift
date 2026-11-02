@@ -10,7 +10,13 @@ import Foundation
 ///    days with more free parts, then the earlier date.
 /// 2. **Hard sessions** next, on a day that allows one of ``hardTypes`` (the first allowed type in
 ///    that order is used). Days that name a hard type come first, then the earlier date.
-/// 3. **Easy runs** (or recovery) in every free run left.
+/// 3. **Easy runs** (or recovery) in every free run left on a day that is not preferably free
+///    (``RunAvailability/preferablyFree``), or, with `runsPerWeek`, enough of them to reach that number
+///    of runs, on the best-spaced days (the unused day farthest from the nearest run first; the days
+///    kept free last).
+///
+/// Days the athlete would rather keep free come last for long runs and hard sessions too: they are
+/// used only when no other day can take the session.
 ///
 /// A day allows a run type when ``RunAvailability/runTypes(on:)`` contains it. Hard sessions, and
 /// long runs when ``TrainingParadigm/spacesLongRunsAsHard`` is set (not for an ultra target), keep at least
@@ -50,6 +56,9 @@ public struct DayAssigner: Sendable, Hashable {
     ///   - precedingLongRuns: The days of the long runs just before the micro, so a long run on the
     ///     micro's first day next to one counts as a back-to-back pair; used only for the pair limit of
     ///     an ultra target, and independent of `preceding`. Defaults to none.
+    ///   - precedingRuns: The days of the runs just before the micro, of any type, so the easy runs
+    ///     placed for `runsPerWeek` are spaced from them too and a micro does not open with a run the day
+    ///     after the previous one's last. Used only with `runsPerWeek`. Defaults to none.
     ///   - recoveryAfter: For days of workouts just before the micro, the days they want free after
     ///     them (``RecoveryDays/after``), so a hard session is not placed sooner after them. A minimum
     ///     to aim for: when no day has the days wanted, the paradigm's spacing alone decides and the
@@ -58,6 +67,10 @@ public struct DayAssigner: Sendable, Hashable {
     ///   - targetRace: The race the plan builds towards; for an ultra the paradigm's long runs are not
     ///     spaced and at most ``TrainingParadigm/maxBackToBackLongRunPairsPerMicro`` pairs of long
     ///     runs on consecutive days are placed, see ``TrainingParadigm/resolved(for:)``. Defaults to `nil`.
+    ///   - runsPerWeek: How many runs the athlete wants in 7 days (``PlanPreferences/runsPerWeek``),
+    ///     scaled to the micro's length and rounded; `nil` (the default) for a run on every available
+    ///     day that is not preferably free. Hard sessions and long runs count towards it and are never
+    ///     dropped for it.
     ///   - calendar: The athlete's calendar, which maps days to weekdays.
     /// - Returns: The placed runs and the sessions that could not be placed. A day without free
     ///   runs, or outside the availability, gets nothing.
@@ -68,9 +81,11 @@ public struct DayAssigner: Sendable, Hashable {
         longCount: Int,
         preceding: [Date] = [],
         precedingLongRuns: [Date] = [],
+        precedingRuns: [Date] = [],
         recoveryAfter: [Date: Int] = [:],
         raceDays: [Date] = [],
         targetRace: Race? = nil,
+        runsPerWeek: Int? = nil,
         calendar: Calendar
     ) -> DayAssignmentResult {
         let paradigm = paradigm?.resolved(for: targetRace)
@@ -81,7 +96,7 @@ public struct DayAssigner: Sendable, Hashable {
                let weekday = Weekday(rawValue: calendar.component(.weekday, from: cursor)) {
                 let runs = availability.runs(on: weekday)
                 if runs > 0 {
-                    days.append(Day(date: cursor, weekday: weekday, capacity: runs, freeSlots: DaySlot.allCases.filter { availability[weekday].contains($0) }))
+                    days.append(Day(date: cursor, weekday: weekday, preferFree: availability.isPreferablyFree(weekday), capacity: runs, freeSlots: DaySlot.allCases.filter { availability[weekday].contains($0) }))
                 }
             }
             guard let next = calendar.date(byAdding: .day, value: 1, to: cursor) else { break }
@@ -128,6 +143,7 @@ public struct DayAssigner: Sendable, Hashable {
             let wantedCandidates = eligible(honouringWanted: true)
             let candidates = wantedCandidates.isEmpty ? eligible(honouringWanted: false) : wantedCandidates
             let best = candidates.min { lhs, rhs in
+                if days[lhs.index].preferFree != days[rhs.index].preferFree { return !days[lhs.index].preferFree }
                 let (named0, named1) = (availability.dayRunTypes[days[lhs.index].weekday]?.contains(.long) == true, availability.dayRunTypes[days[rhs.index].weekday]?.contains(.long) == true)
                 if named0 != named1 { return named0 }
                 if days[lhs.index].freeSlots.count != days[rhs.index].freeSlots.count { return days[lhs.index].freeSlots.count > days[rhs.index].freeSlots.count }
@@ -163,6 +179,7 @@ public struct DayAssigner: Sendable, Hashable {
             }
             func pick(honouringWanted: Bool) -> (index: Int, type: RunType, slot: DaySlot, named: Bool)? {
                 allowing.filter { spacingAllows(days[$0.index].date, honouringWanted: honouringWanted) }.min { lhs, rhs in
+                    if days[lhs.index].preferFree != days[rhs.index].preferFree { return !days[lhs.index].preferFree }
                     if lhs.named != rhs.named { return lhs.named }
                     return days[lhs.index].date < days[rhs.index].date
                 }
@@ -179,13 +196,35 @@ public struct DayAssigner: Sendable, Hashable {
             hardPlaced += 1
         }
 
-        for index in days.indices {
-            let allowed = availability.runTypes(on: days[index].weekday)
-            let type: RunType? = allowed.contains(.easy) ? .easy : allowed.contains(.recovery) ? .recovery : nil
-            guard let type else { continue }
-            while days[index].capacity > 0, let slot = days[index].freeSlots.first {
-                days[index].take(slot)
-                placed.append(DayAssignment(day: days[index].date, slot: slot, runType: type))
+        func easyType(on weekday: Weekday) -> RunType? {
+            let allowed = availability.runTypes(on: weekday)
+            return allowed.contains(.easy) ? .easy : allowed.contains(.recovery) ? .recovery : nil
+        }
+        func placeEasy(on index: Int) {
+            guard let type = easyType(on: days[index].weekday), let slot = days[index].freeSlots.first else { return }
+            days[index].take(slot)
+            placed.append(DayAssignment(day: days[index].date, slot: slot, runType: type))
+        }
+        if let runsPerWeek {
+            // The target for this micro; the easy runs fill what hard sessions and long runs leave, on the best-spaced days.
+            let target = Int((Double(runsPerWeek) * Double(Self.length(of: micro, calendar: calendar)) / 7).rounded())
+            func gap(_ date: Date) -> Int {
+                (placed.map(\.day) + precedingRuns).map { abs(calendar.dateComponents([.day], from: $0, to: date).day ?? 0) }.min() ?? Int.max
+            }
+            while placed.count < target {
+                let open = days.indices.filter { days[$0].capacity > 0 && easyType(on: days[$0].weekday) != nil }
+                // Unused days first, the ones kept free last; a second run on a day only when no other day is left.
+                let unused = open.filter { index in !placed.contains { $0.day == days[index].date } }
+                let tier = [unused.filter { !days[$0].preferFree }, unused, open.filter { !days[$0].preferFree }, open].first { !$0.isEmpty }
+                guard let best = tier?.min(by: { lhs, rhs in
+                    let (g0, g1) = (gap(days[lhs].date), gap(days[rhs].date))
+                    return g0 != g1 ? g0 > g1 : days[lhs].date < days[rhs].date
+                }) else { break }
+                placeEasy(on: best)
+            }
+        } else {
+            for index in days.indices where !days[index].preferFree {
+                while days[index].capacity > 0, !days[index].freeSlots.isEmpty, easyType(on: days[index].weekday) != nil { placeEasy(on: index) }
             }
         }
 
@@ -197,6 +236,7 @@ public struct DayAssigner: Sendable, Hashable {
     private struct Day {
         let date: Date
         let weekday: Weekday
+        let preferFree: Bool
         var capacity: Int
         var freeSlots: [DaySlot]
 

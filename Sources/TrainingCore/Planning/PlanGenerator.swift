@@ -153,6 +153,7 @@ public struct PlanGenerator: PlanCandidateProvider {
         var overWeeklyLimit = false
         var hardDates: [Date] = []
         var longDates: [Date] = []
+        var runDates: [Date] = []
         var previousTemplates: [UUID] = []
         var demands: [Demand] = []
         var reportedPlanProblems: Set<UnresolvedReason> = []
@@ -174,9 +175,11 @@ public struct PlanGenerator: PlanCandidateProvider {
                 longCount: request.longRunsPerMicro,
                 preceding: hardDates + (spacesLong ? longDates : []),
                 precedingLongRuns: longDates,
+                precedingRuns: runDates,
                 recoveryAfter: Dictionary(demands.map { ($0.date, $0.recovery.after) }, uniquingKeysWith: max),
                 raceDays: raceDays,
                 targetRace: request.targetRace,
+                runsPerWeek: request.preferences.runsPerWeek,
                 calendar: calendar
             )
             let phaseMicros = micros.indices.filter { micros[$0].phase == micro.phase }
@@ -245,6 +248,7 @@ public struct PlanGenerator: PlanCandidateProvider {
             planSessions += built.sessions
             hardDates += built.hardDays
             longDates += built.longDays
+            runDates += assignment.assignments.map(\.day)
             previousTemplates = built.templates
             demands += built.demands
             if let weeklyLimitSeconds, built.fittedSeconds * 7 / Double(volume.lengthDays) > weeklyLimitSeconds * (1 + 1e-9) {

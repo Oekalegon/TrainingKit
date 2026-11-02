@@ -729,4 +729,35 @@ struct TriphasicPlanQualityTests {
         #expect(!hard.isEmpty)
         #expect(hard.allSatisfy { $0.seconds <= 120 * 60 }, "the longest hard session is \((hard.map(\.seconds).max() ?? 0) / 60) minutes")
     }
+    @Test("a plan for 4 runs a week has at most 4 runs in a 7-day micro")
+    func fourRunsAWeek() async throws {
+        var asked = tenDayRequest(distance: Race.marathonDistanceMeters, microLength: 7)
+        asked.preferences.runsPerWeek = 4
+        asked.startingVolume = VolumeTarget(measure: .durationSeconds, amount: 21_600)!
+        asked.peakVolume = VolumeTarget(measure: .durationSeconds, amount: 36_000)!
+        let candidate = try await PlanGenerator.generate(asked).candidate
+
+        let counts = micros(candidate).filter { $0.loadRole == .build }.map { micro in
+            candidate.sessions.filter { micro.dateRange.contains($0.day) && $0.day >= asked.start }.count
+        }
+        #expect(counts.count > 3 && counts.allSatisfy { $0 <= 4 }, "runs per micro: \(counts)")
+    }
+    @Test("3 runs a week at a high volume: the runs stay within what a run can be and the sizing still reaches the TSB zones")
+    func fewRunsHighVolume() async throws {
+        var asked = tenDayRequest(distance: Race.marathonDistanceMeters, microLength: 7)
+        asked.preferences.runsPerWeek = 3
+        asked.startingVolume = VolumeTarget(measure: .durationSeconds, amount: 54_000)!
+        asked.peakVolume = VolumeTarget(measure: .durationSeconds, amount: 72_000)!
+        let result = try await PlanGenerator.generate(asked)
+
+        let builds = micros(result.candidate).filter { $0.loadRole == .build }
+        for micro in builds {
+            let sessions = result.candidate.sessions.filter { micro.dateRange.contains($0.day) && $0.day >= asked.start }
+            #expect(sessions.count <= 3)
+            #expect(sessions.map(\.seconds).max() ?? 0 <= 6 * 3600, "no single run is longer than 6 hours")
+        }
+        let missed = result.compromises.filter { if case .sizingMissedZone = $0 { true } else { false } }
+        // The sizing lowers the volume to what 3 runs can carry, so the zones are still reached (the shortfall is not lost).
+        #expect(missed.count <= builds.count / 3, "micros that missed their zone: \(missed.count) of \(builds.count)")
+    }
 }

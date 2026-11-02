@@ -76,10 +76,12 @@ public enum ParameterGrid {
     /// `value` moved to the nearest grid value (the lower one on a tie).
     ///
     /// - Parameters:
-    ///   - value: The value to snap.
+    ///   - value: The value to snap, in the unit's base (seconds for ``ParameterUnit/minutes``, meters for ``ParameterUnit/meters``).
     ///   - unit: The parameter's unit.
+    /// - Returns: A value ``values(in:unit:)`` would list; a band's start is a candidate, so 2,950 m snaps to 3,000 m.
     public static func snapped(_ value: Double, unit: ParameterUnit) -> Double {
-        let step = step(at: value, unit: unit)
-        return (value / step - 0.5 + 1e-9).rounded(.up) * step
+        let reach = 2 * step(at: value, unit: unit)
+        let candidates = values(in: max(0, value - reach)...(value + reach), unit: unit)
+        return candidates.reduce(candidates[0]) { abs($1 - value) < abs($0 - value) - 1e-9 ? $1 : $0 }
     }
 }

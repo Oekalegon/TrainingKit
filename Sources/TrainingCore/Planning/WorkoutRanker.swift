@@ -16,14 +16,19 @@ import Foundation
 /// "Near" is within ``targetMargin`` of the target. With no target (adding without a micro volume) every workout stays.
 ///
 /// **How it ranks.** Lexicographic, like ``TemplateFitter``, with no weights:
-/// 1. the number of problems the workout brings: a risk the plan did not have (the evaluator's rules on the plan with
-///    the workout in it) and recovery days short of what the template wants (see ``WorkoutRankReason``);
+/// 1. the number of problems the workout brings: a rule with a risk the plan did not have (the evaluator's rules on the plan with
+///    the workout in it; a breach of several days counts once) and recovery days short of what the template wants (the
+///    neighbours' own template days, else the paradigm's spacing for a hard or long run; see ``WorkoutRankReason``);
 /// 2. whether the micro's phase asks for the session type at all (a mismatch ranks below, but stays in the list);
 /// 3. the distance of the TSB at the end of the micro from the aim of its role (the midpoint of the zone: training for a
 ///    build micro, recovery for a recovery micro, race for a taper micro);
 /// 4. the distance of the micro's planned time from its volume;
 /// 5. the distance from the target;
 /// 6. the template's name.
+///
+/// The series is extended with rest days to the day and to the day the micro is aimed at (the last day of the micro, or the race it holds), so a workout after the last planned day still counts. The function is `async` and CPU-bound: without a
+/// target it ranks every variant (about 9,000 for the built-in templates, some 20 seconds), so call it off the main
+/// thread; it checks for cancellation between variants.
 ///
 /// A phase-intensity step (``IntensityTarget/phaseIntensity``) is not resolved: the plan's phase pace is not an input,
 /// so such a workout is estimated with the step as it is.
@@ -50,6 +55,8 @@ public enum WorkoutRanker {
     ///     which leaves volume out of the ranking and the target of an added workout open.
     ///   - today: The boundary between past and projected days.
     /// - Returns: The workouts, best first; empty when no template can be filled in.
+    /// - Throws: `CancellationError` when the task is cancelled; the work is CPU-bound and, with no target, can take tens of
+    ///   seconds, so call it off the main thread.
     public static func rank(
         day: Date,
         replacing: PlannedActivity? = nil,
@@ -65,7 +72,7 @@ public enum WorkoutRanker {
         guardrails: PlanGuardrails = PlanGuardrails(),
         microSeconds: TimeInterval? = nil,
         today: Date
-    ) -> [RankedWorkout] {
+    ) async throws -> [RankedWorkout] {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = athlete.timeZone
         let day = calendar.startOfDay(for: day)
@@ -107,11 +114,28 @@ public enum WorkoutRanker {
         func metrics(of days: [DayLoad]) -> [FitnessMetrics] {
             FitnessMetricsCalculator().metrics(for: days, parameters: LoadModelParameters(), seed: nil)
         }
-        let existing = Set(risks(metrics: metrics(of: days(of: plan, workouts: workouts)), sessions: sessions(of: plan)).map { FindingKey(rule: $0.rule, day: $0.day) })
+        let aimDay: Date? = micro.map { micro in
+            // A taper or race micro is aimed at the race it holds, as the generator does.
+            if micro.loadRole == .taper || micro.loadRole == .race,
+               let raceDay = evaluationRaces.map(\.date).filter({ calendar.startOfDay(for: micro.dateRange.lowerBound) <= $0 && $0 <= calendar.startOfDay(for: micro.dateRange.upperBound) }).min() {
+                return raceDay
+            }
+            return calendar.startOfDay(for: micro.dateRange.upperBound)
+        }
+        // The series reaches the day and the day the micro is aimed at, with rest after the last planned day: a workout there still counts.
+        let lastNeeded = [day, aimDay].compactMap { $0 }.max() ?? day
+        func extended(_ days: [DayLoad]) -> [DayLoad] {
+            var days = days
+            while let last = days.last?.day, last < lastNeeded, let next = calendar.date(byAdding: .day, value: 1, to: last) {
+                days.append(DayLoad(day: next, load: 0, isProjected: true))
+            }
+            return days
+        }
+        let existing = Set(risks(metrics: metrics(of: extended(days(of: plan, workouts: workouts))), sessions: sessions(of: plan)).map { FindingKey(rule: $0.rule, day: $0.day) })
 
         let others = plan.filter { $0.id != replacing?.id }
         // The series without the new workout, once: a workout only adds its load on its day (a day before today feeds nothing).
-        let baseDays = days(of: others, workouts: workouts)
+        let baseDays = extended(days(of: others, workouts: workouts))
         let baseSessions = sessions(of: others)
         let feedsSeries = day >= calendar.startOfDay(for: today)
         func isInMicro(_ date: Date) -> Bool {
@@ -137,13 +161,17 @@ public enum WorkoutRanker {
             target = .seconds(microSeconds - plannedSeconds)
         }
 
-        // The neighbours that want days free around them.
+        // The neighbours that want days free around them: by their own template when they have one, else the paradigm's spacing for a hard or long run.
         let defaultAfter = resolved?.minDaysBetweenHardSessions.flatMap { $0 > 0 ? $0 : nil }
-        let demanding: [Date] = resolved.map { resolved in
-            others.compactMap { item -> Date? in
+        let templatesByID = Dictionary(templates.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let demanding: [(date: Date, recovery: RecoveryDays)] = resolved.map { resolved in
+            others.compactMap { item -> (Date, RecoveryDays)? in
                 guard let workout = workoutsByID[item.workoutID] else { return nil }
                 let session = classifier.session(on: calendar.startOfDay(for: item.date), for: workout, athlete: athlete)
-                return resolved.isHardForSpacing(session) ? session.day : nil
+                let own = workout.templateID.flatMap { templatesByID[$0] }?
+                    .effectiveRecoveryDays(defaultAfter: defaultAfter, longRunsNeedRecovery: resolved.spacesLongRunsAsHard)
+                guard let recovery = own ?? (resolved.isHardForSpacing(session) ? defaultAfter.map { RecoveryDays(before: 0, after: $0) } : nil) else { return nil }
+                return (session.day, recovery)
             }
         } ?? []
         func daysBetween(_ start: Date, _ end: Date) -> Int { calendar.dateComponents([.day], from: start, to: end).day ?? Int.max }
@@ -158,7 +186,7 @@ public enum WorkoutRanker {
             case .taper, .race: TSBZone.race.midpoint(guardrails: appliedGuardrails)
             }
         }
-        let endDay = micro.map { calendar.startOfDay(for: $0.dateRange.upperBound) }
+        let endDay = aimDay
 
         struct Scored {
             let ranked: RankedWorkout
@@ -169,75 +197,86 @@ public enum WorkoutRanker {
             let targetDistance: Double
         }
         var scored: [Scored] = []
+        func visit(_ template: WorkoutTemplate, _ values: [String: Double]) throws {
+            try Task.checkCancellation()
+            guard let workout = try? template.instantiate(values: values) else { return }
+            let seconds = durations.duration(for: workout, athlete: athlete)
+            let load = estimator.estimatedLoad(for: workout, athlete: athlete).value
+            var targetDistance = 0.0
+            switch target {
+            case .load(let wanted): targetDistance = abs(load - wanted) / max(wanted, 1)
+            case .seconds(let wanted): targetDistance = abs(seconds - wanted) / max(wanted, 1)
+            case nil: break
+            }
+            guard targetDistance <= targetMargin else { return }
+
+            var withDays = baseDays
+            if feedsSeries, let index = withDays.firstIndex(where: { $0.day == day }) {
+                withDays[index] = DayLoad(day: day, load: withDays[index].load + load, isProjected: withDays[index].isProjected)
+            }
+            let resultMetrics = metrics(of: withDays)
+            let found = risks(metrics: resultMetrics, sessions: baseSessions + [classifier.session(on: day, for: workout, athlete: athlete)])
+            // One reason per rule, at its earliest day: a breach that lasts for days is one problem.
+            var firstDay: [PlanRule: Date] = [:]
+            for finding in found where !existing.contains(FindingKey(rule: finding.rule, day: finding.day)) {
+                firstDay[finding.rule] = min(firstDay[finding.rule] ?? finding.day, finding.day)
+            }
+            var reasons: [WorkoutRankReason] = firstDay.sorted { $0.value == $1.value ? "\($0.key)" < "\($1.key)" : $0.value < $1.value }
+                .map { .addsRisk(rule: $0.key, day: $0.value) }
+
+            if let resolved, let own = template.effectiveRecoveryDays(defaultAfter: defaultAfter, longRunsNeedRecovery: resolved.spacesLongRunsAsHard) {
+                var worst: (needed: Int, available: Int)?
+                for neighbour in demanding {
+                    let earlier = neighbour.date <= day
+                    let needed = earlier ? neighbour.recovery.after + own.before : own.after + neighbour.recovery.before
+                    let available = earlier ? daysBetween(neighbour.date, day) : daysBetween(day, neighbour.date)
+                    guard available < needed, worst.map({ needed - available > $0.needed - $0.available }) ?? true else { continue }
+                    worst = (needed, available)
+                }
+                if let worst { reasons.append(.recoveryDaysShort(neededDays: worst.needed, availableDays: worst.available)) }
+            }
+            let problems = reasons.count
+
+            var outsidePhase = false
+            if let profileTypes, let micro, workout.sessionType.map({ !profileTypes.contains($0) }) ?? true {
+                outsidePhase = true
+                reasons.append(.notAskedInPhase(micro.phase))
+            }
+
+            let withWorkout = micro == nil ? nil : plannedSeconds + seconds
+            var volumeDistance = 0.0
+            if let withWorkout, let microSeconds {
+                volumeDistance = abs(withWorkout - microSeconds)
+                if withWorkout > microSeconds + 1 { reasons.append(.aboveMicroVolume(by: withWorkout - microSeconds)) }
+            }
+            let endTSB = endDay.flatMap { end in resultMetrics.first { $0.day == end }?.tsb }
+            var tsbDistance = 0.0
+            if let endTSB, let aim { tsbDistance = abs(endTSB - aim) }
+
+            scored.append(Scored(
+                ranked: RankedWorkout(
+                    template: template, values: values, workout: workout, seconds: seconds, load: load,
+                    endOfMicroTSB: endTSB, microSeconds: withWorkout, reasons: reasons
+                ),
+                problems: problems, outsidePhase: outsidePhase, tsbDistance: tsbDistance,
+                volumeDistance: volumeDistance, targetDistance: targetDistance
+            ))
+        }
+        /// Every combination of the parameters' values, one at a time (never all in memory).
+        func walk(_ template: WorkoutTemplate, _ choices: [(key: String, values: [Double])], _ index: Int, _ values: [String: Double]) throws {
+            guard index < choices.count else { return try visit(template, values) }
+            for value in choices[index].values {
+                var next = values
+                next[choices[index].key] = value
+                try walk(template, choices, index + 1, next)
+            }
+        }
         for template in templates where template.sport == .running && !template.isArchived {
             let choices = template.parameters.map { parameter -> (key: String, values: [Double]) in
                 guard let range = parameter.range else { return (parameter.key, [parameter.defaultValue]) }
                 return (parameter.key, ParameterGrid.values(in: range, unit: parameter.unit))
             }
-            var combinations: [[String: Double]] = [[:]]
-            for choice in choices {
-                combinations = combinations.flatMap { partial in choice.values.map { partial.merging([choice.key: $0]) { _, new in new } } }
-            }
-            for values in combinations {
-                guard let workout = try? template.instantiate(values: values) else { continue }
-                let seconds = durations.duration(for: workout, athlete: athlete)
-                let load = estimator.estimatedLoad(for: workout, athlete: athlete).value
-                var targetDistance = 0.0
-                switch target {
-                case .load(let wanted): targetDistance = abs(load - wanted) / max(wanted, 1)
-                case .seconds(let wanted): targetDistance = abs(seconds - wanted) / max(wanted, 1)
-                case nil: break
-                }
-                guard targetDistance <= targetMargin else { continue }
-
-                var withDays = baseDays
-                if feedsSeries, let index = withDays.firstIndex(where: { $0.day == day }) {
-                    withDays[index] = DayLoad(day: day, load: withDays[index].load + load, isProjected: withDays[index].isProjected)
-                }
-                let resultMetrics = metrics(of: withDays)
-                let found = risks(metrics: resultMetrics, sessions: baseSessions + [classifier.session(on: day, for: workout, athlete: athlete)])
-                var reasons: [WorkoutRankReason] = found
-                    .filter { !existing.contains(FindingKey(rule: $0.rule, day: $0.day)) }
-                    .map { .addsRisk(rule: $0.rule, day: $0.day) }
-
-                if let resolved, let own = template.effectiveRecoveryDays(defaultAfter: defaultAfter, longRunsNeedRecovery: resolved.spacesLongRunsAsHard) {
-                    var worst: (needed: Int, available: Int)?
-                    for date in demanding {
-                        let earlier = date <= day
-                        let needed = earlier ? (defaultAfter ?? 0) + own.before : own.after
-                        let available = earlier ? daysBetween(date, day) : daysBetween(day, date)
-                        guard available < needed, worst.map({ needed - available > $0.needed - $0.available }) ?? true else { continue }
-                        worst = (needed, available)
-                    }
-                    if let worst { reasons.append(.recoveryDaysShort(neededDays: worst.needed, availableDays: worst.available)) }
-                }
-                let problems = reasons.count
-
-                var outsidePhase = false
-                if let profileTypes, let micro, workout.sessionType.map({ !profileTypes.contains($0) }) ?? true {
-                    outsidePhase = true
-                    reasons.append(.notAskedInPhase(micro.phase))
-                }
-
-                let withWorkout = micro == nil ? nil : plannedSeconds + seconds
-                var volumeDistance = 0.0
-                if let withWorkout, let microSeconds {
-                    volumeDistance = abs(withWorkout - microSeconds)
-                    if withWorkout > microSeconds + 1 { reasons.append(.aboveMicroVolume(by: withWorkout - microSeconds)) }
-                }
-                let endTSB = endDay.flatMap { end in resultMetrics.first { $0.day == end }?.tsb }
-                var tsbDistance = 0.0
-                if let endTSB, let aim { tsbDistance = abs(endTSB - aim) }
-
-                scored.append(Scored(
-                    ranked: RankedWorkout(
-                        template: template, values: values, workout: workout, seconds: seconds, load: load,
-                        endOfMicroTSB: endTSB, microSeconds: withWorkout, reasons: reasons
-                    ),
-                    problems: problems, outsidePhase: outsidePhase, tsbDistance: tsbDistance,
-                    volumeDistance: volumeDistance, targetDistance: targetDistance
-                ))
-            }
+            try walk(template, choices, 0, [:])
         }
         return scored.sorted { lhs, rhs in
             if lhs.problems != rhs.problems { return lhs.problems < rhs.problems }

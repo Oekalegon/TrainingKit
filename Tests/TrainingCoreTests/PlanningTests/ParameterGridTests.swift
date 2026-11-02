@@ -44,5 +44,8 @@ struct ParameterGridTests {
     func snapping() {
         #expect(ParameterGrid.snapped(33 * 60, unit: .minutes) == 2_100)
         #expect(ParameterGrid.snapped(1_050, unit: .meters) == 1_200)
+        #expect(ParameterGrid.snapped(2_950, unit: .meters) == 3_000, "a band's start is a grid value")
+        #expect(ParameterGrid.snapped(1_000, unit: .meters) == 800, "the lower one on a tie")
+        #expect(ParameterGrid.snapped(3_000, unit: .meters) == 3_000)
     }
 }

@@ -56,6 +56,9 @@ public struct DayAssigner: Sendable, Hashable {
     ///   - precedingLongRuns: The days of the long runs just before the micro, so a long run on the
     ///     micro's first day next to one counts as a back-to-back pair; used only for the pair limit of
     ///     an ultra target, and independent of `preceding`. Defaults to none.
+    ///   - precedingRuns: The days of the runs just before the micro, of any type, so the easy runs
+    ///     placed for `runsPerWeek` are spaced from them too and a micro does not open with a run the day
+    ///     after the previous one's last. Used only with `runsPerWeek`. Defaults to none.
     ///   - recoveryAfter: For days of workouts just before the micro, the days they want free after
     ///     them (``RecoveryDays/after``), so a hard session is not placed sooner after them. A minimum
     ///     to aim for: when no day has the days wanted, the paradigm's spacing alone decides and the
@@ -78,6 +81,7 @@ public struct DayAssigner: Sendable, Hashable {
         longCount: Int,
         preceding: [Date] = [],
         precedingLongRuns: [Date] = [],
+        precedingRuns: [Date] = [],
         recoveryAfter: [Date: Int] = [:],
         raceDays: [Date] = [],
         targetRace: Race? = nil,
@@ -205,7 +209,7 @@ public struct DayAssigner: Sendable, Hashable {
             // The target for this micro; the easy runs fill what hard sessions and long runs leave, on the best-spaced days.
             let target = Int((Double(runsPerWeek) * Double(Self.length(of: micro, calendar: calendar)) / 7).rounded())
             func gap(_ date: Date) -> Int {
-                placed.map { abs(calendar.dateComponents([.day], from: $0.day, to: date).day ?? 0) }.min() ?? Int.max
+                (placed.map(\.day) + precedingRuns).map { abs(calendar.dateComponents([.day], from: $0, to: date).day ?? 0) }.min() ?? Int.max
             }
             while placed.count < target {
                 let open = days.indices.filter { days[$0].capacity > 0 && easyType(on: days[$0].weekday) != nil }

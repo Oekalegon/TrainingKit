@@ -2,8 +2,9 @@ import Foundation
 
 /// What the athlete wants from a generated plan: the generator's soft inputs.
 ///
-/// Preferences are honoured where possible but never override ``PlanGuardrails``. For now this
-/// carries ``runAvailability``, ``maxWeeklyVolume``, ``maxLongRunMeters`` and ``includeConditioning``; training days, starting volumes and ramp are
+/// Preferences are honoured where possible but never override ``PlanGuardrails``. It carries
+/// ``runAvailability``, ``maxWeeklyVolume``, ``maxLongRunMeters``, ``includeConditioning``,
+/// ``minDaysBetweenHardSessions`` and ``runsPerWeek``; starting volumes and ramp are
 /// added by later tickets (design doc §8.1).
 public struct PlanPreferences: Sendable, Codable, Hashable {
     /// When the athlete can run. Seeded from the athlete's global availability setting, which does

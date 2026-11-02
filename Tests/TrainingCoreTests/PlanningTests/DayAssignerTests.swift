@@ -260,4 +260,22 @@ struct DayAssignerTests {
         #expect(tight.assignments.count == 3 && tight.dropped.isEmpty)
         #expect(assign(availability([.monday, .tuesday]), hard: 0, long: 0, runsPerWeek: 5).assignments.count == 2)
     }
+    @Test("a second run on a day is used only when no other day is left")
+    func secondRunsLast() {
+        var avail = RunAvailability(slots: [.monday: [.morning, .evening], .wednesday: [.morning, .evening], .friday: [.morning], .saturday: [.morning, .evening]])
+        for weekday in [Weekday.monday, .wednesday, .saturday] { avail.setRuns(2, on: weekday) }
+        let four = assign(avail, hard: 0, long: 0, runsPerWeek: 4)
+        #expect(Set(four.assignments.map(\.day)).count == 4)
+        let six = assign(avail, hard: 0, long: 0, runsPerWeek: 6)
+        #expect(six.assignments.count == 6 && Set(six.assignments.map(\.day)).count == 4)
+    }
+
+    @Test("easy runs are spaced from the runs before the micro, and a race day takes none")
+    func boundaryAndRace() {
+        let before = [day(-1)]
+        let result = DayAssigner().assign(micro: micro(days: 7), availability: availability(allWeek), hardCount: 0, longCount: 0, precedingRuns: before, runsPerWeek: 3, calendar: calendar)
+        #expect(!offsets(result, .easy).contains(0), "no run the day after the previous micro's last: \(offsets(result, .easy))")
+        let race = DayAssigner().assign(micro: micro(days: 7), availability: availability(allWeek), hardCount: 0, longCount: 0, raceDays: [day(3)], runsPerWeek: 3, calendar: calendar)
+        #expect(race.assignments.count == 3 && !offsets(race, .easy).contains(3))
+    }
 }

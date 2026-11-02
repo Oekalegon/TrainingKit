@@ -153,6 +153,9 @@ public enum TemplateFitter {
     ///   templates with a hard work step in a zone that holds it take part, so a race-pace profile does not get a
     ///   workout whose zone is another pace (MVP5-150); when no template qualifies they all take part, and the
     ///   step resolver reports the step.
+    /// - Parameter workDistance: The hard work to aim for as a distance in meters (MVP5-157), used when `workLength` is
+    ///   `nil`: a hard step with a distance goal gets it as it is (within its range), a hard step with a time goal the seconds it
+    ///   takes at the pace of `phase` (left at its default without one).
     static func fit(
         profile: SessionProfile,
         targetSeconds: TimeInterval,
@@ -160,6 +163,7 @@ public enum TemplateFitter {
         phase: PhasePace? = nil,
         previous: [UUID] = [],
         workLength: TimeInterval? = nil,
+        workDistance: Double? = nil,
         athlete: AthleteProfile
     ) -> TemplateFit {
         let aim = workLength ?? profile.workLength.map { ($0.lowerBound + $0.upperBound) / 2 }
@@ -167,7 +171,7 @@ public enum TemplateFitter {
         // A template that asks for the phase's intensity needs a phase pace; without one it takes part only when nothing else does.
         if phase == nil, passing.contains(where: { !$0.hasPhaseStep }) { passing.removeAll { $0.hasPhaseStep } }
         func choices(_ pool: [Prepared]) -> [TemplateChoice] {
-            pool.compactMap { choice(for: $0, profile: profile, target: targetSeconds, workLength: aim, athlete: athlete) }.sorted { lhs, rhs in
+            pool.compactMap { choice(for: $0, profile: profile, target: targetSeconds, workLength: aim, workDistance: workDistance, phase: phase, athlete: athlete) }.sorted { lhs, rhs in
                 if abs(lhs.error - rhs.error) > 1e-9 { return lhs.error < rhs.error }
                 if lhs.template.name != rhs.template.name { return lhs.template.name < rhs.template.name }
                 return lhs.template.id.uuidString < rhs.template.id.uuidString
@@ -199,7 +203,7 @@ public enum TemplateFitter {
 
     private static func choice(
         for prepared: Prepared, profile: SessionProfile,
-        target: TimeInterval, workLength: TimeInterval?, athlete: AthleteProfile
+        target: TimeInterval, workLength: TimeInterval?, workDistance: Double?, phase: PhasePace?, athlete: AthleteProfile
     ) -> TemplateChoice? {
         let template = prepared.template
         let estimator = WorkoutDurationEstimator()
@@ -209,8 +213,20 @@ public enum TemplateFitter {
         let (workKeys, volumeKeys, repetitionKeys, parameters) = (prepared.workKeys, prepared.volumeKeys, prepared.repetitionKeys, prepared.parameters)
 
         var base = prepared.defaults
-        // The work length: solve each hard step's duration for its parameter.
-        if let workLength {
+        // The work distance: a distance step gets it as it is, a time step the seconds it takes at the phase pace.
+        if let workDistance {
+            for (key, step) in workKeys {
+                guard let parameter = parameters[key] else { continue }
+                let value: Double?
+                switch step.goal {
+                case .distance: value = workDistance
+                case .time: value = phase.map { workDistance / 1000 * $0.secondsPerKilometer }
+                case .open: value = nil
+                }
+                if let value { base[key] = min(max(value, range(parameter).lowerBound), range(parameter).upperBound) }
+            }
+        } else if let workLength {
+            // The work length: solve each hard step's duration for its parameter.
             for (key, step) in workKeys {
                 guard let parameter = parameters[key] else { continue }
                 if case .time = step.goal {

@@ -122,6 +122,24 @@ struct SessionProfileTests {
         #expect(SessionProfile(sessionType: .easy).progressedWorkLength(microIndex: 0, of: 3) == nil)
     }
 
+    @Test("the work distance steps linearly from the low to the high end, and only a profile with one has it")
+    func distanceProgression() {
+        let profile = SessionProfile(sessionType: .long, workDistance: 3_000...10_000, workCount: 1...1)
+        #expect(profile.progressedWorkDistance(microIndex: 0, of: 8) == 3_000)
+        #expect(profile.progressedWorkDistance(microIndex: 7, of: 8) == 10_000)
+        #expect(profile.progressedWorkDistance(microIndex: 0, of: 1) == 6_500)
+        #expect(SessionProfile(sessionType: .long).progressedWorkDistance(microIndex: 0, of: 3) == nil)
+        #expect(SessionProfile(sessionType: .long, workDistance: -1...5).workDistance == nil)
+    }
+
+    @Test("a profile with a work distance round-trips, and an old payload without one decodes")
+    func distanceCodable() throws {
+        let profile = SessionProfile(sessionType: .long, workDistance: 4_000...8_000, workCount: 1...1, raceTargetFraction: 1)
+        #expect(try JSONDecoder().decode(SessionProfile.self, from: JSONEncoder().encode(profile)) == profile)
+        let old = try JSONDecoder().decode(SessionProfile.self, from: Data(#"{"sessionType":"long"}"#.utf8))
+        #expect(old.workDistance == nil)
+    }
+
     @Test("invalid values are dropped")
     func invalidValues() {
         let profile = SessionProfile(sessionType: .interval, workLength: -5...10, workCount: -1...3, raceTargetFraction: .nan)
@@ -534,3 +552,44 @@ struct TemplateFitterTests {
 }
 
 private enum FitterTestError: Error { case missing }
+
+@Suite("TemplateFitter work distance")
+struct TemplateFitterWorkDistanceTests {
+    let athlete = AthleteProfile.fixture()
+    private let profile = SessionProfile(sessionType: .long, workDistance: 3_000...10_000, workCount: 1...1, raceTargetFraction: 1)
+
+    private func fit(templates: [WorkoutTemplate], workDistance: Double, phase: TemplateFitter.PhasePace? = nil) -> TemplateFit {
+        TemplateFitter.fit(
+            profile: profile, targetSeconds: 6_000, prepared: TemplateFitter.prepare(templates, athlete: athlete), phase: phase,
+            workDistance: workDistance, athlete: athlete
+        )
+    }
+
+    @Test("the fast finish takes the distance asked for, and the plain long run (no hard step) is not chosen")
+    func finishDistance() throws {
+        let templates = [BuiltInWorkoutTemplates.longRun, BuiltInWorkoutTemplates.longRunFastFinish]
+        for meters in [3_000.0, 6_500, 10_000] {
+            guard case .fit(let choice) = fit(templates: templates, workDistance: meters) else { Issue.record("no fit"); return }
+            #expect(choice.template.id == BuiltInWorkoutTemplates.longRunFastFinish.id)
+            #expect(choice.values["finish"] == meters)
+        }
+    }
+
+    @Test("a distance beyond the template's range is held to the range")
+    func clamped() throws {
+        guard case .fit(let choice) = fit(templates: [BuiltInWorkoutTemplates.longRunFastFinish], workDistance: 25_000) else { Issue.record("no fit"); return }
+        #expect(choice.values["finish"] == 10_000)
+    }
+
+    @Test("a time step gets the seconds the distance takes at the phase pace")
+    func timeStep() throws {
+        let phase = TemplateFitter.PhasePace(secondsPerKilometer: 300, paceModel: athlete.paceModel)
+        let one = SessionProfile(sessionType: .interval, workDistance: 3_000...3_000, workCount: 1...1)
+        let fit = TemplateFitter.fit(
+            profile: one, targetSeconds: 3_000, prepared: TemplateFitter.prepare([BuiltInWorkoutTemplates.fastFinishRun], athlete: athlete), phase: phase,
+            workDistance: 3_000, athlete: athlete
+        )
+        guard case .fit(let choice) = fit else { Issue.record("no fit"); return }
+        #expect(choice.values["finish"] == 900, "3 km at 5:00/km is 15 minutes")
+    }
+}

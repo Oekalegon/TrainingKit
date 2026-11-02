@@ -209,8 +209,8 @@ struct TriphasicPlanQualityTests {
     func tsbZonePerMicro(distance: Double) async throws {
         // Volumes above what the zones need: the curve is a ceiling, and the plan sizes each micro under it.
         var asked = tenDayRequest(distance: distance)
-        asked.startingVolume = VolumeTarget(measure: .durationSeconds, amount: 36_000)!
-        asked.peakVolume = VolumeTarget(measure: .durationSeconds, amount: 54_000)!
+        asked.startingVolume = VolumeTarget(measure: .durationSeconds, amount: 48_000)!
+        asked.peakVolume = VolumeTarget(measure: .durationSeconds, amount: 72_000)!
         let candidate = try await PlanGenerator.generate(asked).candidate
         for micro in micros(candidate).dropLast() {
             let inMicro = candidate.metrics.filter { micro.dateRange.contains($0.day) }
@@ -516,6 +516,40 @@ struct TriphasicPlanQualityTests {
         let phases = Dictionary(uniqueKeysWithValues: micros(candidate).map { ($0.dateRange.lowerBound, $0.phase) })
         let late = unresolvedSteps(candidate).filter { phases[$0.start] == .specific || phases[$0.start] == .taper }
         #expect(late.isEmpty, "\(late)")
+    }
+
+    /// The Zone 3 finish of each specific micro's long run with a fast finish, in meters, in date order.
+    private func finishes(_ candidate: PlanCandidate) -> [Double] {
+        let finishID = BuiltInWorkoutTemplates.longRunFastFinish.id
+        let specific = micros(candidate).filter { $0.phase == .specific }
+        return specific.compactMap { micro in
+            candidate.plannedActivities.filter { micro.dateRange.contains($0.date) }
+                .compactMap { planned in candidate.workouts.first { $0.id == planned.workoutID && $0.templateID == finishID } }
+                .compactMap { $0.parameterValues?["finish"] }.first
+        }
+    }
+
+    @Test("the specific phase's long run ends in a fast finish that grows from the last 3 km to the last 10 km (marathon) or 4 to 8 km (half)", arguments: [
+        (Race.marathonDistanceMeters, 3_000.0, 10_000.0), (21_097.5, 4_000.0, 8_000.0),
+    ])
+    func fastFinishInKilometres(distance: Double, first: Double, last: Double) async throws {
+        var asked = generous(tenDayRequest(distance: distance))
+        asked.targetRace.specificPhaseTarget = .pace(secondsPerKilometer: 270)
+        let candidate = try await PlanGenerator.generate(asked).candidate
+        let finishes = finishes(candidate)
+        #expect(finishes.count == micros(candidate).filter { $0.phase == .specific }.count - (micros(candidate).last?.phase == .specific ? 1 : 0)
+                || finishes.count >= 4, "\(finishes)")
+        #expect(finishes.first == first, "\(finishes)")
+        #expect(finishes.last.map { $0 <= last && $0 > first } == true, "\(finishes)")
+        #expect(finishes == finishes.sorted(), "\(finishes)")
+        #expect(finishes.allSatisfy { $0 >= first && $0 <= last })
+    }
+
+    @Test("without a pace target a distance finish still gets its distance: the pace is needed only to time a step")
+    func fastFinishWithoutPace() async throws {
+        let candidate = try await PlanGenerator.generate(generous(tenDayRequest(distance: Race.marathonDistanceMeters))).candidate
+        let finishes = finishes(candidate)
+        #expect(finishes.first == 3_000 && finishes == finishes.sorted() && finishes.allSatisfy { $0 <= 10_000 }, "\(finishes)")
     }
 
     @Test("a race pace in no zone of any template is reported, once per template and reason in a micro")

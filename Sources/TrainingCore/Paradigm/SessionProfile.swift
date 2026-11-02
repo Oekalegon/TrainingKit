@@ -7,7 +7,7 @@ import Foundation
 /// matches it to a library template. Only the fields set are asked for: a profile with just a
 /// ``sessionType`` accepts any template of that type.
 ///
-/// Units: durations in seconds, ``raceTargetFraction`` a fraction of the race target (0.9 is 90 %).
+/// Units: durations in seconds, distances in meters, ``raceTargetFraction`` a fraction of the race target (0.9 is 90 %).
 public struct SessionProfile: Sendable, Codable, Hashable {
     /// The broad kind of session wanted; a template must carry this tag, see ``WorkoutTemplate/sessionType``.
     public var sessionType: SessionType
@@ -15,6 +15,14 @@ public struct SessionProfile: Sendable, Codable, Hashable {
     /// qualifies when the work lengths its parameters can produce, ``TemplateAnalysis/workLength``,
     /// overlap this range.
     public var workLength: ClosedRange<TimeInterval>?
+    /// The wanted length of the hard work as a distance, in meters, or `nil` for none (MVP5-157): "the last 3 to 10 km".
+    /// It is not matched against templates; the plan generator turns it into seconds at the phase pace (the race
+    /// pace divided by the ``raceTargetFraction``), moving from the lower bound in the first micro of the phase to the
+    /// upper bound in the last (see ``progressedWorkDistance(microIndex:of:)``), and hands it to
+    /// ``TemplateFitter``: a hard step with a distance goal gets the distance as it is, a hard step with a time goal the seconds it
+    /// takes at the phase pace (left at its default when the race has no pace target). Used only when ``workLength`` is `nil`. Pair it with a ``workCount`` to pick the template
+    /// (one hard step for a fast finish).
+    public var workDistance: ClosedRange<Double>?
     /// The wanted number of hard work steps, or `nil` for no requirement. A template qualifies when
     /// ``TemplateAnalysis/workCount`` overlaps it.
     public var workCount: ClosedRange<Int>?
@@ -33,6 +41,8 @@ public struct SessionProfile: Sendable, Codable, Hashable {
     ///   - sessionType: The broad kind of session wanted.
     ///   - workLength: The wanted length of a hard work step, in seconds; defaults to `nil`. A range
     ///     with a negative or non-finite bound is dropped to `nil`.
+    ///   - workDistance: The wanted length of the hard work in meters; defaults to `nil`. A range with a negative or
+    ///     non-finite bound is dropped to `nil`.
     ///   - workCount: The wanted number of hard work steps; defaults to `nil`. A range with a negative
     ///     lower bound is dropped to `nil`.
     ///   - raceTargetFraction: The work intensity as a fraction of the race target; defaults to `nil`.
@@ -42,12 +52,14 @@ public struct SessionProfile: Sendable, Codable, Hashable {
     public init(
         sessionType: SessionType,
         workLength: ClosedRange<TimeInterval>? = nil,
+        workDistance: ClosedRange<Double>? = nil,
         workCount: ClosedRange<Int>? = nil,
         raceTargetFraction: Double? = nil,
         endRaceTargetFraction: Double? = nil
     ) {
         self.sessionType = sessionType
         self.workLength = workLength.flatMap { $0.lowerBound.isFinite && $0.upperBound.isFinite && $0.lowerBound >= 0 ? $0 : nil }
+        self.workDistance = workDistance.flatMap { $0.lowerBound.isFinite && $0.upperBound.isFinite && $0.lowerBound >= 0 ? $0 : nil }
         self.workCount = workCount.flatMap { $0.lowerBound >= 0 ? $0 : nil }
         self.raceTargetFraction = raceTargetFraction.flatMap { $0.isFinite && $0 > 0 ? $0 : nil }
         self.endRaceTargetFraction = endRaceTargetFraction.flatMap { $0.isFinite && $0 > 0 ? $0 : nil }
@@ -88,8 +100,23 @@ public struct SessionProfile: Sendable, Codable, Hashable {
         return workLength.lowerBound + (workLength.upperBound - workLength.lowerBound) * position
     }
 
+    /// The wanted work distance in the micro at `index` of `count` in the phase, in meters, moving linearly from
+    /// the lower bound of ``workDistance`` in the first micro to the upper bound in the last; the middle for a
+    /// phase of one micro.
+    ///
+    /// - Parameters:
+    ///   - index: The micro's position in its phase, 0 for the first. Clamped to `0..<count`.
+    ///   - count: The number of micros in the phase.
+    /// - Returns: The distance in meters, or `nil` without a ``workDistance``.
+    public func progressedWorkDistance(microIndex index: Int, of count: Int) -> Double? {
+        guard let workDistance else { return nil }
+        guard count > 1 else { return (workDistance.lowerBound + workDistance.upperBound) / 2 }
+        let position = Double(min(max(index, 0), count - 1)) / Double(count - 1)
+        return workDistance.lowerBound + (workDistance.upperBound - workDistance.lowerBound) * position
+    }
+
     private enum CodingKeys: String, CodingKey {
-        case sessionType, workLength, workCount, raceTargetFraction, endRaceTargetFraction
+        case sessionType, workLength, workDistance, workCount, raceTargetFraction, endRaceTargetFraction
     }
 
     /// Decodes a profile; everything but `sessionType` is optional. A range that is invalid reads as
@@ -99,6 +126,7 @@ public struct SessionProfile: Sendable, Codable, Hashable {
         self.init(
             sessionType: try container.decode(SessionType.self, forKey: .sessionType),
             workLength: try? container.decodeIfPresent(ClosedRange<TimeInterval>.self, forKey: .workLength),
+            workDistance: try? container.decodeIfPresent(ClosedRange<Double>.self, forKey: .workDistance),
             workCount: try? container.decodeIfPresent(ClosedRange<Int>.self, forKey: .workCount),
             raceTargetFraction: try? container.decodeIfPresent(Double.self, forKey: .raceTargetFraction),
             endRaceTargetFraction: try? container.decodeIfPresent(Double.self, forKey: .endRaceTargetFraction)

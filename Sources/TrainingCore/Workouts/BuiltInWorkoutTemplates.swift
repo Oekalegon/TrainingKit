@@ -436,7 +436,7 @@ public enum BuiltInWorkoutTemplates {
 
     /// Long run with fast finish (MVP2-106): a long Zone 2 run that ends with a Zone 3 stretch.
     ///
-    /// A fixed 5-minute Zone 1 warmup, `distance` (Zone 2, 12-25 km), then `finish` (Zone 3, 1-4 km).
+    /// A fixed 5-minute Zone 1 warmup, `distance` (Zone 2, 12-25 km), then `finish` (Zone 3, 1-10 km).
     /// Like ``fastFinishRun`` it ends on the Zone 3 effort, with no cooldown.
     public static let longRunFastFinish = WorkoutTemplate(
         id: UUID(uuidString: "8F5D6E4E-6E0E-4B8B-9C1A-9E6F9F1C1A0D")!,
@@ -447,7 +447,7 @@ public enum BuiltInWorkoutTemplates {
                 key: "distance", name: "Zone 2 distance", unit: .meters, defaultValue: 16_000, range: 12_000...25_000
             ),
             WorkoutTemplateParameter(
-                key: "finish", name: "Zone 3 finish", unit: .meters, defaultValue: 2_000, range: 1_000...4_000
+                key: "finish", name: "Zone 3 finish", unit: .meters, defaultValue: 2_000, range: 1_000...10_000
             ),
         ],
         blocks: [

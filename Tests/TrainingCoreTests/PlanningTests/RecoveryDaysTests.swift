@@ -114,8 +114,11 @@ struct RecoveryDaysPlanTests {
         for weekday in hard { availability.setRunTypes([.interval, .threshold, .easy], on: weekday) }
         for weekday in long { availability.setRunTypes([.long, .easy], on: weekday) }
         let race = Race(name: "A race", date: day(9 * 7 - 1), priority: .primary, distanceMeters: distance)
+        // These tests are about recovery days, with the alternation run as the long run: the fast finish of the specific phase (MVP5-157) is left out.
+        var paradigm = TrainingParadigm.triphasic
+        paradigm.sessionProfiles[.specific] = paradigm.sessionProfiles[.specific]?.filter { $0.sessionType != .long }
         return PlanRequest(
-            targetRace: race, paradigm: .triphasic, macro: macro, meso: .threeToOne,
+            targetRace: race, paradigm: paradigm, macro: macro, meso: .threeToOne,
             preferences: PlanPreferences(runAvailability: availability), athlete: athlete, today: monday, start: monday,
             templates: templates,
             startingVolume: VolumeTarget(measure: .durationSeconds, amount: 14_400)!,

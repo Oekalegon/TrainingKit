@@ -51,6 +51,17 @@ public struct PlanPreferences: Sendable, Codable, Hashable {
     /// dropped for it: a number below what the micro asks for gives only those.
     public var runsPerWeek: Int?
 
+    /// How many special blocks the athlete wants in the plan, 0 (the default) to 2 (MVP5-161).
+    ///
+    /// A special block is a micro in the specific phase with two sessions in one day, a specific
+    /// workout in the morning and a second in the evening; for an ultra target (``Race/isUltra``) it is
+    /// instead a long run on two consecutive days. The generator places the blocks itself, as late in
+    /// the specific phase as the micro after it (easy running, no hard sessions) allows, at least three
+    /// micros apart; the rules on hard sessions per micro and days between them do not apply inside the
+    /// block. Fewer blocks than asked are placed when they do not fit, and the plan reports
+    /// ``PlanCompromise/OverriddenPreference/specialBlocks``. Clamped to 0...2 at `init`.
+    public var specialBlocks: Int
+
     /// The ceiling on a long run for a plan aimed at `targetRace`, in meters.
     ///
     /// Only an ultra target has one: `nil` for any other race, or none. For an ultra it is the
@@ -76,6 +87,7 @@ public struct PlanPreferences: Sendable, Codable, Hashable {
     ///   - includeConditioning: Whether the athlete wants a conditioning phase; defaults to `false`.
     ///   - minDaysBetweenHardSessions: The fewest days between two hard sessions; defaults to `nil` (the
     ///     paradigm's value). A value below 1 is stored as `nil`.
+    ///   - specialBlocks: How many special blocks, 0 to 2; defaults to 0. Clamped to 0...2.
     ///   - runsPerWeek: How many runs in 7 days; defaults to `nil` (every available day). A value below 1
     ///     is stored as `nil`.
     public init(
@@ -84,8 +96,10 @@ public struct PlanPreferences: Sendable, Codable, Hashable {
         maxLongRunMeters: Double? = nil,
         includeConditioning: Bool = false,
         minDaysBetweenHardSessions: Int? = nil,
-        runsPerWeek: Int? = nil
+        runsPerWeek: Int? = nil,
+        specialBlocks: Int = 0
     ) {
+        self.specialBlocks = min(max(specialBlocks, 0), 2)
         self.runsPerWeek = runsPerWeek.flatMap { $0 >= 1 ? $0 : nil }
         self.includeConditioning = includeConditioning
         self.minDaysBetweenHardSessions = minDaysBetweenHardSessions.flatMap { $0 >= 1 ? $0 : nil }
@@ -95,7 +109,7 @@ public struct PlanPreferences: Sendable, Codable, Hashable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case runAvailability, maxWeeklyVolume, maxLongRunMeters, includeConditioning, minDaysBetweenHardSessions, runsPerWeek
+        case runAvailability, maxWeeklyVolume, maxLongRunMeters, includeConditioning, minDaysBetweenHardSessions, runsPerWeek, specialBlocks
     }
 
     /// One sport's limit, as stored: `Sport` encodes as an object, so a dictionary keyed by it
@@ -127,9 +141,10 @@ public struct PlanPreferences: Sendable, Codable, Hashable {
         includeConditioning = (try? container.decodeIfPresent(Bool.self, forKey: .includeConditioning)) ?? false
         minDaysBetweenHardSessions = (try? container.decodeIfPresent(Int.self, forKey: .minDaysBetweenHardSessions)).flatMap { $0 >= 1 ? $0 : nil }
         runsPerWeek = (try? container.decodeIfPresent(Int.self, forKey: .runsPerWeek)).flatMap { $0 >= 1 ? $0 : nil }
+        specialBlocks = min(max((try? container.decodeIfPresent(Int.self, forKey: .specialBlocks)) ?? 0, 0), 2)
     }
 
-    /// Encodes the preferences; an empty ``maxWeeklyVolume``, a `nil` ``maxLongRunMeters``, a `nil` ``minDaysBetweenHardSessions``, a `nil` ``runsPerWeek`` and a `false` ``includeConditioning`` are left out.
+    /// Encodes the preferences; an empty ``maxWeeklyVolume``, a `nil` ``maxLongRunMeters``, a `nil` ``minDaysBetweenHardSessions``, a `nil` ``runsPerWeek``, a zero ``specialBlocks`` and a `false` ``includeConditioning`` are left out.
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(runAvailability, forKey: .runAvailability)
@@ -137,6 +152,7 @@ public struct PlanPreferences: Sendable, Codable, Hashable {
         if includeConditioning { try container.encode(true, forKey: .includeConditioning) }
         try container.encodeIfPresent(minDaysBetweenHardSessions, forKey: .minDaysBetweenHardSessions)
         try container.encodeIfPresent(runsPerWeek, forKey: .runsPerWeek)
+        if specialBlocks > 0 { try container.encode(specialBlocks, forKey: .specialBlocks) }
         if !maxWeeklyVolume.isEmpty {
             let sorter = JSONEncoder()
             sorter.outputFormatting = JSONEncoder.OutputFormatting.sortedKeys

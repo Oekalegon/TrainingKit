@@ -14,6 +14,8 @@ public enum PlanCompromise: Sendable, Codable, Hashable {
         case maxWeeklyVolume
         /// ``PlanPreferences/maxLongRunMeters``: a long run needed more than the athlete's limit.
         case maxLongRun
+        /// ``PlanPreferences/specialBlocks``: fewer blocks fit than the athlete asked for (MVP5-161).
+        case specialBlocks
     }
 
     /// The lead time was too short for the paradigm's macro; see ``LeadTimeCompromiser``.

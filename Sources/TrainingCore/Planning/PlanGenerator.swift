@@ -163,6 +163,9 @@ public struct PlanGenerator: PlanCandidateProvider {
         let races = [request.targetRace] + request.otherRaces
         let raceDays = races.map { calendar.startOfDay(for: $0.date) }
 
+        let blocks = Self.specialBlockMicros(micros, wanted: request.preferences.specialBlocks)
+        if blocks.count < request.preferences.specialBlocks { compromises.append(.overriddenPreference(.specialBlocks)) }
+
         for (index, micro) in micros.enumerated() {
             try Task.checkCancellation()
             let microStart = micro.dateRange.lowerBound
@@ -171,7 +174,7 @@ public struct PlanGenerator: PlanCandidateProvider {
             let assignment = assigner.assign(
                 micro: micro.dateRange,
                 availability: request.preferences.runAvailability,
-                hardCount: request.hardSessionsPerMicro,
+                hardCount: blocks.contains(index - 1) ? 0 : request.hardSessionsPerMicro,
                 longCount: request.longRunsPerMicro,
                 preceding: hardDates + (spacesLong ? longDates : []),
                 precedingLongRuns: longDates,
@@ -180,6 +183,7 @@ public struct PlanGenerator: PlanCandidateProvider {
                 raceDays: raceDays,
                 targetRace: request.targetRace,
                 runsPerWeek: request.preferences.runsPerWeek,
+                specialBlock: blocks.contains(index),
                 calendar: calendar
             )
             let phaseMicros = micros.indices.filter { micros[$0].phase == micro.phase }
@@ -367,6 +371,24 @@ public struct PlanGenerator: PlanCandidateProvider {
         return built
     }
 
+    /// The micros that get a special block (MVP5-161): build micros of the specific phase with a micro after
+    /// them for the easy running, the latest ones, at least three micros apart.
+    ///
+    /// - Parameters:
+    ///   - micros: The micros of the plan, in date order.
+    ///   - wanted: How many blocks the athlete asked for.
+    /// - Returns: The indices of the block micros; fewer than `wanted` when they do not fit.
+    static func specialBlockMicros(_ micros: [Microcycle], wanted: Int) -> Set<Int> {
+        var result: Set<Int> = []
+        var latest = micros.count
+        for index in micros.indices.reversed() where result.count < wanted && index < latest {
+            guard index + 1 < micros.count, micros[index].phase == .specific, micros[index].loadRole == .build else { continue }
+            result.insert(index)
+            latest = index - 2
+        }
+        return result
+    }
+
     /// How many times a micro is built again to give the volume a capped run could not take to the others.
     private static let redistributionPasses = 4
     /// A run is capped when it falls short of its share by more than this fraction of the share.
@@ -382,6 +404,7 @@ public struct PlanGenerator: PlanCandidateProvider {
         var reportedProblems: Set<ProblemKey> = []
         var hardIndex = 0
         let runs = assignment.assignments.filter { !levers.droppedDays.contains($0.day) }
+        let doubleDays = Set(Dictionary(grouping: runs.filter { Self.hardTypes.contains($0.runType) }, by: \.day).filter { $0.value.count > 1 }.keys)
         let defaultAfter = paradigm.minDaysBetweenHardSessions.flatMap { $0 > 0 ? $0 : nil }
         let longNeedsRecovery = paradigm.resolved(for: request.targetRace).spacesLongRunsAsHard
         func isEased(_ run: DayAssignment) -> Bool {
@@ -397,11 +420,13 @@ public struct PlanGenerator: PlanCandidateProvider {
         for (index, run) in runs.enumerated() {
             let share = shares[run] ?? 0
             let eased = isEased(run)
-            let later = runs[(index + 1)...].compactMap(defaultDemand(of:))
+            // The two sessions of a special block's day do not ask days of each other (MVP5-161).
+            let sameDay: (Demand) -> Bool = { doubleDays.contains(run.day) && $0.date == run.day }
+            let later = runs[(index + 1)...].compactMap(defaultDemand(of:)).filter { !sameDay($0) }
             let thisHardIndex = hardIndex
             if Self.hardTypes.contains(run.runType) && !eased { hardIndex += 1 }
             let (fitted, shortfall) = try fitHonouringRecoveryDays(
-                run, on: run.day, neighbours: Neighbours(carried: carried, inMicro: built.demands, later: later), calendar: calendar
+                run, on: run.day, neighbours: Neighbours(carried: carried, inMicro: built.demands.filter { !sameDay($0) }, later: later), calendar: calendar
             ) { excluded in
                 try fitRun(
                     run, eased: eased, hardIndex: thisHardIndex, micro: micro, position: position, phaseCount: phaseCount,

@@ -845,6 +845,8 @@ struct TriphasicPlanQualityTests {
         #expect(micros(result.candidate).filter { $0.phase != .specific }.allSatisfy { micro in
             Dictionary(grouping: result.candidate.sessions.filter { micro.dateRange.contains($0.day) }, by: \.day).values.allSatisfy { $0.count == 1 }
         }, "no other micro has a double day")
+        #expect(result.candidate.sessions.filter(\.isBlockSession).map(\.day) == doubleDay.map { [$0] } ?? [], "the second session of the block's day is marked")
+        #expect(!result.proposalFindingsOnBlockDay(doubleDay), "the evaluator does not fault the block's day")
         #expect(!result.compromises.contains { if case .overriddenPreference(.specialBlocks) = $0 { true } else { false } })
     }
 
@@ -867,5 +869,13 @@ struct TriphasicPlanQualityTests {
         impossible.targetRace.date = day(6 * 7 - 1)
         let short = try await PlanGenerator.generate(impossible)
         #expect(short.compromises.contains { if case .overriddenPreference(.specialBlocks) = $0 { true } else { false } })
+    }
+}
+
+private extension PlanProposal {
+    /// Whether the evaluation holds a spacing or per-micro finding dated on `day`.
+    func proposalFindingsOnBlockDay(_ day: Date?) -> Bool {
+        guard let day else { return false }
+        return evaluation.findings.contains { ($0.rule == .hardSessionSpacing || $0.rule == .hardSessionsPerMicro) && $0.day == day }
     }
 }

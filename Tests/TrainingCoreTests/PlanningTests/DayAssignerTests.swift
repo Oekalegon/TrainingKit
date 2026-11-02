@@ -303,6 +303,12 @@ struct DayAssignerTests {
         #expect(result.assignments.filter { [.interval, .threshold].contains($0.runType) }.count == 1)
     }
 
+    @Test("a block in a micro with no hard session has nothing to double and reports nothing")
+    func blockWithoutHard() {
+        let result = block(availability(allWeek), hard: 0, long: 1)
+        #expect(result.dropped.isEmpty)
+    }
+
     @Test("for an ultra, a block adds a long run on the day before or after the other, even when the paradigm lists no pairs")
     func backToBack() {
         let ultra = Race(name: "Ultra", date: day(60), priority: .primary, distanceMeters: 100_000)

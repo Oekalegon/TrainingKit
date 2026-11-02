@@ -444,7 +444,12 @@ public struct PlanGenerator: PlanCandidateProvider {
             }
             built.workouts.append(result.workout)
             built.planned.append(result.planned)
-            built.sessions.append(result.session)
+            // The second hard session of a special block's day is the athlete's ask, not a spacing fault.
+            let secondOfDay = doubleDays.contains(run.day) && Self.hardTypes.contains(run.runType) && built.hardDays.contains(run.day)
+            let session = result.session
+            built.sessions.append(secondOfDay
+                ? PlanSession(day: session.day, seconds: session.seconds, intensity: session.intensity, speed: session.speed, isLongRun: session.isLongRun, isBlockSession: true)
+                : session)
             built.templates.append(result.templateID)
             if let reason = result.unresolvedReason {
                 if reason.dependsOnTemplate {

@@ -222,7 +222,8 @@ public struct DayAssigner: Sendable, Hashable {
             if let pick = options.min(by: { days[$0.index].preferFree != days[$1.index].preferFree ? !days[$0.index].preferFree : days[$0.index].date < days[$1.index].date }) {
                 days[pick.index].take(pick.slot)
                 placed.append(DayAssignment(day: days[pick.index].date, slot: pick.slot, runType: pick.type))
-            } else {
+            } else if !hardRuns.isEmpty {
+                // With no hard session in the micro there is nothing to double, which is not a missing day.
                 dropped.append(DroppedSession(kind: .hard, reason: .noFreeDay))
             }
         }

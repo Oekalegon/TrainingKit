@@ -29,11 +29,17 @@ public struct PlanRequest: Sendable {
     public var start: Date
     /// The library the template fitter chooses from.
     public var templates: [WorkoutTemplate]
-    /// The weekly volume at the first build micro, in ``VolumeMeasure/durationSeconds`` per 7 days.
+    /// The weekly volume at the start of the base phase, the first build micro after conditioning (MVP5-160),
+    /// in ``VolumeMeasure/durationSeconds`` per 7 days.
     public var startingVolume: VolumeTarget
     /// The weekly volume at the last build micro, in ``VolumeMeasure/durationSeconds`` per 7 days;
     /// lowered to ``PlanPreferences/maxWeeklyVolume`` for running if that is lower.
     public var peakVolume: VolumeTarget
+    /// The athlete's current weekly volume, in the measure of ``startingVolume``, where the plan begins
+    /// (MVP5-160). ``startingVolume`` is the volume at the start of the base phase; when the plan has a
+    /// conditioning phase and this is lower, the conditioning micros build up from it to the starting
+    /// volume. `nil` (the default) for no build-up. Without a conditioning phase it has no effect.
+    public var currentVolume: VolumeTarget?
     /// How many hard sessions each micro asks the day assigner for (every micro, whatever its role).
     /// By default ``defaultHardSessionsPerMicro(microLengthDays:)`` for the micro length of `meso`,
     /// worked out once when the request is created: a `meso` set afterwards does not change it. This
@@ -78,8 +84,9 @@ public struct PlanRequest: Sendable {
     ///   - today: The current day.
     ///   - start: The first day of the plan.
     ///   - templates: The workout templates to choose from.
-    ///   - startingVolume: Seconds per 7 days at the first build micro.
+    ///   - startingVolume: Seconds per 7 days at the start of the base phase (the first build micro after conditioning).
     ///   - peakVolume: Seconds per 7 days at the last build micro.
+    ///   - currentVolume: The athlete's current volume per 7 days, where a conditioning phase begins; defaults to `nil`.
     ///   - hardSessionsPerMicro: Hard sessions asked per micro; defaults to `nil`, which asks
     ///     ``defaultHardSessionsPerMicro(microLengthDays:)`` for the micro length of `meso`.
     ///   - longRunsPerMicro: Long runs asked per micro; defaults to 1.
@@ -102,6 +109,7 @@ public struct PlanRequest: Sendable {
         templates: [WorkoutTemplate],
         startingVolume: VolumeTarget,
         peakVolume: VolumeTarget,
+        currentVolume: VolumeTarget? = nil,
         hardSessionsPerMicro: Int? = nil,
         longRunsPerMicro: Int = 1,
         activities: [Activity] = [],
@@ -123,6 +131,7 @@ public struct PlanRequest: Sendable {
         self.templates = templates
         self.startingVolume = startingVolume
         self.peakVolume = peakVolume
+        self.currentVolume = currentVolume
         self.hardSessionsPerMicro = hardSessionsPerMicro ?? Self.defaultHardSessionsPerMicro(microLengthDays: meso.microLengthDays)
         self.longRunsPerMicro = longRunsPerMicro
         self.activities = activities

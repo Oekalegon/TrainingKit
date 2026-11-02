@@ -12,7 +12,7 @@ public enum PlanGeneratorError: Error, Sendable, Equatable {
     /// The layout has no micro: the race is before the start, or the macro template has no usable block.
     case noLayout
     /// The starting and peak volume or the maximum weekly volume do not form a curve; see
-    /// ``VolumeCurveBuilder/targets(for:starting:peak:)``. A ``PlanPreferences/maxWeeklyVolume``
+    /// ``VolumeCurveBuilder/targets(for:starting:peak:conditioningStart:)``. A ``PlanPreferences/maxWeeklyVolume``
     /// in another measure than the requested volume is ``VolumeCurveError/mismatchedMeasure``.
     case volumeCurve(VolumeCurveError)
     /// The volume is in ``VolumeMeasure/trimp``; the generator sizes sessions in seconds and converts a

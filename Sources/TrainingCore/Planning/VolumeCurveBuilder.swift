@@ -4,7 +4,7 @@ import Foundation
 ///
 /// Volumes are given **per 7 days** and scaled by each micro's length, so a 14-day micro holds
 /// twice the weekly volume and 7-, 10- and 14-day micros read alike. From `starting` to `peak`:
-/// - **Build micros** climb in equal steps from the starting volume at the first build micro to
+/// - **Build micros** climb in equal steps from the starting volume at the first build micro (after conditioning, see below) to
 ///   the peak at the last one (a single build micro gets the peak). Recovery micros between them do
 ///   not add a step.
 /// - **Recovery micros** hold ``recoveryLoadFraction`` of the preceding build micro (the first
@@ -14,6 +14,14 @@ import Foundation
 /// - **The race micro**, the last micro when its role is ``MicroLoadRole/taper`` (as
 ///   ``CycleLayoutBuilder`` lays it out) or ``MicroLoadRole/race`` (older stored plans), gets
 ///   ``raceFraction`` of the peak and is not part of the taper ramp.
+///
+/// **Conditioning** (MVP5-160): the `starting` volume is the volume at the start of the base phase,
+/// not of the plan. When the plan opens with a conditioning phase and the caller gives the athlete's
+/// current volume (`conditioningStart`), the build micros of that phase climb in equal steps from it
+/// towards `starting`, ending one step below, so the first micro after conditioning is at `starting`;
+/// the ramp to the peak starts there. A current volume at or above `starting` keeps conditioning flat
+/// at `starting`, and without one (`nil`) the conditioning micros are part of the ramp to the peak as
+/// before. A recovery micro in conditioning holds the fraction of the conditioning build before it.
 ///
 /// A plan with no build micro has no ramp: recovery micros then hold the fraction of the starting
 /// volume, and taper and race micros the fraction of the peak.
@@ -55,22 +63,34 @@ public struct VolumeCurveBuilder: Sendable, Hashable {
     ///
     /// - Parameters:
     ///   - micros: The micros of the plan, e.g. from ``CycleLayoutBuilder``; any order.
-    ///   - starting: The volume per 7 days of the first build micro.
+    ///   - starting: The volume per 7 days at the start of the base phase: the first build micro, or the
+    ///     first one after the conditioning micros when `conditioningStart` is given.
     ///   - peak: The volume per 7 days of the last build micro, in the same measure as `starting`
     ///     and at least as large.
+    ///   - conditioningStart: The athlete's current volume per 7 days, where the conditioning phase
+    ///     begins, in the same measure as `starting`; `nil` (the default) for no build-up. Used only
+    ///     for build micros in the ``CyclePhase/conditioning`` phase.
     /// - Returns: One target per micro, in date order, in the measure of `starting`. Empty for no micros.
     /// - Throws: ``VolumeCurveError`` for a mismatched measure, a peak below the start, or a
     ///   fraction that is not in 0...1 (above 0), or a taper that rises (start below end).
-    public func targets(for micros: [Microcycle], starting: VolumeTarget, peak: VolumeTarget) throws -> [MicroVolumeTarget] {
+    public func targets(for micros: [Microcycle], starting: VolumeTarget, peak: VolumeTarget, conditioningStart: VolumeTarget? = nil) throws -> [MicroVolumeTarget] {
         guard starting.measure == peak.measure else { throw VolumeCurveError.mismatchedMeasure }
         guard peak.amount >= starting.amount else { throw VolumeCurveError.peakBelowStart }
+        if let conditioningStart, conditioningStart.measure != starting.measure { throw VolumeCurveError.mismatchedMeasure }
         let fractions = [recoveryLoadFraction, taperStartFraction, taperEndFraction, raceFraction]
         guard fractions.allSatisfy({ $0.isFinite && $0 > 0 && $0 <= 1 }), taperStartFraction >= taperEndFraction else {
             throw VolumeCurveError.invalidFraction
         }
 
         let ordered = micros.sorted { $0.dateRange.lowerBound < $1.dateRange.lowerBound }
-        let buildCount = ordered.filter { $0.loadRole == .build }.count
+        // With a current volume given, the conditioning builds are their own ramp up to the start of base.
+        func isConditioningBuild(_ micro: Microcycle) -> Bool { conditioningStart != nil && micro.phase == .conditioning && micro.loadRole == .build }
+        let conditioningCount = ordered.filter(isConditioningBuild).count
+        let conditioningWeekly = (0..<conditioningCount).map { index in
+            let from = min(conditioningStart?.amount ?? starting.amount, starting.amount)
+            return from + (starting.amount - from) * Double(index) / Double(conditioningCount)
+        }
+        let buildCount = ordered.filter { $0.loadRole == .build && !isConditioningBuild($0) }.count
         // The micro with race day is the last one; layouts give it the taper role, older stored
         // plans the race role. Either way it gets the race fraction and is not part of the ramp.
         let raceStart = ordered.last.flatMap { $0.loadRole == .taper || $0.loadRole == .race ? $0.dateRange.lowerBound : nil }
@@ -84,11 +104,16 @@ public struct VolumeCurveBuilder: Sendable, Hashable {
 
         var result: [MicroVolumeTarget] = []
         var buildIndex = 0
+        var conditioningIndex = 0
         var taperIndex = 0
         var lastBuildWeekly: Double?
         for micro in ordered {
             let weekly: Double
             switch micro.dateRange.lowerBound == raceStart ? .race : micro.loadRole {
+            case .build where isConditioningBuild(micro):
+                weekly = conditioningWeekly[conditioningIndex]
+                conditioningIndex += 1
+                lastBuildWeekly = weekly
             case .build:
                 weekly = buildWeekly[buildIndex]
                 buildIndex += 1

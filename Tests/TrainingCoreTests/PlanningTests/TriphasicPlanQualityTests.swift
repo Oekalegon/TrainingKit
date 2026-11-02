@@ -760,4 +760,27 @@ struct TriphasicPlanQualityTests {
         // The sizing lowers the volume to what 3 runs can carry, so the zones are still reached (the shortfall is not lost).
         #expect(missed.count <= builds.count / 3, "micros that missed their zone: \(missed.count) of \(builds.count)")
     }
+    @Test("a conditioning phase builds up from the current volume: its micros are lighter than base, which starts at the asked volume (MVP5-160)")
+    func conditioningBuildsUp() async throws {
+        var asked = tenDayRequest(distance: Race.marathonDistanceMeters, microLength: 7)
+        asked.preferences.includeConditioning = true
+        asked.targetRace.date = day(19 * 7 - 1)
+        asked.macro = MacroTemplate(name: "Triphasic", mesoBlocks: [
+            .init(phase: .conditioning, microCount: 3), .init(phase: .base, microCount: 3), .init(phase: .structural, microCount: 6),
+            .init(phase: .specific, microCount: 6), .init(phase: .taper, microCount: 1),
+        ])
+        asked.startingVolume = VolumeTarget(measure: .durationSeconds, amount: 21_600)!
+        asked.peakVolume = VolumeTarget(measure: .durationSeconds, amount: 36_000)!
+        asked.currentVolume = VolumeTarget(measure: .durationSeconds, amount: 7_200)!
+        let result = try await PlanGenerator.generate(asked)
+
+        let conditioning = micros(result.candidate).filter { $0.phase == .conditioning && $0.loadRole == .build }
+        let base = micros(result.candidate).filter { $0.phase == .base && $0.loadRole == .build }
+        func seconds(_ micro: TrainingCycle) -> Double {
+            result.candidate.sessions.filter { micro.dateRange.contains($0.day) && $0.day >= asked.start }.map(\.seconds).reduce(0, +)
+        }
+        try #require(!conditioning.isEmpty && !base.isEmpty, "the plan has a conditioning and a base phase")
+        #expect(seconds(conditioning[0]) < seconds(base[0]), "the first conditioning micro is lighter than the first base micro")
+        #expect(seconds(conditioning[0]) <= 21_600 * 0.6, "conditioning starts near the current volume, not the base volume")
+    }
 }

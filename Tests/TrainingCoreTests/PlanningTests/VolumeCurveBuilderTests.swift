@@ -140,4 +140,29 @@ struct VolumeCurveBuilderTests {
         // Peak 200: taper ramp 0.7 to 0.5 over the two taper micros before race week, then 0.3.
         #expect(amounts(result).suffix(3) == [140, 100, 60])
     }
+    // MARK: Conditioning build-up (MVP5-160)
+
+    private func phased(_ entries: [(CyclePhase, MicroLoadRole)]) -> [Microcycle] {
+        entries.enumerated().map { index, entry in
+            Microcycle(dateRange: day(index * 7)...day(index * 7 + 6), phase: entry.0, loadRole: entry.1, mesoBlockIndex: 0)
+        }
+    }
+
+    @Test("conditioning climbs from the current volume towards the start of base, which the first base micro reaches")
+    func conditioningBuildUp() throws {
+        let plan = phased([(.conditioning, .build), (.conditioning, .build), (.conditioning, .recovery), (.base, .build), (.base, .build), (.base, .build)])
+        let result = try builder.targets(for: plan, starting: volume(100), peak: volume(160), conditioningStart: volume(40))
+        // 40, 70 | recovery 0.6 x 70 | base 100, 130, 160
+        #expect(amounts(result) == [40, 70, 42, 100, 130, 160])
+    }
+
+    @Test("a current volume at or above the start keeps conditioning flat, none keeps the old ramp, a mismatched measure throws")
+    func conditioningEdges() throws {
+        let plan = phased([(.conditioning, .build), (.conditioning, .build), (.base, .build), (.base, .build)])
+        #expect(amounts(try builder.targets(for: plan, starting: volume(100), peak: volume(160), conditioningStart: volume(120))) == [100, 100, 100, 160])
+        #expect(amounts(try builder.targets(for: plan, starting: volume(100), peak: volume(130))) == [100, 110, 120, 130])
+        #expect(throws: VolumeCurveError.mismatchedMeasure) {
+            try builder.targets(for: plan, starting: volume(100), peak: volume(160), conditioningStart: volume(40, .durationSeconds))
+        }
+    }
 }

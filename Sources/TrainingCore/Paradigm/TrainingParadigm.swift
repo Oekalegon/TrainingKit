@@ -149,9 +149,10 @@ public struct TrainingParadigm: Sendable, Codable, Hashable {
     /// The paradigm as it applies to a plan aimed at `targetRace`.
     ///
     /// For an ultra (``Race/isUltra``) long runs are not spaced like hard sessions, so
-    /// ``spacesLongRunsAsHard`` is `false`, and ``maxLongRunMeters`` and
-    /// ``maxBackToBackLongRunPairsPerMicro`` stay. For any other race, or none, the two ultra
-    /// settings are dropped and everything else is unchanged. For a race of a ``RaceDistanceClass`` that has
+    /// ``spacesLongRunsAsHard`` is `false`; ``maxLongRunMeters`` and ``maxBackToBackLongRunPairsPerMicro``
+    /// stay; and the profiles that ask for the hard work as a distance (``SessionProfile/workDistance``, the fast
+    /// finish at race pace of MVP5-157) are dropped. For any other race, or none, the two ultra settings are dropped
+    /// and everything else is unchanged. For a race of a ``RaceDistanceClass`` that has
     /// ``distanceProfiles``, ``sessionProfiles`` is those profiles. ``DayAssigner``, ``PlanEvaluator`` and
     /// ``PlanGenerator`` call this with their `targetRace`.
     ///
@@ -160,6 +161,8 @@ public struct TrainingParadigm: Sendable, Codable, Hashable {
         var result = self
         if targetRace?.isUltra == true {
             result.spacesLongRunsAsHard = false
+            // A fast finish at race pace (MVP5-157) is a marathon's session: an ultra's pace is not a zone 3 effort.
+            result.sessionProfiles = result.sessionProfiles.mapValues { $0.filter { $0.workDistance == nil } }
         } else {
             result.maxLongRunMeters = nil
             result.maxBackToBackLongRunPairsPerMicro = [:]

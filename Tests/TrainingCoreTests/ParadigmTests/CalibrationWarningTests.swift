@@ -164,9 +164,12 @@ struct RaceDistanceClassTests {
         for (meters, kind) in [(5_000.0, RaceDistanceClass.fiveK), (10_000, .tenK), (21_097.5, .halfMarathon)] {
             #expect(paradigm.resolved(for: race(meters)).sessionProfiles == paradigm.distanceProfiles[kind])
         }
-        for target in [race(42_195), race(100_000), nil] {
+        for target in [race(42_195), nil] {
             #expect(paradigm.resolved(for: target).sessionProfiles == paradigm.sessionProfiles)
         }
+        // An ultra keeps the marathon's profiles except the fast finish at race pace (MVP5-157).
+        let ultra = paradigm.sessionProfiles.mapValues { $0.filter { $0.workDistance == nil } }
+        #expect(paradigm.resolved(for: race(100_000)).sessionProfiles == ultra)
     }
 
     @Test("race-pace work is only in the specific phase and the taper; the base has hill sprints only")

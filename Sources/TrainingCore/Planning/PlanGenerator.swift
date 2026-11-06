@@ -567,6 +567,7 @@ public struct PlanGenerator: PlanCandidateProvider {
         let profile: SessionProfile
         let targetSeconds: TimeInterval
         let workLength: TimeInterval?
+        let workDistance: Double?
         let previous: [UUID]
         let excluded: Set<UUID>
         /// The pace the phase asks for, which decides which templates take part.
@@ -655,6 +656,7 @@ public struct PlanGenerator: PlanCandidateProvider {
     ) throws -> RunFit {
         let profile = profile(for: run, eased: eased, hardIndex: hardIndex, position: position, phase: micro.phase)
         let workLength = profile.progressedWorkLength(microIndex: position, of: phaseCount)
+        let workDistance = workLength == nil ? Self.snapped(profile.progressedWorkDistance(microIndex: position, of: phaseCount), within: profile.workDistance) : nil
         let raceTargetFraction = profile.progressedRaceTargetFraction(microIndex: position, of: phaseCount)
         // The pace the resolver puts on the work steps, as it works it out: a pace target divided by the fraction.
         var phase: TemplateFitter.PhasePace?
@@ -662,7 +664,7 @@ public struct PlanGenerator: PlanCandidateProvider {
            case .pace(let seconds)? = request.targetRace.specificPhaseTarget, seconds.isFinite, seconds > 0 {
             phase = TemplateFitter.PhasePace(secondsPerKilometer: seconds / fraction, paceModel: request.athlete.paceModel(asOf: run.day))
         }
-        let key = FitKey(profile: profile, targetSeconds: share, workLength: workLength, previous: previous, excluded: excluded, phase: phase)
+        let key = FitKey(profile: profile, targetSeconds: share, workLength: workLength, workDistance: workDistance, previous: previous, excluded: excluded, phase: phase)
         let fit = fits.fit(for: key) {
             TemplateFitter.fit(
                 profile: profile,
@@ -671,6 +673,7 @@ public struct PlanGenerator: PlanCandidateProvider {
                 phase: phase,
                 previous: previous,
                 workLength: workLength,
+                workDistance: workDistance,
                 athlete: request.athlete
             )
         }
@@ -720,6 +723,13 @@ public struct PlanGenerator: PlanCandidateProvider {
             if !hard.isEmpty { return hard[(hardIndex + position) % hard.count] }
         }
         return profiles.first { $0.sessionType == sessionType } ?? SessionProfile(sessionType: sessionType)
+    }
+
+    /// `distance` rounded to the steps of ``ParameterGrid`` (a finish of 5 333 m is asked as 5 km), held inside `range`.
+    private static func snapped(_ distance: Double?, within range: ClosedRange<Double>?) -> Double? {
+        guard let distance, let range else { return distance }
+        let step = ParameterGrid.step(at: distance, unit: .meters)
+        return min(max((distance / step).rounded() * step, range.lowerBound), range.upperBound)
     }
 
     private static let hardSessionTypes: Set<SessionType> = [.interval, .tempo, .hillRepeats]

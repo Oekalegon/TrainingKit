@@ -83,6 +83,18 @@ struct UltraTargetTests {
         #expect(resolved.phaseMixes == base.phaseMixes && resolved.maxHardSessionsPerMicro == base.maxHardSessionsPerMicro)
     }
 
+    @Test("an ultra gets no fast finish at race pace in the long run; a marathon and a half marathon do (MVP5-157)")
+    func ultraHasNoFastFinish() {
+        func finishes(_ target: Race?) -> [ClosedRange<Double>] {
+            TrainingParadigm.triphasic.resolved(for: target).sessionProfiles.values.flatMap { $0 }.compactMap(\.workDistance)
+        }
+        #expect(finishes(race(ultra)).isEmpty)
+        #expect(finishes(race(marathon)) == [3_000...10_000])
+        #expect(finishes(race(21_097.5)) == [4_000...8_000])
+        // The other profiles of an ultra stay.
+        #expect(TrainingParadigm.triphasic.resolved(for: race(ultra)).sessionProfiles[.specific]?.map(\.sessionType) == [.interval])
+    }
+
     @Test("with a marathon or no target race the paradigm is unchanged except the ultra settings are dropped")
     func resolvedOther() {
         var base = TrainingParadigm.polarized8020

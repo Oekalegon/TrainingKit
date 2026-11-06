@@ -102,7 +102,12 @@ extension TrainingParadigm {
                 SessionProfile(sessionType: .interval, workLength: 60...130, raceTargetFraction: 1.14, endRaceTargetFraction: 1.06),
                 SessionProfile(sessionType: .interval, workLength: 150...2600, raceTargetFraction: 0.86, endRaceTargetFraction: 0.94),
             ],
-            .specific: [SessionProfile(sessionType: .interval, raceTargetFraction: 1.0)],
+            .specific: [
+                SessionProfile(sessionType: .interval, raceTargetFraction: 1.0),
+                // The long run ends with a fast finish at race pace that grows from the last 3 km to the last 10 km (MVP5-157).
+                // `resolved(for:)` leaves it out for an ultra, whose race pace is not a zone 3 effort.
+                SessionProfile(sessionType: .long, workDistance: 3_000...10_000, workCount: 1...1, raceTargetFraction: 1.0),
+            ],
             .taper: [SessionProfile(sessionType: .interval, raceTargetFraction: 1.0)],
         ],
         distanceProfiles: [
@@ -150,7 +155,11 @@ extension TrainingParadigm {
             SessionProfile(sessionType: .tempo, workLength: 600...2400, workCount: 1...3, raceTargetFraction: 1.02, endRaceTargetFraction: 1.05),
             SessionProfile(sessionType: .interval, workLength: 180...300, workCount: 5...8, raceTargetFraction: 1.10, endRaceTargetFraction: 1.06),
         ],
-        .specific: [SessionProfile(sessionType: .tempo, workLength: 840...1500, workCount: 2...3, raceTargetFraction: 1.0)],
+        .specific: [
+            SessionProfile(sessionType: .tempo, workLength: 840...1500, workCount: 2...3, raceTargetFraction: 1.0),
+            // The half marathon's fast finish, shorter than the marathon's: the last 4 to 8 km at race pace (MVP5-157).
+            SessionProfile(sessionType: .long, workDistance: 4_000...8_000, workCount: 1...1, raceTargetFraction: 1.0),
+        ],
         .taper: [SessionProfile(sessionType: .interval, workLength: 480...600, workCount: 2...2, raceTargetFraction: 1.0)],
     ]
 

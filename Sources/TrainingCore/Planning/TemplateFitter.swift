@@ -153,6 +153,13 @@ public enum TemplateFitter {
     ///   templates with a hard work step in a zone that holds it take part, so a race-pace profile does not get a
     ///   workout whose zone is another pace (MVP5-150); when no template qualifies they all take part, and the
     ///   step resolver reports the step.
+    /// - Parameter workDistance: The hard work to aim for as a distance in meters (MVP5-157), used when there is no
+    ///   `workLength` (and the profile has none): every hard step with a distance goal gets it as it is (within its
+    ///   range), every hard step with a time goal the seconds it takes at the pace of `phase` (left at its default
+    ///   without one). A parameter in another unit than the goal's (meters for a distance, seconds for a time) is left
+    ///   alone. When the template cannot fit the target seconds with the hard step at that length, the step is
+    ///   shortened, down to the lower bound of its range: a fast finish never pushes the run past the time it was
+    ///   given, as far as the volume parameters can give way.
     static func fit(
         profile: SessionProfile,
         targetSeconds: TimeInterval,
@@ -160,6 +167,7 @@ public enum TemplateFitter {
         phase: PhasePace? = nil,
         previous: [UUID] = [],
         workLength: TimeInterval? = nil,
+        workDistance: Double? = nil,
         athlete: AthleteProfile
     ) -> TemplateFit {
         let aim = workLength ?? profile.workLength.map { ($0.lowerBound + $0.upperBound) / 2 }
@@ -167,7 +175,7 @@ public enum TemplateFitter {
         // A template that asks for the phase's intensity needs a phase pace; without one it takes part only when nothing else does.
         if phase == nil, passing.contains(where: { !$0.hasPhaseStep }) { passing.removeAll { $0.hasPhaseStep } }
         func choices(_ pool: [Prepared]) -> [TemplateChoice] {
-            pool.compactMap { choice(for: $0, profile: profile, target: targetSeconds, workLength: aim, athlete: athlete) }.sorted { lhs, rhs in
+            pool.compactMap { choice(for: $0, profile: profile, target: targetSeconds, workLength: aim, workDistance: workDistance, phase: phase, athlete: athlete) }.sorted { lhs, rhs in
                 if abs(lhs.error - rhs.error) > 1e-9 { return lhs.error < rhs.error }
                 if lhs.template.name != rhs.template.name { return lhs.template.name < rhs.template.name }
                 return lhs.template.id.uuidString < rhs.template.id.uuidString
@@ -199,7 +207,7 @@ public enum TemplateFitter {
 
     private static func choice(
         for prepared: Prepared, profile: SessionProfile,
-        target: TimeInterval, workLength: TimeInterval?, athlete: AthleteProfile
+        target: TimeInterval, workLength: TimeInterval?, workDistance: Double?, phase: PhasePace?, athlete: AthleteProfile
     ) -> TemplateChoice? {
         let template = prepared.template
         let estimator = WorkoutDurationEstimator()
@@ -209,8 +217,38 @@ public enum TemplateFitter {
         let (workKeys, volumeKeys, repetitionKeys, parameters) = (prepared.workKeys, prepared.volumeKeys, prepared.repetitionKeys, prepared.parameters)
 
         var base = prepared.defaults
-        // The work length: solve each hard step's duration for its parameter.
-        if let workLength {
+        // The work distance, when no work length is asked for: a distance step gets it as it is, a time step the
+        // seconds it takes at the phase pace; a parameter in another unit than the goal's is left at its default.
+        if let workDistance, workLength == nil {
+            for (key, step) in workKeys {
+                guard let parameter = parameters[key] else { continue }
+                let value: Double?
+                switch step.goal {
+                case .distance: value = parameter.unit == .meters ? workDistance : nil
+                case .time: value = parameter.unit == .minutes ? phase.map { workDistance / 1000 * $0.secondsPerKilometer } : nil
+                case .open: value = nil
+                }
+                if let value { base[key] = min(max(value, range(parameter).lowerBound), range(parameter).upperBound) }
+            }
+            // The volume parameters give way first (the Zone 2 part of a long run); when even their lower bounds leave
+            // the run longer than its time, the hard step is shortened to what is left, down to its own lower bound.
+            if !volumeKeys.isEmpty {
+                var floor = base
+                for key in volumeKeys { if let parameter = parameters[key] { floor[key] = range(parameter).lowerBound } }
+                for (key, _) in workKeys {
+                    guard let parameter = parameters[key], let wanted = base[key], wanted > range(parameter).lowerBound else { continue }
+                    func seconds(_ x: Double) -> TimeInterval {
+                        var trial = floor
+                        trial[key] = x
+                        guard let workout = try? template.instantiate(values: trial) else { return .infinity }
+                        return estimator.duration(for: workout, athlete: athlete)
+                    }
+                    guard seconds(wanted) > target else { continue }
+                    base[key] = solve(range(parameter).lowerBound...wanted, toward: target, using: seconds)
+                }
+            }
+        } else if let workLength {
+            // The work length: solve each hard step's duration for its parameter.
             for (key, step) in workKeys {
                 guard let parameter = parameters[key] else { continue }
                 if case .time = step.goal {

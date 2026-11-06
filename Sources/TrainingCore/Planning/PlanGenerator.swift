@@ -656,7 +656,7 @@ public struct PlanGenerator: PlanCandidateProvider {
     ) throws -> RunFit {
         let profile = profile(for: run, eased: eased, hardIndex: hardIndex, position: position, phase: micro.phase)
         let workLength = profile.progressedWorkLength(microIndex: position, of: phaseCount)
-        let workDistance = workLength == nil ? profile.progressedWorkDistance(microIndex: position, of: phaseCount) : nil
+        let workDistance = workLength == nil ? Self.snapped(profile.progressedWorkDistance(microIndex: position, of: phaseCount), within: profile.workDistance) : nil
         let raceTargetFraction = profile.progressedRaceTargetFraction(microIndex: position, of: phaseCount)
         // The pace the resolver puts on the work steps, as it works it out: a pace target divided by the fraction.
         var phase: TemplateFitter.PhasePace?
@@ -723,6 +723,13 @@ public struct PlanGenerator: PlanCandidateProvider {
             if !hard.isEmpty { return hard[(hardIndex + position) % hard.count] }
         }
         return profiles.first { $0.sessionType == sessionType } ?? SessionProfile(sessionType: sessionType)
+    }
+
+    /// `distance` rounded to the steps of ``ParameterGrid`` (a finish of 5 333 m is asked as 5 km), held inside `range`.
+    private static func snapped(_ distance: Double?, within range: ClosedRange<Double>?) -> Double? {
+        guard let distance, let range else { return distance }
+        let step = ParameterGrid.step(at: distance, unit: .meters)
+        return min(max((distance / step).rounded() * step, range.lowerBound), range.upperBound)
     }
 
     private static let hardSessionTypes: Set<SessionType> = [.interval, .tempo, .hillRepeats]

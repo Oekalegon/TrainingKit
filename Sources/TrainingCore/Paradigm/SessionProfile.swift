@@ -7,7 +7,8 @@ import Foundation
 /// matches it to a library template. Only the fields set are asked for: a profile with just a
 /// ``sessionType`` accepts any template of that type.
 ///
-/// Units: durations in seconds, distances in meters, ``raceTargetFraction`` a fraction of the race target (0.9 is 90 %).
+/// Units: durations in seconds, distances in meters, ``raceTargetFraction`` a fraction of the race
+/// target (0.9 is 90 %).
 public struct SessionProfile: Sendable, Codable, Hashable {
     /// The broad kind of session wanted; a template must carry this tag, see ``WorkoutTemplate/sessionType``.
     public var sessionType: SessionType
@@ -16,12 +17,16 @@ public struct SessionProfile: Sendable, Codable, Hashable {
     /// overlap this range.
     public var workLength: ClosedRange<TimeInterval>?
     /// The wanted length of the hard work as a distance, in meters, or `nil` for none (MVP5-157): "the last 3 to 10 km".
-    /// It is not matched against templates; the plan generator turns it into seconds at the phase pace (the race
-    /// pace divided by the ``raceTargetFraction``), moving from the lower bound in the first micro of the phase to the
-    /// upper bound in the last (see ``progressedWorkDistance(microIndex:of:)``), and hands it to
-    /// ``TemplateFitter``: a hard step with a distance goal gets the distance as it is, a hard step with a time goal the seconds it
-    /// takes at the phase pace (left at its default when the race has no pace target). Used only when ``workLength`` is `nil`. Pair it with a ``workCount`` to pick the template
-    /// (one hard step for a fast finish).
+    ///
+    /// It is not matched against templates. The plan generator moves it from the lower bound in the first micro of
+    /// the phase to the upper bound in the last (``progressedWorkDistance(microIndex:of:)``), rounds it to the
+    /// steps of ``ParameterGrid``, and hands it to ``TemplateFitter``. There, every hard step takes it: a step with a
+    /// distance goal the distance, a step with a time goal the seconds the distance takes at the phase pace (the race
+    /// pace divided by the ``raceTargetFraction``; left at its default when the race has no pace target). The finish
+    /// shrinks, down to the template's own minimum, when the run's time leaves no room for it.
+    ///
+    /// Used only when ``workLength`` is `nil`. Pair it with a ``workCount`` to pick the template (one hard step
+    /// for a fast finish).
     public var workDistance: ClosedRange<Double>?
     /// The wanted number of hard work steps, or `nil` for no requirement. A template qualifies when
     /// ``TemplateAnalysis/workCount`` overlaps it.

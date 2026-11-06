@@ -105,6 +105,7 @@ extension TrainingParadigm {
             .specific: [
                 SessionProfile(sessionType: .interval, raceTargetFraction: 1.0),
                 // The long run ends with a fast finish at race pace that grows from the last 3 km to the last 10 km (MVP5-157).
+                // `resolved(for:)` leaves it out for an ultra, whose race pace is not a zone 3 effort.
                 SessionProfile(sessionType: .long, workDistance: 3_000...10_000, workCount: 1...1, raceTargetFraction: 1.0),
             ],
             .taper: [SessionProfile(sessionType: .interval, raceTargetFraction: 1.0)],
@@ -156,7 +157,7 @@ extension TrainingParadigm {
         ],
         .specific: [
             SessionProfile(sessionType: .tempo, workLength: 840...1500, workCount: 2...3, raceTargetFraction: 1.0),
-            // The marathon's fast finish, shorter: the last 4 to 8 km at race pace (MVP5-157).
+            // The half marathon's fast finish, shorter than the marathon's: the last 4 to 8 km at race pace (MVP5-157).
             SessionProfile(sessionType: .long, workDistance: 4_000...8_000, workCount: 1...1, raceTargetFraction: 1.0),
         ],
         .taper: [SessionProfile(sessionType: .interval, workLength: 480...600, workCount: 2...2, raceTargetFraction: 1.0)],

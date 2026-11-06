@@ -558,9 +558,11 @@ struct TemplateFitterWorkDistanceTests {
     let athlete = AthleteProfile.fixture()
     private let profile = SessionProfile(sessionType: .long, workDistance: 3_000...10_000, workCount: 1...1, raceTargetFraction: 1)
 
-    private func fit(templates: [WorkoutTemplate], workDistance: Double, phase: TemplateFitter.PhasePace? = nil) -> TemplateFit {
+    private func fit(
+        templates: [WorkoutTemplate], workDistance: Double, targetSeconds: TimeInterval = 20_000, phase: TemplateFitter.PhasePace? = nil
+    ) -> TemplateFit {
         TemplateFitter.fit(
-            profile: profile, targetSeconds: 6_000, prepared: TemplateFitter.prepare(templates, athlete: athlete), phase: phase,
+            profile: profile, targetSeconds: targetSeconds, prepared: TemplateFitter.prepare(templates, athlete: athlete), phase: phase,
             workDistance: workDistance, athlete: athlete
         )
     }
@@ -579,6 +581,56 @@ struct TemplateFitterWorkDistanceTests {
     func clamped() throws {
         guard case .fit(let choice) = fit(templates: [BuiltInWorkoutTemplates.longRunFastFinish], workDistance: 25_000) else { Issue.record("no fit"); return }
         #expect(choice.values["finish"] == 10_000)
+    }
+
+    @Test("the finish gives way when the run's time leaves no room: down to the template's own lower bound")
+    func finishGivesWay() throws {
+        let templates = [BuiltInWorkoutTemplates.longRunFastFinish]
+        // 12 km of Zone 2 alone takes longer than this, so the finish is as short as the template allows.
+        guard case .fit(let tight) = fit(templates: templates, workDistance: 10_000, targetSeconds: 3_000) else { Issue.record("no fit"); return }
+        #expect(tight.values["finish"] == 1_000)
+        // With room for part of it, the run takes the target and the finish is between its bounds.
+        let estimator = WorkoutDurationEstimator()
+        func seconds(finish: Double) throws -> TimeInterval {
+            estimator.duration(for: try BuiltInWorkoutTemplates.longRunFastFinish.instantiate(values: ["distance": 12_000, "finish": finish]), athlete: athlete)
+        }
+        let target = (try seconds(finish: 1_000) + seconds(finish: 10_000)) / 2
+        guard case .fit(let partial) = fit(templates: templates, workDistance: 10_000, targetSeconds: target) else { Issue.record("no fit"); return }
+        let finish = try #require(partial.values["finish"])
+        #expect(finish > 1_000 && finish < 10_000, "\(finish)")
+        #expect(abs(partial.seconds - target) < 1, "\(partial.seconds) against \(target)")
+        // With plenty of time the distance asked for is kept.
+        guard case .fit(let ample) = fit(templates: templates, workDistance: 10_000, targetSeconds: 20_000) else { Issue.record("no fit"); return }
+        #expect(ample.values["finish"] == 10_000)
+    }
+
+    @Test("a work length that is asked for wins over a work distance")
+    func workLengthWins() throws {
+        guard case .fit(let choice) = TemplateFitter.fit(
+            profile: profile, targetSeconds: 6_000,
+            prepared: TemplateFitter.prepare([BuiltInWorkoutTemplates.longRunFastFinish], athlete: athlete),
+            workLength: 600, workDistance: 8_000, athlete: athlete
+        ) else { Issue.record("no fit"); return }
+        let finish = try #require(choice.values["finish"])
+        #expect(finish < 8_000, "the finish is sized for 10 minutes, not 8 km: \(finish)")
+    }
+
+    @Test("a parameter in another unit than the goal's is left at its default")
+    func unitMismatch() throws {
+        let odd = WorkoutTemplate(
+            name: "Finish in the wrong unit", sport: .running,
+            parameters: [
+                WorkoutTemplateParameter(key: "distance", name: "Zone 2 distance", unit: .meters, defaultValue: 16_000, range: 12_000...25_000),
+                WorkoutTemplateParameter(key: "finish", name: "Finish", unit: .count, defaultValue: 2, range: 1...10),
+            ],
+            blocks: [
+                TemplateBlock(steps: [TemplateStep(kind: .work, goal: .distance(.parameter("distance")), target: .heartRateZone(2))]),
+                TemplateBlock(steps: [TemplateStep(kind: .work, goal: .distance(.parameter("finish")), target: .heartRateZone(3))]),
+            ],
+            sessionType: .long
+        )
+        guard case .fit(let choice) = fit(templates: [odd], workDistance: 8_000) else { Issue.record("no fit"); return }
+        #expect(choice.values["finish"] == 2)
     }
 
     @Test("a time step gets the seconds the distance takes at the phase pace")

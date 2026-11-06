@@ -107,7 +107,7 @@ struct RecoveryDaysPlanTests {
     /// runs on the other days, and only the given templates.
     private func request(
         hard: [Weekday], long: [Weekday], templates: [WorkoutTemplate], hardSessions: Int = 1,
-        distance: Double = Race.marathonDistanceMeters, longRuns: Int = 1
+        distance: Double = Race.marathonDistanceMeters, longRuns: Int = 1, fastFinish: Bool = false
     ) -> PlanRequest {
         var availability = RunAvailability()
         for weekday in Weekday.allCases { availability[weekday] = [.morning] }
@@ -116,7 +116,7 @@ struct RecoveryDaysPlanTests {
         let race = Race(name: "A race", date: day(9 * 7 - 1), priority: .primary, distanceMeters: distance)
         // These tests are about recovery days, with the alternation run as the long run: the fast finish of the specific phase (MVP5-157) is left out.
         var paradigm = TrainingParadigm.triphasic
-        paradigm.sessionProfiles[.specific] = paradigm.sessionProfiles[.specific]?.filter { $0.sessionType != .long }
+        if !fastFinish { paradigm.sessionProfiles[.specific] = paradigm.sessionProfiles[.specific]?.filter { $0.sessionType != .long } }
         return PlanRequest(
             targetRace: race, paradigm: paradigm, macro: macro, meso: .threeToOne,
             preferences: PlanPreferences(runAvailability: availability), athlete: athlete, today: monday, start: monday,
@@ -150,6 +150,24 @@ struct RecoveryDaysPlanTests {
     private func shortfalls(_ proposal: PlanProposal) -> [(template: String, needed: Int, available: Int)] {
         proposal.compromises.compactMap { compromise in
             if case .recoveryDaysShort(_, let template, let needed, let available) = compromise { (template, needed, available) } else { nil }
+        }
+    }
+
+    @Test("with the paradigm's own fast finish the specific long runs are fast finishes, and no run is short of recovery days")
+    func fastFinishInsteadOfTheAlternationRun() async throws {
+        let templates = basics + [BuiltInWorkoutTemplates.alternationRun, BuiltInWorkoutTemplates.longRunFastFinish]
+        let asked = request(hard: [.wednesday], long: [.sunday], templates: templates, fastFinish: true)
+        let proposal = try await PlanGenerator.generate(asked)
+        // (The base phase's hill sprints have no template among these, which is not what this is about.)
+        #expect(!proposal.compromises.contains { if case .missingTemplate(_, let profile) = $0 { profile.sessionType == .long } else { false } })
+        #expect(shortfalls(proposal).isEmpty, "\(shortfalls(proposal))")
+        let specific = proposal.candidate.cycles.filter { $0.level == .micro && $0.phase == .specific }
+        let finishID = BuiltInWorkoutTemplates.longRunFastFinish.id
+        let workouts = Dictionary(uniqueKeysWithValues: proposal.candidate.workouts.map { ($0.id, $0) })
+        for micro in specific {
+            let finishes = proposal.candidate.plannedActivities.filter { micro.dateRange.contains($0.date) }
+                .filter { workouts[$0.workoutID]?.templateID == finishID }
+            #expect(finishes.count == 1, "\(micro.dateRange): \(finishes.count) fast finishes")
         }
     }
 

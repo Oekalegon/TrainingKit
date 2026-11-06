@@ -130,4 +130,4 @@ Open: the points of section 5 stay open until the plans can be looked at; they a
 `TrainingParadigm.distanceProfiles`, with the three sets for triphasic as in section 3. Work in metres is in seconds at
 about the race pace: 5k specific 180 to 240 s, 10k specific 360 to 540 s, half specific 840 to 1500 s. The fast finish in km was built in MVP5-157: `SessionProfile.workDistance`, with the marathon's last 3 to 10 km and the half
 marathon's last 4 to 8 km in the specific phase (`TemplateFitter` gives a distance step the distance, a time step the seconds at
-the phase pace).
+the phase pace). An ultra gets none, and the finish shrinks when the run's time leaves no room for it.

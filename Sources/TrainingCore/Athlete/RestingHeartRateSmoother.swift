@@ -52,6 +52,59 @@ public struct RestingHeartRateSmoother: Sendable {
         return smoothedRestingHeartRateBPM(from: dailyAveragesBPM)
     }
 
+    /// The percentile of each day's heart rate that stands for that day's resting heart rate.
+    ///
+    /// The 5th percentile sits just above the sleeping low, close to the morning pulse the
+    /// Karvonen method is built around, and is robust against single artefact samples that a plain
+    /// minimum would pick up.
+    public static let dailyRestingPercentile = 0.05
+
+    /// The fewest samples a day needs to count; a sparsely worn day would otherwise yield a
+    /// "low" that is really just one active moment.
+    public static let minimumSamplesPerDay = 20
+
+    /// The most the derived resting heart rate may sit above the sleeping minimum, in bpm.
+    ///
+    /// A sanity check: the true resting rate is only a few bpm above the sleeping low, so a derived
+    /// value much further above it means the low percentile was contaminated (a watch worn only
+    /// while active, say) and would overstate the resting rate and shrink the heart rate reserve.
+    public static let maximumAboveSleepingMinimumBPM = 10.0
+
+    /// The resting heart rate derived from ordinary heart rate samples rather than a precomputed
+    /// resting value: the low percentile of each day's samples, then the median over those days,
+    /// capped at ``maximumAboveSleepingMinimumBPM`` above the sleeping minimum.
+    ///
+    /// The sleeping minimum is the median over the days of each day's lowest sample. Using the median
+    /// rather than the overall lowest sample stops a single artefact from pulling the cap down.
+    ///
+    /// - Parameters:
+    ///   - samples: Heart rate samples from the trailing window, with the time each was recorded;
+    ///     order doesn't matter.
+    ///   - calendar: The calendar used to group samples by day; defaults to `.current`.
+    /// - Returns: The capped resting heart rate over the days that have at least
+    ///   ``minimumSamplesPerDay`` samples, or `nil` if no day qualifies.
+    public func restingHeartRateBPM(
+        fromHeartRateSamples samples: [(date: Date, bpm: Double)],
+        calendar: Calendar = .current
+    ) -> Double? {
+        let perDay = Dictionary(grouping: samples) { calendar.startOfDay(for: $0.date) }
+        let qualifyingDays = perDay.values.filter { $0.count >= Self.minimumSamplesPerDay }.map { $0.map(\.bpm) }
+        let dailyLows = qualifyingDays.map { Self.percentile(Self.dailyRestingPercentile, of: $0) }
+        guard let resting = smoothedRestingHeartRateBPM(from: dailyLows),
+              let sleepingMinimum = smoothedRestingHeartRateBPM(from: qualifyingDays.compactMap { $0.min() })
+        else { return nil }
+        return min(resting, sleepingMinimum + Self.maximumAboveSleepingMinimumBPM)
+    }
+
+    /// The linearly interpolated percentile (`fraction` in 0...1) of `values`, which must not be empty.
+    static func percentile(_ fraction: Double, of values: [Double]) -> Double {
+        let sorted = values.sorted()
+        let position = fraction * Double(sorted.count - 1)
+        let lower = Int(position.rounded(.down))
+        let upper = min(lower + 1, sorted.count - 1)
+        return sorted[lower] + (sorted[upper] - sorted[lower]) * (position - Double(lower))
+    }
+
     /// The median of the given readings.
     ///
     /// - Parameter readingsBPM: Already one-per-day resting heart rate readings; order doesn't

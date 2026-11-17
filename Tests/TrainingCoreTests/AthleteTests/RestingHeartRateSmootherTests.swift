@@ -93,4 +93,71 @@ struct RestingHeartRateSmootherTests {
 
         #expect(smoother.smoothedRestingHeartRateBPM(from: readings) == nil)
     }
+
+    // MARK: Derived from heart rate samples
+
+    private func day(_ offset: Int, _ bpms: [Double]) -> [(date: Date, bpm: Double)] {
+        let start = Calendar.current.startOfDay(for: Date(timeIntervalSince1970: 1_700_000_000))
+        let base = Calendar.current.date(byAdding: .day, value: offset, to: start)!
+        return bpms.enumerated().map { (base.addingTimeInterval(Double($0.offset) * 60), $0.element) }
+    }
+
+    @Test("a day's resting value is its low percentile, not its minimum")
+    func lowPercentileIgnoresArtefact() {
+        // Five days of 50...149, one of them with an artefact at 30: the 5th percentile stays near 54.
+        let normal = (1..<5).flatMap { day($0, (50..<150).map(Double.init)) }
+        let artefact = day(0, [30] + (50..<150).map(Double.init))
+
+        let resting = smoother.restingHeartRateBPM(fromHeartRateSamples: normal + artefact)
+
+        #expect(resting != nil)
+        #expect(resting! > 50 && resting! < 56)
+    }
+
+    @Test("days with too few samples are ignored")
+    func sparseDaysIgnored() {
+        let full = day(0, Array(repeating: 52, count: 30))
+        let sparse = day(1, [40, 41, 42])
+
+        #expect(smoother.restingHeartRateBPM(fromHeartRateSamples: full + sparse) == 52)
+    }
+
+    @Test("the daily values are combined by median")
+    func medianAcrossDays() {
+        let days = [50.0, 52, 90].enumerated().flatMap { day($0.offset, Array(repeating: $0.element, count: 25)) }
+
+        #expect(smoother.restingHeartRateBPM(fromHeartRateSamples: days) == 52)
+    }
+
+    @Test("no qualifying days gives nil")
+    func noQualifyingDays() {
+        #expect(smoother.restingHeartRateBPM(fromHeartRateSamples: []) == nil)
+        #expect(smoother.restingHeartRateBPM(fromHeartRateSamples: day(0, [50, 51])) == nil)
+    }
+
+    @Test("the result is capped at 10 bpm above the sleeping minimum")
+    func cappedAboveSleepingMinimum() {
+        // Each day has one sample at 40 and nineteen at 80, so the 5th percentile is about 78, far above
+        // the sleeping minimum of 40, and the cap decides.
+        let days = (0..<3).flatMap { day($0, [40] + Array(repeating: 80, count: 19)) }
+
+        let resting = smoother.restingHeartRateBPM(fromHeartRateSamples: days)
+
+        #expect(resting == 40 + RestingHeartRateSmoother.maximumAboveSleepingMinimumBPM)
+    }
+
+    @Test("a value within 10 bpm of the sleeping minimum is left alone")
+    func notCappedWhenClose() {
+        let days = (0..<3).flatMap { day($0, Array(repeating: 52, count: 10) + Array(repeating: 70, count: 10)) }
+
+        #expect(smoother.restingHeartRateBPM(fromHeartRateSamples: days) == 52)
+    }
+
+    @Test("a single artefact low doesn't drag the cap down")
+    func artefactDoesNotMoveCap() {
+        let normal = (1..<5).flatMap { day($0, Array(repeating: 52, count: 25)) }
+        let artefact = day(0, [25] + Array(repeating: 52, count: 24))
+
+        #expect(smoother.restingHeartRateBPM(fromHeartRateSamples: normal + artefact) == 52)
+    }
 }

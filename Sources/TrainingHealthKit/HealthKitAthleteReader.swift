@@ -55,10 +55,13 @@ public struct HealthKitAthleteReader: Sendable {
         )
     }
 
-    /// Queries the trailing ``RestingHeartRateSmoother/windowInDays`` of resting HR samples and
-    /// reduces them to one value via ``restingHeartRateSmoother``, rather than the single latest
-    /// sample — a resting HR reading swings day to day (sleep, illness, travel), and feeding that
-    /// noise straight into zone settings would jitter zone boundaries on every re-read.
+    /// Queries the trailing ``RestingHeartRateSmoother/windowInDays`` of ordinary heart rate samples
+    /// and derives the resting heart rate from them: the low percentile of each day, then the median
+    /// over the days (see ``RestingHeartRateSmoother/restingHeartRateBPM(fromHeartRateSamples:calendar:)``).
+    ///
+    /// HealthKit's own `restingHeartRate` isn't used: Apple's value doesn't match the morning pulse
+    /// the Karvonen method expects. Smoothing over days rather than taking the latest day stops the
+    /// zone boundaries jittering on every re-read.
     ///
     /// - Note: Swallows any HealthKit error (e.g. denied authorization) into `nil` rather than
     ///   throwing, so one field's failure can never take down the others in ``snapshot(asOf:)``.
@@ -66,14 +69,14 @@ public struct HealthKitAthleteReader: Sendable {
         let windowStart = restingHeartRateSmoother.windowStart(endingAt: today)
         let predicate = HKQuery.predicateForSamples(withStart: windowStart, end: today)
         let descriptor = HKSampleQueryDescriptor(
-            predicates: [.quantitySample(type: HKQuantityType(.restingHeartRate), predicate: predicate)],
+            predicates: [.quantitySample(type: HKQuantityType(.heartRate), predicate: predicate)],
             sortDescriptors: [SortDescriptor(\.startDate)]
         )
         guard let samples = try? await descriptor.result(for: healthStore) else { return nil }
         let readings = samples.map {
             (date: $0.startDate, bpm: $0.quantity.doubleValue(for: HeartRateSample.heartRateUnit))
         }
-        return restingHeartRateSmoother.smoothedRestingHeartRateBPM(from: readings)
+        return restingHeartRateSmoother.restingHeartRateBPM(fromHeartRateSamples: readings)
     }
 
     /// - Note: Swallows any HealthKit error (e.g. denied authorization) into `nil` rather than

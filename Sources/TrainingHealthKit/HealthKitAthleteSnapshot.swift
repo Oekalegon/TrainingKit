@@ -7,8 +7,9 @@ import TrainingCore
 /// the user may have denied one type while allowing others, or simply never recorded it (e.g. no
 /// resting-heart-rate samples yet).
 public struct HealthKitAthleteSnapshot: Sendable, Hashable {
-    /// Resting heart rate, in beats per minute, smoothed via `RestingHeartRateSmoother` over the
-    /// trailing 1–2 week window rather than a single latest sample.
+    /// Resting heart rate, in beats per minute: the low percentile of each day's heart rate samples,
+    /// then the median over the trailing 1–2 week window (see `RestingHeartRateSmoother`), rather than
+    /// Apple's own resting heart rate value or a single latest sample.
     public let restingHeartRateBPM: Double?
     /// The athlete's biological sex, if HealthKit has one on record.
     public let biologicalSex: BiologicalSex?

@@ -6,7 +6,7 @@ import HealthKit
 /// No write scopes in MVP 1 — import and athlete pre-fill are both read-only.
 public enum HealthKitAuthorization {
     /// The HealthKit types this package reads: workouts, heart rate (during a workout and at
-    /// rest), date of birth, and biological sex, and the distance types (running and walking,
+    /// rest, from which the resting heart rate is derived rather than reading Apple's own value), date of birth, and biological sex, and the distance types (running and walking,
     /// cycling, swimming, rowing), which a workout's steps summarise (MVP2-146), and the speed types
     /// (running, cycling), whose samples draw the pace chart and feed the pace forecasts: without
     /// distance a step has its times and heart rate but no distance or pace, and without speed an
@@ -15,7 +15,6 @@ public enum HealthKitAuthorization {
         [
             HKObjectType.workoutType(),
             HKQuantityType(.heartRate),
-            HKQuantityType(.restingHeartRate),
             HKQuantityType(.distanceWalkingRunning),
             HKQuantityType(.distanceCycling),
             HKQuantityType(.distanceSwimming),

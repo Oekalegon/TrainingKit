@@ -47,8 +47,24 @@ extension Activity {
             heartRate: heartRate,
             speed: speed,
             scheduledPlanID: scheduledPlanID,
-            steps: workout.workoutActivities.compactMap(ActivityStep.init(healthKitActivity:)).sorted { $0.start < $1.start }
+            steps: workout.workoutActivities.compactMap(ActivityStep.init(healthKitActivity:)).sorted { $0.start < $1.start },
+            batteryStart: Self.batteryLevel(in: workout, key: Self.batteryStartKey),
+            batteryEnd: Self.batteryLevel(in: workout, key: Self.batteryEndKey)
         )
+    }
+}
+
+extension Activity {
+    /// The metadata keys the TrainingApp watch app writes the battery level into (WATCH-119); the same
+    /// strings as `WorkoutMetadata.batteryStart` and `batteryEnd` in TrainingWatchKit, which this package
+    /// can't import.
+    static let batteryStartKey = "TrainingAppBatteryStart"
+    static let batteryEndKey = "TrainingAppBatteryEnd"
+
+    /// A battery level from `workout`'s metadata, when it is a number from 0 to 1.
+    static func batteryLevel(in workout: HKWorkout, key: String) -> Double? {
+        guard let level = (workout.metadata?[key] as? NSNumber)?.doubleValue, (0...1).contains(level) else { return nil }
+        return level
     }
 }
 

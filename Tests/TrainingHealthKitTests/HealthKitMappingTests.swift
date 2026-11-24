@@ -96,6 +96,25 @@ struct HealthKitMappingTests {
         #expect(Activity(healthKitWorkout: workout, heartRate: []).scheduledPlanID == nil)
     }
 
+    @Test("the battery levels the watch app wrote into the workout are carried onto the activity (WATCH-119)")
+    func activityMappingCarriesBattery() {
+        let start = Date(timeIntervalSince1970: 1_700_000_000)
+        let workout = HKWorkout(
+            activityType: .running, start: start, end: start.addingTimeInterval(3600), duration: 3600,
+            totalEnergyBurned: nil, totalDistance: nil,
+            metadata: ["TrainingAppBatteryStart": 0.9, "TrainingAppBatteryEnd": 0.78])
+        let activity = Activity(healthKitWorkout: workout, heartRate: [])
+        #expect(activity.batteryStart == 0.9)
+        #expect(activity.batteryEnd == 0.78)
+
+        let none = HKWorkout(activityType: .running, start: start, end: start.addingTimeInterval(1800))
+        #expect(Activity(healthKitWorkout: none, heartRate: []).batteryStart == nil)
+        let nonsense = HKWorkout(
+            activityType: .running, start: start, end: start.addingTimeInterval(1800), duration: 1800,
+            totalEnergyBurned: nil, totalDistance: nil, metadata: ["TrainingAppBatteryStart": 7.0])
+        #expect(Activity(healthKitWorkout: nonsense, heartRate: []).batteryStart == nil)
+    }
+
     @Test("a workout with no distance maps to a nil distanceMeters, not 0")
     func activityMappingNoDistance() {
         let start = Date(timeIntervalSince1970: 1_700_000_000)

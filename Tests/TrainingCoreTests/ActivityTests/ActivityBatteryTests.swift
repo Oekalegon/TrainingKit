@@ -37,4 +37,13 @@ struct ActivityBatteryTests {
         let old = try JSONDecoder().decode(Activity.self, from: JSONSerialization.data(withJSONObject: json))
         #expect(old.batteryStart == nil && old.batteryEnd == nil)
     }
+
+    @Test("a joined activity has no battery levels")
+    func joinedHasNone() throws {
+        let first = activity(duration: 1800, start: 0.9, end: 0.85)
+        var second = activity(duration: 1800, start: 0.8, end: 0.75)
+        second.start = first.start.addingTimeInterval(3600)
+        let joined = try #require(Activity.joined([first, second]))
+        #expect(joined.batteryStart == nil && joined.batteryEnd == nil && joined.batteryDrainPerHour == nil)
+    }
 }

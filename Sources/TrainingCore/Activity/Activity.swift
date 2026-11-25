@@ -60,8 +60,8 @@ public struct Activity: Identifiable, Sendable, Codable, Hashable {
     /// so a re-import or a rebuilt join keeps them instead of the source's. Defaults to `false`.
     public var isSportEdited: Bool
     /// The watch's battery charge (0...1) when the workout started and when it ended, as the TrainingApp
-    /// watch app writes it into the workout (WATCH-119); `nil` for a workout recorded by anything else.
-    /// See ``batteryDrainPerHour``.
+    /// watch app writes it into the workout (WATCH-119); `nil` for a workout recorded by anything else and
+    /// for a joined activity (the time between its pieces isn't a run's drain). See ``batteryDrainPerHour``.
     public var batteryStart: Double?
     /// The watch's battery charge (0...1) at the end of the workout; see ``batteryStart``.
     public var batteryEnd: Double?

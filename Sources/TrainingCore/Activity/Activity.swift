@@ -59,6 +59,20 @@ public struct Activity: Identifiable, Sendable, Codable, Hashable {
     /// Whether the athlete chose ``sport`` and ``venue`` themselves (``TrainingModel/setSport(_:venue:forActivityID:asOf:)``),
     /// so a re-import or a rebuilt join keeps them instead of the source's. Defaults to `false`.
     public var isSportEdited: Bool
+    /// The watch's battery charge (0...1) when the workout started and when it ended, as the TrainingApp
+    /// watch app writes it into the workout (WATCH-119); `nil` for a workout recorded by anything else and
+    /// for a joined activity (the time between its pieces isn't a run's drain). See ``batteryDrainPerHour``.
+    public var batteryStart: Double?
+    /// The watch's battery charge (0...1) at the end of the workout; see ``batteryStart``.
+    public var batteryEnd: Double?
+
+    /// How much of the full charge the watch lost per hour in this workout, or `nil` when the battery
+    /// wasn't recorded, the workout was shorter than 15 minutes, or the level didn't drop by at least 1%
+    /// (the level moves in coarse steps, so a smaller change says little, and a rise means charging).
+    public var batteryDrainPerHour: Double? {
+        guard let batteryStart, let batteryEnd, duration >= 15 * 60, batteryStart - batteryEnd >= 0.01 else { return nil }
+        return (batteryStart - batteryEnd) / duration * 3600
+    }
 
     /// The time span this activity covers, from ``start`` to `start + duration`.
     ///
@@ -110,7 +124,9 @@ public struct Activity: Identifiable, Sendable, Codable, Hashable {
         steps: [ActivityStep] = [],
         importedLoad: Double? = nil,
         isCalendarImport: Bool = false,
-        isSportEdited: Bool = false
+        isSportEdited: Bool = false,
+        batteryStart: Double? = nil,
+        batteryEnd: Double? = nil
     ) {
         self.id = id
         self.source = source
@@ -131,6 +147,8 @@ public struct Activity: Identifiable, Sendable, Codable, Hashable {
         self.importedLoad = importedLoad
         self.isCalendarImport = isCalendarImport
         self.isSportEdited = isSportEdited
+        self.batteryStart = batteryStart
+        self.batteryEnd = batteryEnd
     }
 }
 
@@ -138,6 +156,7 @@ extension Activity {
     private enum CodingKeys: String, CodingKey {
         case id, source, sport, venue, start, duration, distanceMeters, heartRate, speed, elevation, cadence
         case geographicBounds, perceivedExertion, linkedPlanID, scheduledPlanID, steps, importedLoad, isCalendarImport, isSportEdited
+        case batteryStart, batteryEnd
     }
 
     /// Decodes an activity, reading a missing `steps` as empty, and a missing imported load as none, so
@@ -165,5 +184,7 @@ extension Activity {
         importedLoad = try container.decodeIfPresent(Double.self, forKey: .importedLoad)
         isCalendarImport = try container.decodeIfPresent(Bool.self, forKey: .isCalendarImport) ?? false
         isSportEdited = try container.decodeIfPresent(Bool.self, forKey: .isSportEdited) ?? false
+        batteryStart = try container.decodeIfPresent(Double.self, forKey: .batteryStart)
+        batteryEnd = try container.decodeIfPresent(Double.self, forKey: .batteryEnd)
     }
 }

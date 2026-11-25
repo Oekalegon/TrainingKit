@@ -238,6 +238,8 @@ struct Activity: Identifiable, Sendable, Codable {
     var linkedPlanID: UUID?           // reconciliation with a PlannedActivity
     var scheduledPlanID: UUID?        // the plan the Watch workout was started from (hint; MVP2-120)
     var steps: [ActivityStep]         // the steps the Watch recorded for a plan-started workout (MVP2-146)
+    var batteryStart: Double?         // the watch battery (0...1) at the start and end of a TrainingApp watch run (WATCH-119);
+    var batteryEnd: Double?           // batteryDrainPerHour is the drop over the duration
 }
 
 struct HeartRateSample: Sendable, Codable {

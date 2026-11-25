@@ -20,6 +20,8 @@ extension Activity {
     /// - ``cadence`` min/max widen; mean and median are duration-weighted averages of the two
     ///   pieces' values — the raw stream isn't kept, so the merged median is an approximation.
     /// - ``perceivedExertion`` is the duration-weighted average of whichever sides have one.
+    /// - ``batteryStart`` and ``batteryEnd`` are dropped, like the steps: the charge across the gap between
+    ///   two pieces isn't the drain of a run.
     /// - ``sport`` is the longer piece's. ``linkedPlanID`` is the earlier piece's, else the later's:
     ///   if the pieces were reconciled to two different plans, the later piece's plan loses its
     ///   match.

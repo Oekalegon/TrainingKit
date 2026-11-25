@@ -42,14 +42,16 @@ public struct WorkoutTemplate: Identifiable, Sendable, Codable, Hashable {
     /// in use. An archived template stays in the store so those plans can still open its parameters,
     /// but libraries and pickers don't offer it. Absent from templates saved before this field existed.
     public var archivedDate: Date?
-    /// Whether the template was archived instead of deleted; see ``archivedDate``.
-    public var isArchived: Bool { archivedDate != nil }
     /// The id of the screen set the Apple Watch app shows while a workout made from this template is run
     /// (WATCH-133), or `nil` for the watch's workout default. The sets are the app's own, so this is only an
     /// id: a template can name a set that no longer exists, and the watch then uses its default. The
-    /// built-in templates are constants and have none; the app keeps links for them itself. Absent from
-    /// templates saved before this field existed, which decode as `nil`.
+    /// built-in templates are constants and have none; the app keeps links for them itself. It belongs to
+    /// the athlete's library, not to the template's content: a calendar export doesn't write it, a template
+    /// imported from a file has none, and it plays no part in whether two templates count as the same on
+    /// import. Absent from templates saved before this field existed, which decode as `nil`.
     public var watchScreenSetID: String?
+    /// Whether the template was archived instead of deleted; see ``archivedDate``.
+    public var isArchived: Bool { archivedDate != nil }
 
     /// Creates a workout template.
     ///

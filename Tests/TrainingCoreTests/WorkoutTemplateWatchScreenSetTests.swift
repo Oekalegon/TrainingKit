@@ -21,6 +21,17 @@ struct WorkoutTemplateWatchScreenSetTests {
         #expect(try JSONDecoder().decode(WorkoutTemplate.self, from: data).watchScreenSetID == nil)
     }
 
+    @Test("two templates that differ only in the screen set are not equal")
+    func equality() {
+        var a = template(setID: "a")
+        var b = a
+        #expect(a == b)
+        b.watchScreenSetID = nil
+        #expect(a != b)
+        a.watchScreenSetID = nil
+        #expect(a == b)
+    }
+
     @Test("the built-in templates have no screen set")
     func builtIns() {
         #expect(BuiltInWorkoutTemplates.all.allSatisfy { $0.watchScreenSetID == nil })

@@ -44,6 +44,12 @@ public struct WorkoutTemplate: Identifiable, Sendable, Codable, Hashable {
     public var archivedDate: Date?
     /// Whether the template was archived instead of deleted; see ``archivedDate``.
     public var isArchived: Bool { archivedDate != nil }
+    /// The id of the screen set the Apple Watch app shows while a workout made from this template is run
+    /// (WATCH-133), or `nil` for the watch's workout default. The sets are the app's own, so this is only an
+    /// id: a template can name a set that no longer exists, and the watch then uses its default. The
+    /// built-in templates are constants and have none; the app keeps links for them itself. Absent from
+    /// templates saved before this field existed, which decode as `nil`.
+    public var watchScreenSetID: String?
 
     /// Creates a workout template.
     ///
@@ -59,6 +65,7 @@ public struct WorkoutTemplate: Identifiable, Sendable, Codable, Hashable {
     ///   - sessionType: The broad kind of session it makes; defaults to `nil` (untagged).
     ///   - recoveryDays: The days it wants free around it; defaults to `nil` (the default of its session type).
     ///   - archivedDate: When the template was archived; defaults to `nil`.
+    ///   - watchScreenSetID: The watch screen set to run it with; defaults to `nil` (the watch's default).
     public init(
         id: UUID = UUID(),
         name: String,
@@ -70,7 +77,8 @@ public struct WorkoutTemplate: Identifiable, Sendable, Codable, Hashable {
         purpose: WorkoutPurpose = .general,
         sessionType: SessionType? = nil,
         recoveryDays: RecoveryDays? = nil,
-        archivedDate: Date? = nil
+        archivedDate: Date? = nil,
+        watchScreenSetID: String? = nil
     ) {
         self.id = id
         self.name = name
@@ -83,6 +91,7 @@ public struct WorkoutTemplate: Identifiable, Sendable, Codable, Hashable {
         self.sessionType = sessionType
         self.recoveryDays = recoveryDays
         self.archivedDate = archivedDate
+        self.watchScreenSetID = watchScreenSetID
     }
 }
 
@@ -254,13 +263,13 @@ extension TemplateStepGoal {
 
 extension WorkoutTemplate {
     private enum CodingKeys: String, CodingKey {
-        case id, name, titleName, sport, venue, parameters, blocks, purpose, sessionType, recoveryDays, archivedDate
+        case id, name, titleName, sport, venue, parameters, blocks, purpose, sessionType, recoveryDays, archivedDate, watchScreenSetID
     }
 
     /// Decodes a template, reading the venue an older version stored inside the sport
     /// (`indoorRunning`/`outdoorRunning`) when there's no `venue` of its own, and treating a missing
     /// `purpose` as ``WorkoutPurpose/general``, a missing or unknown `sessionType` as `nil` and a missing
-    /// or undecodable `recoveryDays` as `nil`.
+    /// or undecodable `recoveryDays` and a missing `watchScreenSetID` as `nil`.
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(UUID.self, forKey: .id)
@@ -275,5 +284,6 @@ extension WorkoutTemplate {
         sessionType = (try? container.decodeIfPresent(SessionType.self, forKey: .sessionType)) ?? nil
         recoveryDays = (try? container.decodeIfPresent(RecoveryDays.self, forKey: .recoveryDays)) ?? nil
         archivedDate = try container.decodeIfPresent(Date.self, forKey: .archivedDate)
+        watchScreenSetID = try container.decodeIfPresent(String.self, forKey: .watchScreenSetID)
     }
 }

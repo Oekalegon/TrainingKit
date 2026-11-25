@@ -868,6 +868,34 @@ struct SwiftDataStoreTests {
         #expect(try await store.template(id: old.id)?.archivedDate == archived.archivedDate)
     }
 
+    @Test("a template's watch screen set id round-trips through the store, and one saved without it reads as none (WATCH-133)")
+    func templateStoreWatchScreenSet() async throws {
+        let container = try TestContainers.make(cloudKitDatabase: .none, isStoredInMemoryOnly: true)
+        let store = SwiftDataStore(modelContainer: container)
+        var linked = WorkoutTemplate(name: "Sprints", sport: .running, parameters: [], blocks: [])
+        linked.watchScreenSetID = "sprint"
+        try await store.upsert([linked])
+        #expect(try await store.template(id: linked.id)?.watchScreenSetID == "sprint")
+
+        linked.watchScreenSetID = nil
+        try await store.upsert([linked])
+        #expect(try await store.template(id: linked.id)?.watchScreenSetID == nil)
+
+        let old = WorkoutTemplate(name: "Old", sport: .running, parameters: [], blocks: [])
+        var json = try JSONSerialization.jsonObject(with: JSONEncoder().encode(old)) as! [String: Any]
+        json.removeValue(forKey: "watchScreenSetID")
+        let context = ModelContext(container)
+        context.insert(WorkoutTemplateRecord(id: old.id, payload: try JSONSerialization.data(withJSONObject: json)))
+        try context.save()
+        #expect(try await store.template(id: old.id)?.watchScreenSetID == nil)
+
+        let memory = InMemoryStore()
+        var other = old
+        other.watchScreenSetID = "long"
+        try await memory.upsert([other])
+        #expect(try await memory.template(id: old.id)?.watchScreenSetID == "long")
+    }
+
     @Test("WorkoutTemplateStore skips a record it can't decode instead of failing the whole list (MVP2-140)")
     func templateStoreSkipsUndecodableRecord() async throws {
         let container = try TestContainers.make(cloudKitDatabase: .none, isStoredInMemoryOnly: true)
